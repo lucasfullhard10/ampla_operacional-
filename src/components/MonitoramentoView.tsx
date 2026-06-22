@@ -1008,6 +1008,7 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
                         tickLine={false}
                       />
                       <Tooltip
+                        isAnimationActive={false}
                         contentStyle={{
                           backgroundColor: "#020617",
                           borderColor: "#1e293b",
