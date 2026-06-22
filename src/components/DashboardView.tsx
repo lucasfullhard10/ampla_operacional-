@@ -5,10 +5,11 @@ import {
   Layers, BarChart2, ShieldAlert, Zap, Landmark
 } from "lucide-react";
 import { 
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
   LineChart, Line, Cell, PieChart, Pie
 } from "recharts";
 import { Unidade } from "../types";
+import SafeResponsiveContainer from "./SafeResponsiveContainer";
 
 interface DashboardProps {
   unidades: Unidade[];
@@ -824,8 +825,8 @@ export default function DashboardView({
                     </div>
                     <span className="text-[10px] bg-slate-800 px-2.5 py-1 rounded text-sky-400 font-mono">Histórico Semanal</span>
                   </div>
-                  <div className="h-64">
-                    <ResponsiveContainer width="100%" height="100%">
+                  <div className="h-[300px] min-h-[300px]">
+                    <SafeResponsiveContainer minHeight={300}>
                       <BarChart data={dadosGraficoPeriodo} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                         <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
                         <XAxis dataKey="name" stroke="#64748b" fontSize={11} tickLine={false} />
@@ -838,7 +839,7 @@ export default function DashboardView({
                         <Bar dataKey="Entregas" fill="#0ea5e9" radius={[4, 4, 0, 0]} name="Entregas Realizadas" />
                         <Bar dataKey="Devolucoes" fill="#f43f5e" radius={[4, 4, 0, 0]} name="Devoluções" />
                       </BarChart>
-                    </ResponsiveContainer>
+                    </SafeResponsiveContainer>
                   </div>
                 </div>
 
@@ -849,9 +850,9 @@ export default function DashboardView({
                     <p className="text-xs text-slate-400">Percentual de finalização da carga</p>
                   </div>
                   
-                  <div className="h-44 flex items-center justify-center my-2 relative">
+                  <div className="h-[300px] min-h-[300px] flex items-center justify-center my-2 relative">
                     {cards.entregasPrevistas > 0 ? (
-                      <ResponsiveContainer width="100%" height="100%">
+                      <SafeResponsiveContainer minHeight={300}>
                         <PieChart>
                           <Pie
                             data={pieData.filter(d => d.value > 0)}
@@ -868,7 +869,7 @@ export default function DashboardView({
                           </Pie>
                           <Tooltip contentStyle={{ backgroundColor: "#0f172a", fontSize: "12px" }} />
                         </PieChart>
-                      </ResponsiveContainer>
+                      </SafeResponsiveContainer>
                     ) : (
                       <div className="text-slate-500 font-mono text-xs">Sem dados no período</div>
                     )}
@@ -1140,8 +1141,8 @@ export default function DashboardView({
                     <h3 className="text-xs font-bold text-white uppercase font-mono tracking-wider">1. Evolução do Aproveitamento Diário (%)</h3>
                     <span className="text-[9px] bg-sky-950 border border-sky-900 text-sky-450 px-2 py-0.5 rounded font-mono font-semibold">Tendência</span>
                   </div>
-                  <div className="h-56">
-                    <ResponsiveContainer width="100%" height="100%">
+                  <div className="h-[300px] min-h-[300px]">
+                    <SafeResponsiveContainer minHeight={300}>
                       <LineChart data={disponibilidadeKpis?.aproveitamentoDiario} margin={{ left: -20, right: 10 }}>
                         <CartesianGrid strokeDasharray="3 3" stroke="#222" />
                         <XAxis dataKey="name" stroke="#475569" fontSize={10} />
@@ -1149,7 +1150,7 @@ export default function DashboardView({
                         <Tooltip contentStyle={{ backgroundColor: "#000", border: "1px solid #222", fontSize: "11px", color: "#fff" }} />
                         <Line type="monotone" dataKey="Aproveitamento %" stroke="#38bdf8" strokeWidth={3} dot={{ fill: "#38bdf8", r: 4 }} name="Aproveitamento %" />
                       </LineChart>
-                    </ResponsiveContainer>
+                    </SafeResponsiveContainer>
                   </div>
                 </div>
 
@@ -1159,8 +1160,8 @@ export default function DashboardView({
                     <h3 className="text-xs font-bold text-white uppercase font-mono tracking-wider">2. Evolução de Aproveitamento por Mês (%)</h3>
                     <span className="text-[9px] bg-emerald-950 border border-emerald-900 text-emerald-450 px-2 py-0.5 rounded font-mono font-semibold">Acumulado</span>
                   </div>
-                  <div className="h-56">
-                    <ResponsiveContainer width="100%" height="100%">
+                  <div className="h-[300px] min-h-[300px]">
+                    <SafeResponsiveContainer minHeight={300}>
                       <BarChart data={disponibilidadeKpis?.aproveitamentoMensal} margin={{ left: -20, right: 10 }}>
                         <CartesianGrid strokeDasharray="3 3" stroke="#222" />
                         <XAxis dataKey="name" stroke="#475569" fontSize={10} />
@@ -1168,7 +1169,7 @@ export default function DashboardView({
                         <Tooltip contentStyle={{ backgroundColor: "#000", border: "1px solid #222", fontSize: "11px", color: "#fff" }} />
                         <Bar dataKey="Aproveitamento %" fill="#10b981" radius={[4, 4, 0, 0]} name="Aproveitamento %" />
                       </BarChart>
-                    </ResponsiveContainer>
+                    </SafeResponsiveContainer>
                   </div>
                 </div>
 
@@ -1178,8 +1179,8 @@ export default function DashboardView({
                     <h3 className="text-xs font-bold text-white uppercase font-mono tracking-wider">3. Evolução de Aproveitamento por Ano (%)</h3>
                     <span className="text-[9px] bg-indigo-950 border border-indigo-900 text-indigo-450 px-2 py-0.5 rounded font-mono font-semibold">Anual</span>
                   </div>
-                  <div className="h-56">
-                    <ResponsiveContainer width="100%" height="100%">
+                  <div className="h-[300px] min-h-[300px]">
+                    <SafeResponsiveContainer minHeight={300}>
                       <BarChart data={disponibilidadeKpis?.aproveitamentoAnual} margin={{ left: -20, right: 10 }}>
                         <CartesianGrid strokeDasharray="3 3" stroke="#222" />
                         <XAxis dataKey="name" stroke="#475569" fontSize={10} />
@@ -1187,7 +1188,7 @@ export default function DashboardView({
                         <Tooltip contentStyle={{ backgroundColor: "#000", border: "1px solid #222", fontSize: "11px", color: "#fff" }} />
                         <Bar dataKey="Aproveitamento %" fill="#6366f1" radius={[4, 4, 0, 0]} name="Aproveitamento %" />
                       </BarChart>
-                    </ResponsiveContainer>
+                    </SafeResponsiveContainer>
                   </div>
                 </div>
 
@@ -1197,8 +1198,8 @@ export default function DashboardView({
                     <h3 className="text-xs font-bold text-white uppercase font-mono tracking-wider">4. Oferta Real vs Alocada (Roteirizados)</h3>
                     <span className="text-[9px] bg-slate-800 text-sky-400 px-2 py-0.5 rounded font-mono font-semibold">Volume Absoluto</span>
                   </div>
-                  <div className="h-56">
-                    <ResponsiveContainer width="100%" height="100%">
+                  <div className="h-[300px] min-h-[300px]">
+                    <SafeResponsiveContainer minHeight={300}>
                       <BarChart data={disponibilidadeKpis?.aproveitamentoDiario} margin={{ left: -20, right: 10 }}>
                         <CartesianGrid strokeDasharray="3 3" stroke="#222" />
                         <XAxis dataKey="name" stroke="#475569" fontSize={10} />
@@ -1208,7 +1209,7 @@ export default function DashboardView({
                         <Bar dataKey="Disponibilizados" fill="#0284c7" name="Oferecidos/Disponibilizados" radius={[3, 3, 0, 0]} />
                         <Bar dataKey="Roteirizados" fill="#10b981" name="Utilizados em DTs" radius={[3, 3, 0, 0]} />
                       </BarChart>
-                    </ResponsiveContainer>
+                    </SafeResponsiveContainer>
                   </div>
                 </div>
 
@@ -1218,8 +1219,8 @@ export default function DashboardView({
                     <h3 className="text-xs font-bold text-white uppercase font-mono tracking-wider">5. Ociosidade Crítica (Veículos Ociosos)</h3>
                     <span className="text-[9px] bg-amber-950 border border-amber-900 text-amber-500 px-2 py-0.5 rounded font-mono font-semibold">Subalocação</span>
                   </div>
-                  <div className="h-56">
-                    <ResponsiveContainer width="100%" height="100%">
+                  <div className="h-[300px] min-h-[300px]">
+                    <SafeResponsiveContainer minHeight={300}>
                       <BarChart data={disponibilidadeKpis?.veiculosOciosos} margin={{ left: -20, right: 10 }}>
                         <CartesianGrid strokeDasharray="3 3" stroke="#222" />
                         <XAxis dataKey="name" stroke="#475569" fontSize={10} />
@@ -1227,7 +1228,7 @@ export default function DashboardView({
                         <Tooltip contentStyle={{ backgroundColor: "#000", border: "1px solid #222", fontSize: "11px", color: "#fff" }} />
                         <Bar dataKey="Ociosos" fill="#f59e0b" radius={[4, 4, 0, 0]} name="Sobras Ociosas" />
                       </BarChart>
-                    </ResponsiveContainer>
+                    </SafeResponsiveContainer>
                   </div>
                 </div>
 
@@ -1237,8 +1238,8 @@ export default function DashboardView({
                     <h3 className="text-xs font-bold text-white uppercase font-mono tracking-wider">6. Aproveitamento por Filial (%)</h3>
                     <span className="text-[9px] bg-purple-950 border border-purple-900 text-purple-400 px-2 py-0.5 rounded font-mono font-semibold">Unidades</span>
                   </div>
-                  <div className="h-56">
-                    <ResponsiveContainer width="100%" height="100%">
+                  <div className="h-[300px] min-h-[300px]">
+                    <SafeResponsiveContainer minHeight={300}>
                       <BarChart layout="vertical" data={disponibilidadeKpis?.aproveitamentoUnidade} margin={{ left: 15, right: 20 }}>
                         <CartesianGrid strokeDasharray="3 3" stroke="#222" />
                         <XAxis type="number" domain={[0, 100]} stroke="#475569" fontSize={10} />
@@ -1246,7 +1247,7 @@ export default function DashboardView({
                         <Tooltip contentStyle={{ backgroundColor: "#000", border: "1px solid #222", fontSize: "11px", color: "#fff" }} />
                         <Bar dataKey="Aproveitamento %" fill="#8b5cf6" radius={[0, 4, 4, 0]} name="Aproveitamento %" />
                       </BarChart>
-                    </ResponsiveContainer>
+                    </SafeResponsiveContainer>
                   </div>
                 </div>
 
@@ -1331,8 +1332,8 @@ export default function DashboardView({
                       <h3 className="text-xs font-bold text-white uppercase font-mono tracking-wider">📊 Evolução Mensal de Vales</h3>
                       <span className="text-[9px] bg-slate-850 text-sky-400 px-2 py-0.5 rounded font-mono font-semibold">Consolidado Financeiro</span>
                     </div>
-                    <div className="h-56">
-                      <ResponsiveContainer width="100%" height="100%">
+                    <div className="h-[300px] min-h-[300px]">
+                      <SafeResponsiveContainer minHeight={300}>
                         <BarChart data={data?.valesKpis?.evolucaoMensalVales || []} margin={{ left: -10, right: 10 }}>
                           <CartesianGrid strokeDasharray="3 3" stroke="#222" />
                           <XAxis dataKey="name" stroke="#475569" fontSize={10} />
@@ -1340,7 +1341,7 @@ export default function DashboardView({
                           <Tooltip contentStyle={{ backgroundColor: "#000", border: "1px solid #222", fontSize: "11px", color: "#fff" }} />
                           <Bar dataKey="valor" fill="#f43f5e" radius={[4, 4, 0, 0]} name="Prejuízos (R$)" />
                         </BarChart>
-                      </ResponsiveContainer>
+                      </SafeResponsiveContainer>
                     </div>
                   </div>
 
