@@ -832,6 +832,7 @@ export default function DashboardView({
                         <XAxis dataKey="name" stroke="#64748b" fontSize={11} tickLine={false} />
                         <YAxis stroke="#64748b" fontSize={11} tickLine={false} />
                         <Tooltip 
+                          isAnimationActive={false}
                           contentStyle={{ backgroundColor: "#0f172a", borderColor: "#1e293b", borderRadius: "8px", color: "#fff" }} 
                           itemStyle={{ fontSize: "12px" }}
                         />
@@ -867,7 +868,7 @@ export default function DashboardView({
                               <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                             ))}
                           </Pie>
-                          <Tooltip contentStyle={{ backgroundColor: "#0f172a", fontSize: "12px" }} />
+                          <Tooltip isAnimationActive={false} contentStyle={{ backgroundColor: "#0f172a", fontSize: "12px" }} />
                         </PieChart>
                       </SafeResponsiveContainer>
                     ) : (
@@ -1147,7 +1148,7 @@ export default function DashboardView({
                         <CartesianGrid strokeDasharray="3 3" stroke="#222" />
                         <XAxis dataKey="name" stroke="#475569" fontSize={10} />
                         <YAxis domain={[0, 100]} stroke="#475569" fontSize={10} />
-                        <Tooltip contentStyle={{ backgroundColor: "#000", border: "1px solid #222", fontSize: "11px", color: "#fff" }} />
+                        <Tooltip isAnimationActive={false} contentStyle={{ backgroundColor: "#000", border: "1px solid #222", fontSize: "11px", color: "#fff" }} />
                         <Line type="monotone" dataKey="Aproveitamento %" stroke="#38bdf8" strokeWidth={3} dot={{ fill: "#38bdf8", r: 4 }} name="Aproveitamento %" />
                       </LineChart>
                     </SafeResponsiveContainer>
@@ -1166,7 +1167,7 @@ export default function DashboardView({
                         <CartesianGrid strokeDasharray="3 3" stroke="#222" />
                         <XAxis dataKey="name" stroke="#475569" fontSize={10} />
                         <YAxis domain={[0, 100]} stroke="#475569" fontSize={10} />
-                        <Tooltip contentStyle={{ backgroundColor: "#000", border: "1px solid #222", fontSize: "11px", color: "#fff" }} />
+                        <Tooltip isAnimationActive={false} contentStyle={{ backgroundColor: "#000", border: "1px solid #222", fontSize: "11px", color: "#fff" }} />
                         <Bar dataKey="Aproveitamento %" fill="#10b981" radius={[4, 4, 0, 0]} name="Aproveitamento %" />
                       </BarChart>
                     </SafeResponsiveContainer>
@@ -1185,7 +1186,7 @@ export default function DashboardView({
                         <CartesianGrid strokeDasharray="3 3" stroke="#222" />
                         <XAxis dataKey="name" stroke="#475569" fontSize={10} />
                         <YAxis domain={[0, 100]} stroke="#475569" fontSize={10} />
-                        <Tooltip contentStyle={{ backgroundColor: "#000", border: "1px solid #222", fontSize: "11px", color: "#fff" }} />
+                        <Tooltip isAnimationActive={false} contentStyle={{ backgroundColor: "#000", border: "1px solid #222", fontSize: "11px", color: "#fff" }} />
                         <Bar dataKey="Aproveitamento %" fill="#6366f1" radius={[4, 4, 0, 0]} name="Aproveitamento %" />
                       </BarChart>
                     </SafeResponsiveContainer>
@@ -1204,7 +1205,7 @@ export default function DashboardView({
                         <CartesianGrid strokeDasharray="3 3" stroke="#222" />
                         <XAxis dataKey="name" stroke="#475569" fontSize={10} />
                         <YAxis stroke="#475569" fontSize={10} />
-                        <Tooltip contentStyle={{ backgroundColor: "#000", border: "1px solid #222", fontSize: "11px", color: "#fff" }} />
+                        <Tooltip isAnimationActive={false} contentStyle={{ backgroundColor: "#000", border: "1px solid #222", fontSize: "11px", color: "#fff" }} />
                         <Legend wrapperStyle={{ fontSize: "10px" }} />
                         <Bar dataKey="Disponibilizados" fill="#0284c7" name="Oferecidos/Disponibilizados" radius={[3, 3, 0, 0]} />
                         <Bar dataKey="Roteirizados" fill="#10b981" name="Utilizados em DTs" radius={[3, 3, 0, 0]} />
@@ -1225,7 +1226,7 @@ export default function DashboardView({
                         <CartesianGrid strokeDasharray="3 3" stroke="#222" />
                         <XAxis dataKey="name" stroke="#475569" fontSize={10} />
                         <YAxis stroke="#475569" fontSize={10} />
-                        <Tooltip contentStyle={{ backgroundColor: "#000", border: "1px solid #222", fontSize: "11px", color: "#fff" }} />
+                        <Tooltip isAnimationActive={false} contentStyle={{ backgroundColor: "#000", border: "1px solid #222", fontSize: "11px", color: "#fff" }} />
                         <Bar dataKey="Ociosos" fill="#f59e0b" radius={[4, 4, 0, 0]} name="Sobras Ociosas" />
                       </BarChart>
                     </SafeResponsiveContainer>
@@ -1244,7 +1245,7 @@ export default function DashboardView({
                         <CartesianGrid strokeDasharray="3 3" stroke="#222" />
                         <XAxis type="number" domain={[0, 100]} stroke="#475569" fontSize={10} />
                         <YAxis type="category" dataKey="name" stroke="#475569" fontSize={9} />
-                        <Tooltip contentStyle={{ backgroundColor: "#000", border: "1px solid #222", fontSize: "11px", color: "#fff" }} />
+                        <Tooltip isAnimationActive={false} contentStyle={{ backgroundColor: "#000", border: "1px solid #222", fontSize: "11px", color: "#fff" }} />
                         <Bar dataKey="Aproveitamento %" fill="#8b5cf6" radius={[0, 4, 4, 0]} name="Aproveitamento %" />
                       </BarChart>
                     </SafeResponsiveContainer>
@@ -1338,7 +1339,7 @@ export default function DashboardView({
                           <CartesianGrid strokeDasharray="3 3" stroke="#222" />
                           <XAxis dataKey="name" stroke="#475569" fontSize={10} />
                           <YAxis stroke="#475569" fontSize={11} />
-                          <Tooltip contentStyle={{ backgroundColor: "#000", border: "1px solid #222", fontSize: "11px", color: "#fff" }} />
+                          <Tooltip isAnimationActive={false} contentStyle={{ backgroundColor: "#000", border: "1px solid #222", fontSize: "11px", color: "#fff" }} />
                           <Bar dataKey="valor" fill="#f43f5e" radius={[4, 4, 0, 0]} name="Prejuízos (R$)" />
                         </BarChart>
                       </SafeResponsiveContainer>
