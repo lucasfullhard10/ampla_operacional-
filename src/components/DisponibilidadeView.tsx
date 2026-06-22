@@ -6,10 +6,11 @@ import {
 } from "lucide-react";
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, 
-  ResponsiveContainer, LineChart, Line, AreaChart, Area
+  LineChart, Line, AreaChart, Area
 } from "recharts";
 import { Veiculo, Motorista, Disponibilidade, Unidade } from "../types";
 import { NotificationModal, NotificationType } from "./NotificationModal";
+import SafeResponsiveContainer from "./SafeResponsiveContainer";
 
 interface DisponibilidadeProps {
   veiculos: Veiculo[];
@@ -1721,8 +1722,8 @@ export default function DisponibilidadeView({ veiculos, motoristas, userEmail }:
             {/* 1. Aproveitamento Diário */}
             <div className="bg-slate-900 p-4 rounded-xl border border-slate-800">
               <h4 className="text-xs font-bold text-white uppercase font-mono mb-3 text-slate-300">1. Aproveitamento Diário (%)</h4>
-              <div className="h-56">
-                <ResponsiveContainer width="100%" height="100%">
+              <div className="h-[300px] min-h-[300px]">
+                <SafeResponsiveContainer minHeight={300}>
                   <LineChart data={graphAproveitamentoDiario} margin={{ left: -20, right: 10 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#222" />
                     <XAxis dataKey="name" stroke="#64748b" />
@@ -1730,15 +1731,15 @@ export default function DisponibilidadeView({ veiculos, motoristas, userEmail }:
                     <Tooltip contentStyle={{ backgroundColor: "#000", border: "1px solid #333", fontSize: "11px" }} />
                     <Line type="monotone" dataKey="Roteirização %" stroke="#06b6d4" strokeWidth={3} />
                   </LineChart>
-                </ResponsiveContainer>
+                </SafeResponsiveContainer>
               </div>
             </div>
 
             {/* 2. Aproveitamento Mensal */}
             <div className="bg-slate-900 p-4 rounded-xl border border-slate-800">
               <h4 className="text-xs font-bold text-white uppercase font-mono mb-3 text-slate-300">2. Aproveitamento Mensal (%)</h4>
-              <div className="h-56">
-                <ResponsiveContainer width="100%" height="100%">
+              <div className="h-[300px] min-h-[300px]">
+                <SafeResponsiveContainer minHeight={300}>
                   <BarChart data={graphAproveitamentoMensal} margin={{ left: -20, right: 10 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#222" />
                     <XAxis dataKey="name" stroke="#64748b" />
@@ -1746,15 +1747,15 @@ export default function DisponibilidadeView({ veiculos, motoristas, userEmail }:
                     <Tooltip contentStyle={{ backgroundColor: "#000", border: "1px solid #333", fontSize: "11px" }} />
                     <Bar dataKey="Roteirização %" fill="#10b981" radius={[4, 4, 0, 0]} />
                   </BarChart>
-                </ResponsiveContainer>
+                </SafeResponsiveContainer>
               </div>
             </div>
 
             {/* 3. Aproveitamento Anual */}
             <div className="bg-slate-900 p-4 rounded-xl border border-slate-800">
               <h4 className="text-xs font-bold text-white uppercase font-mono mb-3 text-slate-300">3. Aproveitamento Anual (%)</h4>
-              <div className="h-56">
-                <ResponsiveContainer width="100%" height="100%">
+              <div className="h-[300px] min-h-[300px]">
+                <SafeResponsiveContainer minHeight={300}>
                   <BarChart data={graphAproveitamentoAnual} margin={{ left: -20, right: 10 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#222" />
                     <XAxis dataKey="name" stroke="#64748b" />
@@ -1762,15 +1763,15 @@ export default function DisponibilidadeView({ veiculos, motoristas, userEmail }:
                     <Tooltip contentStyle={{ backgroundColor: "#000", border: "1px solid #333", fontSize: "11px" }} />
                     <Bar dataKey="Aproveitamento %" fill="#6366f1" radius={[4, 4, 0, 0]} />
                   </BarChart>
-                </ResponsiveContainer>
+                </SafeResponsiveContainer>
               </div>
             </div>
 
             {/* 4. Disponibilizados x Roteirizados */}
             <div className="bg-slate-900 p-4 rounded-xl border border-slate-800">
               <h4 className="text-xs font-bold text-white uppercase font-mono mb-3 text-slate-300">4. Disponibilizados x Roteirizados</h4>
-              <div className="h-56">
-                <ResponsiveContainer width="100%" height="100%">
+              <div className="h-[300px] min-h-[300px]">
+                <SafeResponsiveContainer minHeight={300}>
                   <BarChart data={graphDispVsRot} margin={{ left: -20, right: 10 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#222" />
                     <XAxis dataKey="name" stroke="#64748b" />
@@ -1780,15 +1781,15 @@ export default function DisponibilidadeView({ veiculos, motoristas, userEmail }:
                     <Bar dataKey="Disponibilizados" fill="#3b82f6" radius={[3, 3, 0, 0]} />
                     <Bar dataKey="Roteirizados" fill="#10b981" radius={[3, 3, 0, 0]} />
                   </BarChart>
-                </ResponsiveContainer>
+                </SafeResponsiveContainer>
               </div>
             </div>
 
             {/* 5. Veículos Ociosos */}
             <div className="bg-slate-900 p-4 rounded-xl border border-slate-800">
               <h4 className="text-xs font-bold text-white uppercase font-mono mb-3 text-slate-300">5. Quantitativo de Veículos Ociosos</h4>
-              <div className="h-56">
-                <ResponsiveContainer width="100%" height="100%">
+              <div className="h-[300px] min-h-[300px]">
+                <SafeResponsiveContainer minHeight={300}>
                   <BarChart data={graphOciosos} margin={{ left: -20, right: 10 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#222" />
                     <XAxis dataKey="name" stroke="#64748b" />
@@ -1796,15 +1797,15 @@ export default function DisponibilidadeView({ veiculos, motoristas, userEmail }:
                     <Tooltip contentStyle={{ backgroundColor: "#000", border: "1px solid #333", fontSize: "11px" }} />
                     <Bar dataKey="Ociosos" fill="#f59e0b" radius={[4, 4, 0, 0]} />
                   </BarChart>
-                </ResponsiveContainer>
+                </SafeResponsiveContainer>
               </div>
             </div>
 
             {/* 6. Aproveitamento por Unidade */}
             <div className="bg-slate-900 p-4 rounded-xl border border-slate-800">
               <h4 className="text-xs font-bold text-white uppercase font-mono mb-3 text-slate-300">6. Aproveitamento por Filial (%)</h4>
-              <div className="h-56">
-                <ResponsiveContainer width="100%" height="100%">
+              <div className="h-[300px] min-h-[300px]">
+                <SafeResponsiveContainer minHeight={300}>
                   <BarChart layout="vertical" data={graphAproveitamentoUnidade} margin={{ left: 20, right: 20 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#222" />
                     <XAxis type="number" domain={[0, 100]} stroke="#64748b" />
@@ -1812,7 +1813,7 @@ export default function DisponibilidadeView({ veiculos, motoristas, userEmail }:
                     <Tooltip contentStyle={{ backgroundColor: "#000", border: "1px solid #333", fontSize: "11px" }} />
                     <Bar dataKey="Aproveitamento %" fill="#06b6d4" radius={[0, 4, 4, 0]} />
                   </BarChart>
-                </ResponsiveContainer>
+                </SafeResponsiveContainer>
               </div>
             </div>
 
