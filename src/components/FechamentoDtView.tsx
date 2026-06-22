@@ -7,7 +7,8 @@ import {
 } from "lucide-react";
 import { Rota, Veiculo, Motorista, Unidade } from "../types";
 import { NotificationModal, ConfirmModal, NotificationType, ConfirmType } from "./NotificationModal";
-import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, PieChart, Pie, Cell } from "recharts";
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, PieChart, Pie, Cell } from "recharts";
+import SafeResponsiveContainer from "./SafeResponsiveContainer";
 
 interface FechamentoDtProps {
   rotas: Rota[];
@@ -1509,8 +1510,8 @@ export default function FechamentoDtView({
                   <h4 className="text-xs font-bold font-mono uppercase tracking-wider text-sky-450">Vales por Filial / Unidade (R$)</h4>
                   <p className="text-[10px] text-slate-500">Custo financeiro consolidado de perdas operacionais em cada base.</p>
                 </div>
-                <div className="h-64 mt-1.5">
-                  <ResponsiveContainer width="100%" height="100%">
+                <div className="h-[300px] min-h-[300px] mt-1.5">
+                  <SafeResponsiveContainer minHeight={300}>
                     <BarChart data={stats.unitChartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
                       <XAxis dataKey="name" stroke="#64748b" fontSize={10} />
@@ -1518,7 +1519,7 @@ export default function FechamentoDtView({
                       <Tooltip contentStyle={{ backgroundColor: "#0f172a", borderColor: "#1e293b", color: "#fff" }} />
                       <Bar dataKey="valor" fill="#38bdf8" radius={[4, 4, 0, 0]} name="Valor Total (R$)" />
                     </BarChart>
-                  </ResponsiveContainer>
+                  </SafeResponsiveContainer>
                 </div>
               </div>
 
@@ -1528,8 +1529,8 @@ export default function FechamentoDtView({
                   <h4 className="text-xs font-bold font-mono uppercase tracking-wider text-sky-450">Motoristas com Maior Índice de Vales (R$)</h4>
                   <p className="text-[10px] text-slate-500">Top 5 condutores com as maiores multas registradas.</p>
                 </div>
-                <div className="h-64 mt-1.5">
-                  <ResponsiveContainer width="100%" height="100%">
+                <div className="h-[300px] min-h-[300px] mt-1.5">
+                  <SafeResponsiveContainer minHeight={300}>
                     <BarChart data={stats.driverChartData} layout="vertical" margin={{ top: 10, right: 10, left: 10, bottom: 0 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
                       <XAxis type="number" stroke="#64748b" fontSize={10} />
@@ -1537,7 +1538,7 @@ export default function FechamentoDtView({
                       <Tooltip contentStyle={{ backgroundColor: "#0f172a", borderColor: "#1e293b", color: "#fff" }} />
                       <Bar dataKey="valor" fill="#f43f5e" radius={[0, 4, 4, 0]} name="Valor (R$)" />
                     </BarChart>
-                  </ResponsiveContainer>
+                  </SafeResponsiveContainer>
                 </div>
               </div>
 
@@ -1547,8 +1548,8 @@ export default function FechamentoDtView({
                   <h4 className="text-xs font-bold font-mono uppercase tracking-wider text-sky-450">Índice por Frota / Veículo (R$)</h4>
                   <p className="text-[10px] text-slate-500">Prejuízos gerenciais indexados pelo registro do ativo vehicular.</p>
                 </div>
-                <div className="h-64 mt-1.5">
-                  <ResponsiveContainer width="100%" height="100%">
+                <div className="h-[300px] min-h-[300px] mt-1.5">
+                  <SafeResponsiveContainer minHeight={300}>
                     <BarChart data={stats.veicChartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
                       <XAxis dataKey="name" stroke="#64748b" fontSize={10} />
@@ -1556,7 +1557,7 @@ export default function FechamentoDtView({
                       <Tooltip contentStyle={{ backgroundColor: "#0f172a", borderColor: "#1e293b", color: "#fff" }} />
                       <Bar dataKey="valor" fill="#fb923c" radius={[4, 4, 0, 0]} name="Valor (R$)" />
                     </BarChart>
-                  </ResponsiveContainer>
+                  </SafeResponsiveContainer>
                 </div>
               </div>
 
@@ -1566,8 +1567,8 @@ export default function FechamentoDtView({
                   <h4 className="text-xs font-bold font-mono uppercase tracking-wider text-sky-450">Evolução Histórica de Vales (R$)</h4>
                   <p className="text-[10px] text-slate-500">Demonstrativo mensal da ocorrência de multas nas DTs.</p>
                 </div>
-                <div className="h-64 mt-1.5">
-                  <ResponsiveContainer width="100%" height="100%">
+                <div className="h-[300px] min-h-[300px] mt-1.5">
+                  <SafeResponsiveContainer minHeight={300}>
                     <BarChart data={stats.monthChartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
                       <XAxis dataKey="name" stroke="#64748b" fontSize={10} />
@@ -1575,7 +1576,7 @@ export default function FechamentoDtView({
                       <Tooltip contentStyle={{ backgroundColor: "#0f172a", borderColor: "#1e293b", color: "#fff" }} />
                       <Bar dataKey="valor" fill="#a855f7" radius={[4, 4, 0, 0]} name="Valor Consolidado (R$)" />
                     </BarChart>
-                  </ResponsiveContainer>
+                  </SafeResponsiveContainer>
                 </div>
               </div>
 
