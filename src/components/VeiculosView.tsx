@@ -5,9 +5,10 @@ import {
   Building, BarChart3, PieChart as PieChartIcon, Eye, Download, 
   ChevronDown, CheckCircle2, AlertTriangle, FileUp, Info, ArrowLeftRight
 } from "lucide-react";
-import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, PieChart, Pie, Cell } from "recharts";
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, PieChart, Pie, Cell } from "recharts";
 import { Veiculo, Motorista, Unidade } from "../types";
 import { NotificationModal, ConfirmModal, NotificationType, ConfirmType } from "./NotificationModal";
+import SafeResponsiveContainer from "./SafeResponsiveContainer";
 
 interface VeiculosProps {
   veiculos: Veiculo[];
@@ -617,8 +618,8 @@ export default function VeiculosView({
                 <span className="w-2 h-2 bg-sky-500 rounded-full"></span>
                 Frota por Perfil Técnico
               </h3>
-              <div className="h-64">
-                <ResponsiveContainer width="100%" height="100%">
+              <div className="h-[300px] min-h-[300px]">
+                <SafeResponsiveContainer minHeight={300}>
                   <BarChart data={chartPerfilData} margin={{ top: 10, right: 10, left: -20, bottom: 5 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
                     <XAxis dataKey="name" stroke="#64748b" fontSize={9} />
@@ -630,7 +631,7 @@ export default function VeiculosView({
                       ))}
                     </Bar>
                   </BarChart>
-                </ResponsiveContainer>
+                </SafeResponsiveContainer>
               </div>
             </div>
 
@@ -640,8 +641,8 @@ export default function VeiculosView({
                 <span className="w-2 h-2 bg-emerald-500 rounded-full"></span>
                 Distribuição de Status Operacional
               </h3>
-              <div className="h-64 flex items-center justify-center">
-                <ResponsiveContainer width="100%" height="100%">
+              <div className="h-[300px] min-h-[300px] flex items-center justify-center">
+                <SafeResponsiveContainer minHeight={300}>
                   <PieChart>
                     <Pie
                       data={chartStatusData.filter(d => d.value > 0)}
@@ -658,7 +659,7 @@ export default function VeiculosView({
                     </Pie>
                     <Tooltip contentStyle={{ backgroundColor: "#020617", borderColor: "#334155" }} />
                   </PieChart>
-                </ResponsiveContainer>
+                </SafeResponsiveContainer>
                 {/* Labels Legend side panel */}
                 <div className="flex flex-col gap-1.5 pl-2">
                   {chartStatusData.map((item) => (
@@ -678,8 +679,8 @@ export default function VeiculosView({
                 <span className="w-2 h-2 bg-yellow-500 rounded-full"></span>
                 Utilização da Frota por Unidade (%)
               </h3>
-              <div className="h-64">
-                <ResponsiveContainer width="100%" height="100%">
+              <div className="h-[300px] min-h-[300px]">
+                <SafeResponsiveContainer minHeight={300}>
                   <BarChart data={chartUnidadeData} margin={{ top: 10, right: 10, left: -20, bottom: 5 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
                     <XAxis dataKey="name" stroke="#64748b" fontSize={9} />
@@ -691,7 +692,7 @@ export default function VeiculosView({
                       ))}
                     </Bar>
                   </BarChart>
-                </ResponsiveContainer>
+                </SafeResponsiveContainer>
               </div>
             </div>
 
