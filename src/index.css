@@ -1,0 +1,169 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --color-slate-950: #0F1115;
+  --color-slate-900: #161B22;
+  --color-slate-850: #0B0D11;
+  --color-slate-800: #21262D;
+  --color-slate-700: #30363D;
+  --color-slate-600: #484F58;
+  --color-slate-500: #6E7681;
+  --color-slate-400: #8B949E;
+  --color-slate-300: #ADBAC7;
+  --color-slate-200: #C9D1D9;
+  --color-slate-100: #E6EDF3;
+  --color-white: #FCFDFE;
+
+  --color-sky-50: #E6F4EA;
+  --color-sky-100: #D2E3FC;
+  --color-sky-200: #AECBFA;
+  --color-sky-300: #7BAAF7;
+  --color-sky-400: #58A6FF;
+  --color-sky-500: #1F6FEB;
+  --color-sky-600: #0969DA;
+  --color-sky-700: #0550AE;
+  --color-sky-800: #03396C;
+  --color-sky-900: #011E41;
+  --color-sky-950: #000B1A;
+
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, SF Pro Mono, monospace;
+}
+
+/* Custom Scrollbar Styles to integrate seamlessly with Sophisticated Dark */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #0F1115;
+}
+::-webkit-scrollbar-thumb {
+  background: #30363D;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #8B949E;
+}
+
+body {
+  background-color: #0F1115;
+  color: #C9D1D9;
+  font-family: "Inter", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Sophisticated interactive visual components styling */
+select {
+  background-color: transparent;
+  color: #E6EDF3;
+  border: none;
+  cursor: pointer;
+}
+select option {
+  background-color: #161B22;
+  color: #E6EDF3;
+}
+
+/* Ultra Compact Mode Rules for Logistical Supervisors */
+.ultra-compact {
+  font-size: 0.825rem !important;
+}
+
+.ultra-compact h1,
+.ultra-compact h2,
+.ultra-compact h3,
+.ultra-compact h4 {
+  letter-spacing: -0.025em !important;
+}
+
+/* Reduce paddings globally on cards and views in compact mode */
+.ultra-compact .p-6,
+.ultra-compact .md:p-6,
+.ultra-compact .lg:p-6 {
+  padding: 0.9rem !important;
+}
+
+.ultra-compact .p-5,
+.ultra-compact .p-4 {
+  padding: 0.7rem !important;
+}
+
+.ultra-compact .space-y-6 > :not([hidden]) ~ :not([hidden]) {
+  margin-top: 0.75rem !important;
+}
+
+.ultra-compact .space-y-4 > :not([hidden]) ~ :not([hidden]) {
+  margin-top: 0.45rem !important;
+}
+
+.ultra-compact .gap-6 {
+  gap: 0.85rem !important;
+}
+
+.ultra-compact .gap-4 {
+  gap: 0.65rem !important;
+}
+
+/* Specific component cards and headers in compact mode */
+.ultra-compact .rounded-2xl {
+  border-radius: 0.65rem !important;
+}
+
+.ultra-compact .rounded-xl {
+  border-radius: 0.55rem !important;
+}
+
+.ultra-compact .py-5 {
+  padding-top: 0.65rem !important;
+  padding-bottom: 0.65rem !important;
+}
+
+/* Shorter table rows and spacing */
+.ultra-compact table th,
+.ultra-compact table td {
+  padding-top: 0.4rem !important;
+  padding-bottom: 0.4rem !important;
+  padding-left: 0.65rem !important;
+  padding-right: 0.65rem !important;
+}
+
+.ultra-compact table tr {
+  font-size: 0.75rem !important;
+}
+
+/* Charts and metrics boxes smaller */
+.ultra-compact .h-80,
+.ultra-compact .md:h-80 {
+  height: 14rem !important;
+}
+
+.ultra-compact .h-96,
+.ultra-compact .md:h-96 {
+  height: 18rem !important;
+}
+
+.ultra-compact .h-64 {
+  height: 11rem !important;
+}
+
+.ultra-compact .text-4xl,
+.ultra-compact .md:text-4xl,
+.ultra-compact .lg:text-4xl,
+.ultra-compact .text-3xl {
+  font-size: 1.5rem !important;
+}
+
+.ultra-compact .text-2xl,
+.ultra-compact .text-xl,
+.ultra-compact .md:text-xl {
+  font-size: 1.1rem !important;
+}
+
+.ultra-compact .text-lg,
+.ultra-compact .text-base {
+  font-size: 0.85rem !important;
+}
+

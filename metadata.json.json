@@ -1,0 +1,6 @@
+{
+  "name": "Ampla Logistica Operacional",
+  "description": "Sistema profissional de gestao operacional de logistica e transporte multiunidades.",
+  "requestFramePermissions": ["camera", "microphone", "geolocation"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
