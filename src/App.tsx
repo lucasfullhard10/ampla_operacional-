@@ -28,6 +28,27 @@ import MasterUnidadesView from "./components/MasterUnidadesView";
 import CentralProcessos from "./components/CentralProcessos";
 import DatabaseSettingsModal from "./components/DatabaseSettingsModal";
 
+const TAB_TITLES: Record<string, string> = {
+  dashboard: "Dashboard Operativo",
+  unidades: "Unidades Logísticas",
+  veiculos: "Cadastro de Frotas",
+  motoristas: "Motoristas & Conformidades",
+  disponibilidade: "Agenda Diária",
+  monitoramento: "Vistoria DT",
+  "fechamento-dt": "Fechamento de DT & Controle de Vales",
+  "entregas-off": "Entregas OFF-Route",
+  descargas: "Taxas de Descarga",
+  manutencao: "Histórico de Manutenções",
+  epi: "Alocação EPIs",
+  alertas: "Painel Alertas Ativos",
+  auditoria: "Logs de Segurança",
+  "master-usuarios": "Gerenciamento Geral de Usuários",
+  "master-permissoes": "Matriz Geral de Permissões",
+  "master-unidades": "Administração Master de Unidades",
+  processos: "Painel de Processos",
+  noshow: "Vistoria No-Show"
+};
+
 interface ErrorBoundaryProps {
   children: React.ReactNode;
 }
@@ -877,22 +898,7 @@ export default function App() {
           <section className="bg-slate-900 border-b border-slate-800 px-6 py-4.5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 select-none shrink-0">
             <div className="flex items-baseline gap-2">
               <h1 className="text-base font-bold text-white tracking-tight">
-                {activeTab === "dashboard" && "Dashboard Operativo"}
-                {activeTab === "unidades" && "Unidades Logísticas"}
-                {activeTab === "veiculos" && "Cadastro de Frotas"}
-                {activeTab === "motoristas" && "Motoristas & Conformidades"}
-                {activeTab === "disponibilidade" && "Agenda Diária"}
-                {activeTab === "monitoramento" && "Vistoria DT"}
-                {activeTab === "fechamento-dt" && "Fechamento de DT & Controle de Vales"}
-                {activeTab === "entregas-off" && "Entregas OFF-Route"}
-                {activeTab === "descargas" && "Taxas de Descarga"}
-                {activeTab === "manutencao" && "Histórico de Manutenções"}
-                {activeTab === "epi" && "Alocação EPIs"}
-                {activeTab === "alertas" && "Painel Alertas Ativos"}
-                {activeTab === "auditoria" && "Logs de Segurança"}
-                {activeTab === "master-usuarios" && "Gerenciamento Geral de Usuários"}
-                {activeTab === "master-permissoes" && "Matriz Geral de Permissões"}
-                {activeTab === "master-unidades" && "Administração Master de Unidades"}
+                {TAB_TITLES[activeTab] || "AMPLA"}
               </h1>
               <span className="text-[10px] text-slate-500 font-mono">/ {activeTab}</span>
             </div>
