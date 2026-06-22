@@ -624,7 +624,7 @@ export default function VeiculosView({
                     <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
                     <XAxis dataKey="name" stroke="#64748b" fontSize={9} />
                     <YAxis stroke="#64748b" fontSize={9} />
-                    <Tooltip contentStyle={{ backgroundColor: "#020617", borderColor: "#334155" }} />
+                    <Tooltip isAnimationActive={false} contentStyle={{ backgroundColor: "#020617", borderColor: "#334155" }} />
                     <Bar dataKey="Quantidade" fill="#0284c7" radius={[4, 4, 0, 0]}>
                       {chartPerfilData.map((entry, index) => (
                         <Cell key={`cell-${index}`} fill={index % 2 === 0 ? "#0284c7" : "#0ea5e9"} />
@@ -657,7 +657,7 @@ export default function VeiculosView({
                         <Cell key={`cell-${index}`} fill={entry.color} />
                       ))}
                     </Pie>
-                    <Tooltip contentStyle={{ backgroundColor: "#020617", borderColor: "#334155" }} />
+                    <Tooltip isAnimationActive={false} contentStyle={{ backgroundColor: "#020617", borderColor: "#334155" }} />
                   </PieChart>
                 </SafeResponsiveContainer>
                 {/* Labels Legend side panel */}
@@ -685,7 +685,7 @@ export default function VeiculosView({
                     <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
                     <XAxis dataKey="name" stroke="#64748b" fontSize={9} />
                     <YAxis stroke="#64748b" fontSize={9} unit="%" />
-                    <Tooltip contentStyle={{ backgroundColor: "#020617", borderColor: "#334155" }} />
+                    <Tooltip isAnimationActive={false} contentStyle={{ backgroundColor: "#020617", borderColor: "#334155" }} />
                     <Bar dataKey="Utilização" fill="#eab308" radius={[4, 4, 0, 0]}>
                       {chartUnidadeData.map((entry, index) => (
                         <Cell key={`cell-${index}`} fill={entry.Utilização >= 85 ? "#10b981" : entry.Utilização >= 60 ? "#0284c7" : "#ef4444"} />
