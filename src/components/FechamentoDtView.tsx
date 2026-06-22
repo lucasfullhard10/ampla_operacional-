@@ -1516,7 +1516,7 @@ export default function FechamentoDtView({
                       <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
                       <XAxis dataKey="name" stroke="#64748b" fontSize={10} />
                       <YAxis stroke="#64748b" fontSize={10} />
-                      <Tooltip contentStyle={{ backgroundColor: "#0f172a", borderColor: "#1e293b", color: "#fff" }} />
+                      <Tooltip isAnimationActive={false} contentStyle={{ backgroundColor: "#0f172a", borderColor: "#1e293b", color: "#fff" }} />
                       <Bar dataKey="valor" fill="#38bdf8" radius={[4, 4, 0, 0]} name="Valor Total (R$)" />
                     </BarChart>
                   </SafeResponsiveContainer>
@@ -1535,7 +1535,7 @@ export default function FechamentoDtView({
                       <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
                       <XAxis type="number" stroke="#64748b" fontSize={10} />
                       <YAxis type="category" dataKey="name" stroke="#64748b" fontSize={9} />
-                      <Tooltip contentStyle={{ backgroundColor: "#0f172a", borderColor: "#1e293b", color: "#fff" }} />
+                      <Tooltip isAnimationActive={false} contentStyle={{ backgroundColor: "#0f172a", borderColor: "#1e293b", color: "#fff" }} />
                       <Bar dataKey="valor" fill="#f43f5e" radius={[0, 4, 4, 0]} name="Valor (R$)" />
                     </BarChart>
                   </SafeResponsiveContainer>
@@ -1554,7 +1554,7 @@ export default function FechamentoDtView({
                       <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
                       <XAxis dataKey="name" stroke="#64748b" fontSize={10} />
                       <YAxis stroke="#64748b" fontSize={10} />
-                      <Tooltip contentStyle={{ backgroundColor: "#0f172a", borderColor: "#1e293b", color: "#fff" }} />
+                      <Tooltip isAnimationActive={false} contentStyle={{ backgroundColor: "#0f172a", borderColor: "#1e293b", color: "#fff" }} />
                       <Bar dataKey="valor" fill="#fb923c" radius={[4, 4, 0, 0]} name="Valor (R$)" />
                     </BarChart>
                   </SafeResponsiveContainer>
@@ -1573,7 +1573,7 @@ export default function FechamentoDtView({
                       <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
                       <XAxis dataKey="name" stroke="#64748b" fontSize={10} />
                       <YAxis stroke="#64748b" fontSize={10} />
-                      <Tooltip contentStyle={{ backgroundColor: "#0f172a", borderColor: "#1e293b", color: "#fff" }} />
+                      <Tooltip isAnimationActive={false} contentStyle={{ backgroundColor: "#0f172a", borderColor: "#1e293b", color: "#fff" }} />
                       <Bar dataKey="valor" fill="#a855f7" radius={[4, 4, 0, 0]} name="Valor Consolidado (R$)" />
                     </BarChart>
                   </SafeResponsiveContainer>
