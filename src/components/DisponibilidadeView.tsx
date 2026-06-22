@@ -1728,7 +1728,7 @@ export default function DisponibilidadeView({ veiculos, motoristas, userEmail }:
                     <CartesianGrid strokeDasharray="3 3" stroke="#222" />
                     <XAxis dataKey="name" stroke="#64748b" />
                     <YAxis domain={[0, 100]} stroke="#64748b" />
-                    <Tooltip contentStyle={{ backgroundColor: "#000", border: "1px solid #333", fontSize: "11px" }} />
+                    <Tooltip isAnimationActive={false} contentStyle={{ backgroundColor: "#000", border: "1px solid #333", fontSize: "11px" }} />
                     <Line type="monotone" dataKey="Roteirização %" stroke="#06b6d4" strokeWidth={3} />
                   </LineChart>
                 </SafeResponsiveContainer>
@@ -1744,7 +1744,7 @@ export default function DisponibilidadeView({ veiculos, motoristas, userEmail }:
                     <CartesianGrid strokeDasharray="3 3" stroke="#222" />
                     <XAxis dataKey="name" stroke="#64748b" />
                     <YAxis domain={[0, 100]} stroke="#64748b" />
-                    <Tooltip contentStyle={{ backgroundColor: "#000", border: "1px solid #333", fontSize: "11px" }} />
+                    <Tooltip isAnimationActive={false} contentStyle={{ backgroundColor: "#000", border: "1px solid #333", fontSize: "11px" }} />
                     <Bar dataKey="Roteirização %" fill="#10b981" radius={[4, 4, 0, 0]} />
                   </BarChart>
                 </SafeResponsiveContainer>
@@ -1760,7 +1760,7 @@ export default function DisponibilidadeView({ veiculos, motoristas, userEmail }:
                     <CartesianGrid strokeDasharray="3 3" stroke="#222" />
                     <XAxis dataKey="name" stroke="#64748b" />
                     <YAxis domain={[0, 100]} stroke="#64748b" />
-                    <Tooltip contentStyle={{ backgroundColor: "#000", border: "1px solid #333", fontSize: "11px" }} />
+                    <Tooltip isAnimationActive={false} contentStyle={{ backgroundColor: "#000", border: "1px solid #333", fontSize: "11px" }} />
                     <Bar dataKey="Aproveitamento %" fill="#6366f1" radius={[4, 4, 0, 0]} />
                   </BarChart>
                 </SafeResponsiveContainer>
@@ -1776,7 +1776,7 @@ export default function DisponibilidadeView({ veiculos, motoristas, userEmail }:
                     <CartesianGrid strokeDasharray="3 3" stroke="#222" />
                     <XAxis dataKey="name" stroke="#64748b" />
                     <YAxis stroke="#64748b" />
-                    <Tooltip contentStyle={{ backgroundColor: "#000", border: "1px solid #333", fontSize: "11px" }} />
+                    <Tooltip isAnimationActive={false} contentStyle={{ backgroundColor: "#000", border: "1px solid #333", fontSize: "11px" }} />
                     <Legend wrapperStyle={{ fontSize: "10px" }} />
                     <Bar dataKey="Disponibilizados" fill="#3b82f6" radius={[3, 3, 0, 0]} />
                     <Bar dataKey="Roteirizados" fill="#10b981" radius={[3, 3, 0, 0]} />
@@ -1794,7 +1794,7 @@ export default function DisponibilidadeView({ veiculos, motoristas, userEmail }:
                     <CartesianGrid strokeDasharray="3 3" stroke="#222" />
                     <XAxis dataKey="name" stroke="#64748b" />
                     <YAxis stroke="#64748b" />
-                    <Tooltip contentStyle={{ backgroundColor: "#000", border: "1px solid #333", fontSize: "11px" }} />
+                    <Tooltip isAnimationActive={false} contentStyle={{ backgroundColor: "#000", border: "1px solid #333", fontSize: "11px" }} />
                     <Bar dataKey="Ociosos" fill="#f59e0b" radius={[4, 4, 0, 0]} />
                   </BarChart>
                 </SafeResponsiveContainer>
@@ -1810,7 +1810,7 @@ export default function DisponibilidadeView({ veiculos, motoristas, userEmail }:
                     <CartesianGrid strokeDasharray="3 3" stroke="#222" />
                     <XAxis type="number" domain={[0, 100]} stroke="#64748b" />
                     <YAxis type="category" dataKey="name" stroke="#64748b" />
-                    <Tooltip contentStyle={{ backgroundColor: "#000", border: "1px solid #333", fontSize: "11px" }} />
+                    <Tooltip isAnimationActive={false} contentStyle={{ backgroundColor: "#000", border: "1px solid #333", fontSize: "11px" }} />
                     <Bar dataKey="Aproveitamento %" fill="#06b6d4" radius={[0, 4, 4, 0]} />
                   </BarChart>
                 </SafeResponsiveContainer>
