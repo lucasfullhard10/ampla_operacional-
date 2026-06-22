@@ -6,9 +6,10 @@ import {
   X as LucideX, Layers as LucideLayers, RefreshCw as LucideRefreshCw, AlertTriangle as LucideAlertTriangle, 
   Calendar as LucideCalendar, Save, History, Edit, Trash
 } from "lucide-react";
-import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, Cell } from "recharts";
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, Cell } from "recharts";
 import { Rota, Veiculo, Motorista, NotaFiscal, Unidade } from "../types";
 import { NotificationModal, ConfirmModal, NotificationType, ConfirmType } from "./NotificationModal";
+import SafeResponsiveContainer from "./SafeResponsiveContainer";
 
 interface MonitoramentoProps {
   rotas: Rota[];
@@ -982,17 +983,17 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
           </div>
 
           {/* Gráfico Operacional */}
-          <div className="lg:col-span-7 bg-slate-950/50 border border-slate-800/80 rounded-xl p-5 flex flex-col justify-between h-[230px]">
+          <div className="lg:col-span-7 bg-slate-950/50 border border-slate-800/80 rounded-xl p-5 flex flex-col justify-between h-[380px]">
             <h4 className="text-xs font-bold text-slate-300 uppercase tracking-wider font-mono mb-2">📊 Visão Analítica de Entregas</h4>
             
-            <div className="flex-1 w-full min-h-[140px] relative">
+            <div className="flex-1 w-full min-h-[300px] relative">
               {kpis.totalEntregasPlanejadas === 0 ? (
                 <div key="no-data-msg-operational" className="absolute inset-0 flex items-center justify-center text-xs text-slate-500 font-mono">
                   Sem dados de entregas no período selecionado.
                 </div>
               ) : (
-                <div key="chart-wrapper-operational" className="w-full h-full">
-                  <ResponsiveContainer width="100%" height="100%">
+                <div key="chart-wrapper-operational" className="w-full h-[300px] min-h-[300px]">
+                  <SafeResponsiveContainer minHeight={300}>
                     <BarChart data={chartData} margin={{ top: 10, right: 10, left: -25, bottom: 0 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
                       <XAxis 
@@ -1021,7 +1022,7 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
                         ))}
                       </Bar>
                     </BarChart>
-                  </ResponsiveContainer>
+                  </SafeResponsiveContainer>
                 </div>
               )}
             </div>
