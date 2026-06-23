@@ -897,10 +897,10 @@ export default function App() {
           {/* DYNAMIC SUB-HEADER BAR */}
           <section className="bg-slate-900 border-b border-slate-800 px-6 py-4.5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 select-none shrink-0">
             <div className="flex items-baseline gap-2">
-              <h1 className="text-base font-bold text-white tracking-tight">
+              <h1 className="text-base font-bold text-white tracking-tight" key={`title-${activeTab}`}>
                 {TAB_TITLES[activeTab] || "AMPLA"}
               </h1>
-              <span className="text-[10px] text-slate-500 font-mono">/ {activeTab}</span>
+              <span className="text-[10px] text-slate-500 font-mono" key={`path-${activeTab}`}>/ {activeTab}</span>
             </div>
 
             {/* Quick base switch summary or indicators */}
