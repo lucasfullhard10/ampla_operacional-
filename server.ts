@@ -1,8 +1,9 @@
 import "dotenv/config";
 import express from "express";
 import path from "path";
+import fs from "fs";
 import { createServer as createViteServer } from "vite";
-import { FileDatabase, Usuario, Motorista, Veiculo, Rota, NotaFiscal, Manutencao, UsuarioUnidadePermissao, Unidade } from "./server/database";
+import { FileDatabase, Usuario, Motorista, Veiculo, Rota, NotaFiscal, Manutencao, UsuarioUnidadePermissao, Unidade, MovimentacaoFinanceira } from "./server/database";
 
 async function startServer() {
   const app = express();
@@ -960,8 +961,71 @@ async function startServer() {
     const totalDtsFechadasComVale = filteredClosures.filter(c => c.statusFechamento === "Fechada Com Vale" || (!c.statusFechamento && (c.ocorrencias || []).some((occ: any) => occ.tipo === "Falta de Mercadoria"))).length;
     const totalDtsComDevolucao = filteredClosures.filter(c => c.statusFechamento === "Fechada Com Devolução" || c.houveDevolucao === "Sim" || c.houveDevolucao === true || (!c.statusFechamento && (c.ocorrencias || []).some((occ: any) => occ.tipo === "Devolução"))).length;
 
+    // Intelligent suggestion system (Fase 4 metrics)
+    const activeRangeDts = filteredRotasUnit.filter(r => r.data >= currentRange.start && r.data <= currentRange.end);
+    const totalDtsWithSuggestions = activeRangeDts.filter(r => r.equipeSugeridaIds && r.equipeSugeridaIds.length > 0).length;
+    const totalAcceptedSuggestions = activeRangeDts.filter(r => {
+      if (!r.equipeSugeridaIds || r.equipeSugeridaIds.length === 0) return false;
+      const sug = [...r.equipeSugeridaIds].sort().join(",");
+      const uti = [...(r.ajudantesIds || [])].sort().join(",");
+      return sug === uti;
+    }).length;
+    const adherenceRate = totalDtsWithSuggestions > 0 
+      ? Math.round((totalAcceptedSuggestions / totalDtsWithSuggestions) * 100) 
+      : 100;
+
+    // Calculate Fleet Financial Metrics
+    const currentMonthStr = currentRange.start.substring(0, 7); // e.g. "2026-06"
+    let totalCreditosMes = 0;
+    let totalDebitosMes = 0;
+    const dbInstance = FileDatabase.getFull();
+    const allVeiculos = dbInstance.veiculos || [];
+    let maxSaldoNome = "Nenhum";
+    let maxSaldoVal = 0;
+    let maxDevedorNome = "Nenhum";
+    let maxDevedorVal = 0;
+    let totalBalancesCombined = 0;
+    
+    const processedVeiculos = allVeiculos.filter(filterUnit).map(v => {
+      const movements = getMovementsForVehicle(dbInstance, v.id);
+      
+      movements.forEach(m => {
+        if (m.data && m.data.startsWith(currentMonthStr)) {
+          if (m.tipo === "Crédito") {
+            totalCreditosMes += Number(m.valor || 0);
+          } else {
+            totalDebitosMes += Number(m.valor || 0);
+          }
+        }
+      });
+      
+      const credTotal = movements.filter(m => m.tipo === "Crédito" && !m.faturado).reduce((acc, m) => acc + Number(m.valor || 0), 0);
+      const debTotal = movements.filter(m => m.tipo === "Débito" && !m.faturado).reduce((acc, m) => acc + Number(m.valor || 0), 0);
+      const balance = credTotal - debTotal;
+      totalBalancesCombined += balance;
+      
+      const label = `${v.modelo} (${v.placa})`;
+      if (balance > maxSaldoVal) {
+        maxSaldoVal = balance;
+        maxSaldoNome = label;
+      }
+      if (balance < maxDevedorVal) {
+        maxDevedorVal = balance;
+        maxDevedorNome = label;
+      }
+      return balance;
+    });
+    
+    const totalMovimentadoMes = totalCreditosMes + totalDebitosMes;
+    const mediaPorColaborador = processedVeiculos.length > 0 
+      ? Math.round(totalBalancesCombined / processedVeiculos.length) 
+      : 0;
+
     res.json({
       cards: {
+        dtsWithSuggestionsCount: totalDtsWithSuggestions,
+        acceptedSuggestionsCount: totalAcceptedSuggestions,
+        adherenceRateSuggestions: adherenceRate,
         entregasPrevistas: currentStats.entregasPrevistas,
         entregasRealizadas: currentStats.entregasRealizadas,
         entregasPendentes: currentStats.entregasPendentes,
@@ -1024,6 +1088,16 @@ async function startServer() {
         totalDtsFechadasSemVale,
         totalDtsFechadasComVale,
         totalDtsComDevolucao
+      },
+      financeiroKpis: {
+        totalMovimentadoMes,
+        creditosMes: totalCreditosMes,
+        debitosMes: totalDebitosMes,
+        maiorSaldo: maxSaldoVal,
+        maiorSaldoNome: maxSaldoNome,
+        maiorDevedor: Math.abs(maxDevedorVal),
+        maiorDevedorNome: maxDevedorNome,
+        mediaPorColaborador
       }
     });
   });
@@ -1235,7 +1309,6 @@ async function startServer() {
     const usuarios = FileDatabase.get("usuarios") as Usuario[];
     const permissoes = FileDatabase.get("usuario_unidade_permissao") as UsuarioUnidadePermissao[];
     
-    let filteredUsers = usuarios;
     if (!isMaster) {
       // Get all unit IDs current user is authorized to access
       const allowedUnits = [
@@ -1244,13 +1317,23 @@ async function startServer() {
         ...permissoes.filter(p => p.usuario_id === user.id && p.ativo).map(p => p.unidade_id)
       ].filter(Boolean);
       
-      filteredUsers = usuarios.filter(u => {
+      const filteredUsers = usuarios.filter(u => {
         const uUnit = u.unidadeId || u.unidade_id;
         return uUnit && allowedUnits.includes(uUnit);
       });
+      const mapped = filteredUsers.map(u => {
+        const activePerms = permissoes
+          .filter(p => p.usuario_id === u.id && p.ativo)
+          .map(p => p.unidade_id);
+        return {
+          ...u,
+          unidadesPermitidas: activePerms
+        };
+      });
+      return res.json(mapped);
     }
     
-    const mapped = filteredUsers.map(u => {
+    const mapped = usuarios.map(u => {
       const activePerms = permissoes
         .filter(p => p.usuario_id === u.id && p.ativo)
         .map(p => p.unidade_id);
@@ -1541,35 +1624,7 @@ async function startServer() {
         item.unidadeId = user.unidadeId;
       }
 
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      const cnhDate = item.cnhVencimento ? new Date(item.cnhVencimento) : null;
-      const asoDate = item.asoVencimento ? new Date(item.asoVencimento) : null;
-
-      const isCnhExpired = cnhDate && cnhDate < today;
-      const isAsoExpired = asoDate && asoDate < today;
-
-      const allFeito =
-        item.integracao === "Feito" &&
-        item.pesquisa === "Feito" &&
-        item.aso === "Feito" &&
-        item.fichaEpi === "Feito";
-
-      const hasPendente =
-        item.integracao === "Pendente" ||
-        item.pesquisa === "Pendente" ||
-        item.aso === "Pendente" ||
-        item.fichaEpi === "Pendente";
-
-      if (isCnhExpired || isAsoExpired) {
-        item.statusFinal = "BLOQUEADO";
-      } else if (allFeito) {
-        item.statusFinal = "LIBERADO";
-      } else if (hasPendente) {
-        item.statusFinal = "PENDENTE";
-      } else {
-        item.statusFinal = "BLOQUEADO";
-      }
+      item.statusFinal = FileDatabase.computeDriverStatus(item as Motorista);
 
       const added = FileDatabase.add("motoristas", item, operator);
       res.json(added);
@@ -1668,35 +1723,9 @@ async function startServer() {
       }
 
       const merged = { ...current, ...item };
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      const cnhDate = merged.cnhVencimento ? new Date(merged.cnhVencimento) : null;
-      const asoDate = merged.asoVencimento ? new Date(merged.asoVencimento) : null;
-
-      const isCnhExpired = cnhDate && cnhDate < today;
-      const isAsoExpired = asoDate && asoDate < today;
-
-      const allFeito =
-        merged.integracao === "Feito" &&
-        merged.pesquisa === "Feito" &&
-        merged.aso === "Feito" &&
-        merged.fichaEpi === "Feito";
-
-      const hasPendente =
-        merged.integracao === "Pendente" ||
-        merged.pesquisa === "Pendente" ||
-        merged.aso === "Pendente" ||
-        merged.fichaEpi === "Pendente";
-
-      if (isCnhExpired || isAsoExpired) {
-        item.statusFinal = "BLOQUEADO";
-      } else if (allFeito) {
-        item.statusFinal = "LIBERADO";
-      } else if (hasPendente) {
-        item.statusFinal = "PENDENTE";
-      } else {
-        item.statusFinal = "BLOQUEADO";
-      }
+      item.statusFinal = FileDatabase.computeDriverStatus(merged);
+      item.statusConformidade = merged.statusConformidade;
+      item.motivoBloqueio = merged.motivoBloqueio;
 
       const updated = FileDatabase.update("motoristas", req.params.id, item, operator);
       res.json(updated);
@@ -2468,8 +2497,7 @@ async function startServer() {
     }
 
     const allRoutes = FileDatabase.get("rotas") || [];
-    const allOffs = FileDatabase.get("entregas_off") || [];
-    const isRepeated = allRoutes.some((r: any) => r.dt === item.dt) || allOffs.some((e: any) => e.dt === item.dt);
+    const isRepeated = allRoutes.some((r: any) => r.dt === item.dt);
 
     if (isRepeated && item.tipo !== "Reentrega") {
       return res.status(400).json({ error: "❌ DT EM DUPLICIDADE\nNão é possível salvar. Esta DT já está cadastrada no sistema." });
@@ -2516,6 +2544,20 @@ async function startServer() {
     if (dIdx !== -1) {
       disps[dIdx].roteirizado = true;
       FileDatabase.set("disponibilidade", disps);
+    }
+
+    // Intelligent Team Selection Auditor
+    if (item.motoristaId) {
+      const dbDrivers = FileDatabase.get("motoristas") || [];
+      const mName = dbDrivers.find((x: any) => x.id === item.motoristaId)?.nome || item.motoristaId;
+      const sugNames = (item.equipeSugeridaIds || []).map((id: string) => dbDrivers.find((x: any) => x.id === id)?.nome || id).join(", ") || "Nenhum";
+      const utilNames = (item.ajudantesIds || []).map((id: string) => dbDrivers.find((x: any) => x.id === id)?.nome || id).join(", ") || "Nenhum";
+      
+      FileDatabase.logAudit(
+        operator,
+        "Formação de Equipe",
+        `DT #${item.dt} - Motorista: ${mName} | Sugerido: [${sugNames}] | Utilizado: [${utilNames}]`
+      );
     }
 
     res.json(added);
@@ -2636,6 +2678,20 @@ async function startServer() {
         usuario: operator
       }];
       item.historico_status = updatedHistory;
+    }
+
+    // Intelligent Team Selection Auditor for Edit
+    if (item.motoristaId) {
+      const dbDrivers = FileDatabase.get("motoristas") || [];
+      const mName = dbDrivers.find((x: any) => x.id === item.motoristaId)?.nome || item.motoristaId;
+      const sugNames = (item.equipeSugeridaIds || []).map((id: string) => dbDrivers.find((x: any) => x.id === id)?.nome || id).join(", ") || "Nenhum";
+      const utilNames = (item.ajudantesIds || []).map((id: string) => dbDrivers.find((x: any) => x.id === id)?.nome || id).join(", ") || "Nenhum";
+      
+      FileDatabase.logAudit(
+        operator,
+        "Formação de Equipe (Edição)",
+        `DT #${item.dt || current.dt} - Motorista: ${mName} | Sugerido: [${sugNames}] | Utilizado: [${utilNames}]`
+      );
     }
 
     const updated = FileDatabase.update("rotas", req.params.id, item, operator);
@@ -2785,330 +2841,682 @@ async function startServer() {
   });
 
   // ----------------------------------------------------
-  // ENTREGAS OFF API
+  // CONTAS A RECEBER / CENTRO DE RECEBIMENTOS API
   // ----------------------------------------------------
-  app.get("/api/entregas-off", (req, res) => {
-    const user = getRequestUser(req);
-    if (!user) return res.status(401).json({ error: "Não autorizado" });
-    
-    const list = FileDatabase.get("entregas_off") || [];
-    const nfsList = FileDatabase.get("entregas_off_nfs" as any) || [];
-    
-    // Join Nfs to each EntregaOff
-    const joined = list.map((e: any) => {
-      const eNfs = nfsList.filter((nf: any) => nf.entrega_off_id === e.id);
-      return {
-        ...e,
-        nfs: eNfs
-      };
-    });
+  app.get("/api/recebimentos", (req, res) => {
+    try {
+      const user = getRequestUser(req);
+      if (!user) return res.status(401).json({ error: "Não autorizado" });
 
-    const activeUnit = getRequestUnitContext(req, user);
-    if (activeUnit === "Todas") return res.json(joined);
-    res.json(joined.filter(e => e.unidadeId === activeUnit));
-  });
+      const list = FileDatabase.get("contas_a_receber" as any) || [];
+      const activeUnit = getRequestUnitContext(req, user);
 
-  app.post("/api/entregas-off", (req, res) => {
-    const user = getRequestUser(req);
-    if (!user) return res.status(401).json({ error: "Não autorizado" });
-
-    const item = req.body;
-    const operator = user.email;
-
-    if (user.perfil !== "admin_master") {
-      item.unidadeId = user.unidadeId;
-    } else if (!item.unidadeId) {
-      const firstUnitId = (FileDatabase.get("unidades") as any[])[0]?.id || "un-go";
-      item.unidadeId = firstUnitId;
-    }
-
-    // DT duplication check
-    const allRoutes = FileDatabase.get("rotas") || [];
-    const allOffs = FileDatabase.get("entregas_off") || [];
-    const isRepeated = allRoutes.some((r: any) => r.dt === item.dt) || allOffs.some((e: any) => e.dt === item.dt);
-    const isReentrega = (item.tipo_operacao || "").toLowerCase().includes("reentrega");
-
-    if (isRepeated && !isReentrega) {
-      return res.status(400).json({ error: "❌ DT EM DUPLICIDADE\nNão é possível salvar. Esta DT já está cadastrada no sistema." });
-    }
-
-    // Isolate the Nfs array from the item
-    const nfsToSave = item.nfs || [];
-    delete item.nfs;
-
-    // Save the main record
-    const added = FileDatabase.add("entregas_off", item, operator);
-
-    // Save Nfs individually in the database
-    if (Array.isArray(nfsToSave) && nfsToSave.length > 0) {
-      const currentNfs = FileDatabase.get("entregas_off_nfs" as any) || [];
-      nfsToSave.forEach((nf: any) => {
-        const nfItem = {
-          id: `nf-off-${Date.now()}-${Math.floor(Math.random() * 100000)}`,
-          entrega_off_id: added.id,
-          numero_nf: nf.numero_nf,
-          valor_nf: Number(nf.valor_nf)
-        };
-        currentNfs.push(nfItem);
-      });
-      FileDatabase.set("entregas_off_nfs" as any, currentNfs);
-    }
-
-    // Return the response with Joined Nfs
-    const finalAdded = {
-      ...added,
-      nfs: FileDatabase.get("entregas_off_nfs" as any).filter((nf: any) => nf.entrega_off_id === added.id)
-    };
-
-    res.json(finalAdded);
-  });
-
-  app.delete("/api/entregas-off/:id", (req, res) => {
-    const user = getRequestUser(req);
-    if (!user) return res.status(401).json({ error: "Não autorizado" });
-    const operator = user.email;
-
-    // Remove Nfs individually
-    const nfsList = FileDatabase.get("entregas_off_nfs" as any) || [];
-    const filteredNfs = nfsList.filter((nf: any) => nf.entrega_off_id !== req.params.id);
-    FileDatabase.set("entregas_off_nfs" as any, filteredNfs);
-
-    // Remove main record
-    const deleted = FileDatabase.delete("entregas_off", req.params.id, operator);
-    res.json({ success: deleted });
-  });
-
-  app.put("/api/entregas-off/:id", (req, res) => {
-    const user = getRequestUser(req);
-    if (!user) return res.status(401).json({ error: "Não autorizado" });
-
-    const item = req.body;
-    const operator = user.email;
-
-    const current = FileDatabase.get("entregas_off").find(x => x.id === req.params.id);
-    if (!current) return res.status(404).json({ error: "Entrega Off-Route não localizada" });
-
-    if (user.perfil !== "admin_master" && current.unidadeId !== user.unidadeId) {
-      return res.status(403).json({ error: "Acesso negado para alteração de entregas off-route." });
-    }
-
-    if (user.perfil !== "admin_master") {
-      item.unidadeId = user.unidadeId;
-    }
-
-    // Capture change logs for auditing
-    const logAlteracoes = current.log_alteracoes || [];
-    const changedFields: any[] = [];
-    const dStr = new Date().toLocaleDateString("pt-BR");
-    const tStr = new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
-
-    const getDriverName = (id: string) => {
-      const dbDrivers = FileDatabase.get("motoristas") || [];
-      const m = dbDrivers.find((x: any) => x.id === id);
-      return m ? m.nome : (id || "N/D");
-    };
-
-    const getVehiclePlate = (id: string) => {
-      const dbVehicles = FileDatabase.get("veiculos") || [];
-      const v = dbVehicles.find((x: any) => x.id === id);
-      return v ? v.placa : (id || "N/D");
-    };
-
-    const getUnidadeName = (id: string) => {
-      const dbUnidades = FileDatabase.get("unidades") || [];
-      const u = dbUnidades.find((x: any) => x.id === id);
-      return u ? u.nome : (id || "N/D");
-    };
-
-    const recordChange = (campo: string, antes: any, depois: any) => {
-      if (antes !== depois && depois !== undefined) {
-        changedFields.push({
-          data: dStr,
-          hora: tStr,
-          usuario: user.nome || user.email,
-          campo,
-          antes: String(antes ?? "-"),
-          depois: String(depois ?? "-")
-        });
+      let filtered = [...list];
+      if (activeUnit !== "Todas") {
+        filtered = filtered.filter((r: any) => r.unidadeId === activeUnit);
       }
-    };
 
-    if (item.motoristaId !== undefined) {
-      recordChange("Motorista", getDriverName(current.motoristaId), getDriverName(item.motoristaId));
-    }
-    if (item.veiculoId !== undefined) {
-      recordChange("Veículo", getVehiclePlate(current.veiculoId), getVehiclePlate(item.veiculoId));
-    }
-    if (item.placa !== undefined) {
-      recordChange("Placa", current.placa || "N/D", item.placa || "N/D");
-    }
-    if (item.unidadeId !== undefined) {
-      recordChange("Unidade", getUnidadeName(current.unidadeId), getUnidadeName(item.unidadeId));
-    }
-    if (item.cliente !== undefined) {
-      recordChange("Cliente", current.cliente || "", item.cliente);
-    }
-    if (item.cidade !== undefined) {
-      recordChange("Cidade", current.cidade || "", item.cidade);
-    }
-    if (item.endereco !== undefined) {
-      recordChange("Endereço", current.endereco || "", item.endereco);
-    }
-    if (item.data !== undefined) {
-      recordChange("Data da Entrega", current.data || "", item.data);
-    }
-    if (item.horario !== undefined) {
-      recordChange("Horário", current.horario || "", item.horario);
-    }
-    if (item.observacoes !== undefined) {
-      recordChange("Observações", current.observacoes || "", item.observacoes);
-    }
-    if (item.qtd_volumes !== undefined) {
-      recordChange("Quantidade de Volumes", current.qtd_volumes ?? 0, item.qtd_volumes ?? 0);
-    }
-    if (item.qtd_entregues !== undefined) {
-      recordChange("Quantidade Entregue", current.qtd_entregues ?? 0, item.qtd_entregues ?? 0);
-    }
-    if (item.qtd_pendente !== undefined) {
-      recordChange("Quantidade Pendente", current.qtd_pendente ?? 0, item.qtd_pendente ?? 0);
-    }
-    if (item.qtd_recusada !== undefined) {
-      recordChange("Quantidade Recusada", current.qtd_recusada ?? 0, item.qtd_recusada ?? 0);
-    }
-    if (item.qtd_devolvida !== undefined) {
-      recordChange("Quantidade Devolvida", current.qtd_devolvida ?? 0, item.qtd_devolvida ?? 0);
-    }
-    if (item.status_entrega !== undefined) {
-      recordChange("Status", current.status_entrega || "", item.status_entrega);
-    }
+      // If contas_a_receber is completely empty, let's auto-generate some realistic ones from existing closed DTs!
+      if (list.length === 0) {
+        const fechamentos = FileDatabase.get("fechamentos_dt") || [];
+        const nfs = FileDatabase.get("notas_fiscais") || [];
+        const rotas = FileDatabase.get("rotas") || [];
+        const motoristas = FileDatabase.get("motoristas") || [];
+        const veiculos = FileDatabase.get("veiculos") || [];
 
-    if (changedFields.length > 0) {
-      item.log_alteracoes = [...changedFields, ...logAlteracoes];
-    }
+        const clients = ["Heineken", "Ambev", "Coca-Cola Femsa", "Nestlé", "Kabin", "Pepsico", "Unilever"];
+        const generated: any[] = [];
 
-    // Handle NFs update if sent
-    if (Array.isArray(item.nfs)) {
-      const currentNfs = FileDatabase.get("entregas_off_nfs" as any) || [];
-      const filteredNfs = currentNfs.filter((nf: any) => nf.entrega_off_id !== req.params.id);
-      item.nfs.forEach((nf: any) => {
-        filteredNfs.push({
-          id: nf.id || `nf-off-${Date.now()}-${Math.floor(Math.random() * 100000)}`,
-          entrega_off_id: req.params.id,
-          numero_nf: nf.numero_nf,
-          valor_nf: Number(nf.valor_nf)
+        fechamentos.forEach((f: any, idx: number) => {
+          const associatedRoute = rotas.find((r: any) => r.dt === f.dt);
+          const associatedNf = nfs.find((nf: any) => nf.dtId === f.id || nf.dtId === `DT-${f.dt}` || nf.dtId === f.dt);
+          
+          let clientName = associatedNf?.cliente || clients[idx % clients.length];
+          const driverObj = motoristas.find((m: any) => m.id === f.motoristaId);
+          const vehicleObj = veiculos.find((v: any) => v.id === f.veiculoId);
+
+          const frete = f.freteValor !== undefined ? Number(f.freteValor) : 1850.00;
+          const ped = f.pedagios !== undefined ? Number(f.pedagios) : 120.00;
+          const diar = f.diariasBonificacoes !== undefined ? Number(f.diariasBonificacoes) : 0;
+          const acresc = f.outrosCreditos !== undefined ? Number(f.outrosCreditos) : 0;
+          const tot = frete + ped + diar + acresc;
+
+          const deliveryDate = f.dataFechamento || "2026-06-19";
+          const dParts = deliveryDate.split("-");
+          let dueDate = deliveryDate;
+          if (dParts.length === 3) {
+            const d = new Date(Number(dParts[0]), Number(dParts[1]) - 1, Number(dParts[2]));
+            d.setDate(d.getDate() + 30);
+            dueDate = d.toISOString().split("T")[0];
+          }
+
+          let st: "A Receber" | "Recebido" | "Parcial" | "Vencido" | "Cancelado" | "Em Contestação" = "A Receber";
+          if (idx % 3 === 0) {
+            st = "Recebido";
+          } else if (idx % 4 === 0) {
+            st = "Parcial";
+          } else {
+            const todayStr = "2026-06-27";
+            if (dueDate < todayStr) {
+              st = "Vencido";
+            }
+          }
+
+          const newTitle = {
+            id: `REC-${f.dt || Math.floor(100000 + Math.random() * 900000)}`,
+            dt: f.dt,
+            cliente: clientName,
+            veiculoId: f.veiculoId || (vehicleObj?.placa || "AAA-0000"),
+            motoristaId: driverObj?.nome || f.motoristaId || "Motorista não identificado",
+            origem: "Goiânia - Matriz",
+            destino: "Anápolis - DF",
+            valorFrete: frete,
+            valorPedagiosReembolsaveis: ped,
+            valorDiarias: diar,
+            outrosAcrescimos: acresc,
+            valorTotal: tot,
+            dataEntrega: deliveryDate,
+            dataVencimento: dueDate,
+            status: st,
+            responsavel: f.usuarioResponsavel || "Sistema",
+            observacoes: `Gerado automaticamente a partir do faturamento da DT ${f.dt}`,
+            unidadeId: f.unidadeId || "un-go",
+            dataRecebimento: st === "Recebido" ? dueDate : (st === "Parcial" ? dueDate : undefined),
+            valorRecebido: st === "Recebido" ? tot : (st === "Parcial" ? Math.round(tot * 0.4) : undefined),
+            formaRecebimento: st === "Recebido" || st === "Parcial" ? "PIX" : undefined,
+            observacaoBaixa: st === "Recebido" || st === "Parcial" ? "Baixa automática de teste" : undefined,
+            historicoBaixas: st === "Recebido" ? [
+              {
+                data: dueDate,
+                valor: tot,
+                forma: "PIX",
+                observacao: "Baixa automática integral",
+                usuario: "financeiro@ampla.com"
+              }
+            ] : (st === "Parcial" ? [
+              {
+                data: dueDate,
+                valor: Math.round(tot * 0.4),
+                forma: "PIX",
+                observacao: "Baixa parcial de 40%",
+                usuario: "financeiro@ampla.com"
+              }
+            ] : [])
+          };
+          generated.push(newTitle);
         });
+
+        if (generated.length > 0) {
+          FileDatabase.set("contas_a_receber" as any, generated);
+          filtered = activeUnit === "Todas" ? generated : generated.filter((r: any) => r.unidadeId === activeUnit);
+        }
+      }
+
+      const fechamentos = FileDatabase.get("fechamentos_dt") || [];
+      const enriched = filtered.map((r: any) => {
+        const f = fechamentos.find((cl: any) => cl.dt === r.dt);
+        
+        // Receitas
+        const valorFrete = r.valorFrete !== undefined ? Number(r.valorFrete) : (f?.freteValor !== undefined ? Number(f.freteValor) : 1850.00);
+        const valorDisponibilidade = r.valorDisponibilidade !== undefined ? Number(r.valorDisponibilidade) : (f?.disponibilidadeValor !== undefined ? Number(f.disponibilidadeValor) : 0);
+        const valorDescarga = r.valorDescarga !== undefined ? Number(r.valorDescarga) : (f?.houveReciboDescarga === "Sim" ? Number(f?.descargaValor || 0) : 0);
+        const valorReentrega = r.valorReentrega !== undefined ? Number(r.valorReentrega) : (f?.reentregaValor !== undefined ? Number(f.reentregaValor) : 0);
+        const outrasReceitas = r.outrasReceitas !== undefined ? Number(r.outrasReceitas) : (f?.outrosCreditos !== undefined ? Number(f.outrosCreditos) : 0);
+        
+        // Custos
+        const valorVale = r.valorVale !== undefined ? Number(r.valorVale) : (f?.ocorrencias ? f.ocorrencias.filter((o: any) => o.tipo === "Falta de Mercadoria").reduce((sum: number, o: any) => sum + Number(o.valorTotal || 0), 0) : 0);
+        const valorPedagio = r.valorPedagio !== undefined ? Number(r.valorPedagio) : (f?.pedagios !== undefined ? Number(f.pedagios) : 0);
+        const valorAbastecimento = r.valorAbastecimento !== undefined ? Number(r.valorAbastecimento) : (f?.abastecimentoValor !== undefined ? Number(f.abastecimentoValor) : 0);
+        const valorDescontos = r.valorDescontos !== undefined ? Number(r.valorDescontos) : (f?.multasDescontos !== undefined ? Number(f.multasDescontos) : 0);
+        const valorChapas = r.valorChapas !== undefined ? Number(r.valorChapas) : (f?.descargaChapa !== undefined ? Number(f.descargaChapa) : 0);
+        const outrosCustos = r.outrosCustos !== undefined ? Number(r.outrosCustos) : ((f?.lavagensHospedagens || 0) + (f?.alimentacao || 0) + (f?.manutencaoOutros || 0));
+
+        const receitaTotal = valorFrete + valorDisponibilidade + valorDescarga + valorReentrega + outrasReceitas;
+        const custoTotal = valorVale + valorPedagio + valorAbastecimento + valorDescontos + valorChapas + outrosCustos;
+        const resultadoOperacional = receitaTotal - custoTotal;
+
+        return {
+          ...r,
+          valorFrete,
+          valorDisponibilidade,
+          valorDescarga,
+          valorReentrega,
+          outrasReceitas,
+          valorVale,
+          valorPedagio,
+          valorAbastecimento,
+          valorDescontos,
+          valorChapas,
+          outrosCustos,
+          receitaTotal,
+          custoTotal,
+          resultadoOperacional,
+          valorTotal: receitaTotal
+        };
       });
-      FileDatabase.set("entregas_off_nfs" as any, filteredNfs);
-      delete item.nfs;
+
+      res.json(enriched);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
     }
-
-    const updated = FileDatabase.update("entregas_off", req.params.id, item, operator);
-    const nfsList = FileDatabase.get("entregas_off_nfs" as any) || [];
-    const finalUpdated = {
-      ...updated,
-      nfs: nfsList.filter((nf: any) => nf.entrega_off_id === req.params.id)
-    };
-
-    res.json(finalUpdated);
   });
 
-  app.post("/api/entregas-off/:id/ocorrencias", (req, res) => {
-    const user = getRequestUser(req);
-    if (!user) return res.status(401).json({ error: "Não autorizado" });
+  app.post("/api/recebimentos", (req, res) => {
+    try {
+      const user = getRequestUser(req);
+      if (!user) return res.status(401).json({ error: "Não autorizado" });
 
-    const current = FileDatabase.get("entregas_off").find(x => x.id === req.params.id);
-    if (!current) return res.status(404).json({ error: "Entrega Off-Route não encontrada" });
+      const profileType = user.tipo_usuario || "";
+      if (profileType === "OPERADOR") {
+        return res.status(403).json({ error: "Você não possui nível de permissão suficiente para realizar lançamentos." });
+      }
 
-    const { tipo, descricao, data, hora } = req.body;
-    if (!tipo || !descricao) {
-      return res.status(400).json({ error: "Tipo e descrição são obrigatórios." });
+      const item = req.body;
+      const operator = user.email;
+
+      if (!item.dt || !item.cliente || !item.valorTotal) {
+        return res.status(400).json({ error: "Campos obrigatórios ausentes." });
+      }
+
+      const list = FileDatabase.get("contas_a_receber" as any) || [];
+      const newId = `REC-${item.dt}-${Math.floor(1000 + Math.random() * 9000)}`;
+      
+      const newTitle = {
+        id: newId,
+        dt: item.dt,
+        cliente: item.cliente,
+        veiculoId: item.veiculoId || "AAA-0000",
+        motoristaId: item.motoristaId || "Motorista",
+        origem: item.origem || "Goiânia",
+        destino: item.destino || "São Paulo",
+        valorFrete: Number(item.valorFrete || 0),
+        valorPedagiosReembolsaveis: Number(item.valorPedagiosReembolsaveis || 0),
+        valorDiarias: Number(item.valorDiarias || 0),
+        outrosAcrescimos: Number(item.outrosAcrescimos || 0),
+        valorTotal: Number(item.valorTotal || 0),
+        dataEntrega: item.dataEntrega || new Date().toISOString().split("T")[0],
+        dataVencimento: item.dataVencimento || new Date().toISOString().split("T")[0],
+        status: item.status || "A Receber",
+        responsavel: operator,
+        observacoes: item.observacoes || "",
+        unidadeId: user.unidadeId !== "Todas" ? user.unidadeId : (item.unidadeId || "un-go"),
+        historicoBaixas: []
+      };
+
+      list.push(newTitle);
+      FileDatabase.set("contas_a_receber" as any, list);
+
+      FileDatabase.logAudit(
+        operator,
+        "RECEBIMENTO_MANUAL_CRIADO",
+        `Lançamento manual de faturamento criado para o cliente ${item.cliente}, DT: ${item.dt}, Valor: R$ ${item.valorTotal}.`,
+        newTitle.unidadeId
+      );
+
+      res.json({ success: true, item: newTitle });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
     }
-
-    const nowObj = new Date();
-    const dStr = data || nowObj.toLocaleDateString("pt-BR");
-    const tStr = hora || nowObj.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
-
-    const occItem = {
-      id: "occ-" + Math.random().toString(36).substring(2, 9),
-      tipo,
-      descricao,
-      data: dStr,
-      hora: tStr,
-      usuario: user.nome || user.email
-    };
-
-    const occList = current.ocorrencias || [];
-    const updatedOff = {
-      ocorrencias: [occItem, ...occList]
-    } as any;
-
-    // Track as a change log
-    const logAlteracoes = current.log_alteracoes || [];
-    updatedOff.log_alteracoes = [{
-      data: dStr,
-      hora: tStr,
-      usuario: user.nome || user.email,
-      campo: "Nova Ocorrência",
-      antes: "-",
-      depois: `[${tipo}] ${descricao}`
-    }, ...logAlteracoes];
-
-    const updated = FileDatabase.update("entregas_off", req.params.id, updatedOff, user.email);
-    const nfsList = FileDatabase.get("entregas_off_nfs" as any) || [];
-    const finalUpdated = {
-      ...updated,
-      nfs: nfsList.filter((nf: any) => nf.entrega_off_id === req.params.id)
-    };
-    res.json({ success: true, updated: finalUpdated, occItem });
   });
 
-  app.post("/api/entregas-off/:id/anexos", (req, res) => {
-    const user = getRequestUser(req);
-    if (!user) return res.status(401).json({ error: "Não autorizado" });
+  app.put("/api/recebimentos/:id", (req, res) => {
+    try {
+      const user = getRequestUser(req);
+      if (!user) return res.status(401).json({ error: "Não autorizado" });
 
-    const current = FileDatabase.get("entregas_off").find(x => x.id === req.params.id);
-    if (!current) return res.status(404).json({ error: "Entrega Off-Route não encontrada" });
+      const profileType = user.tipo_usuario || "";
+      if (profileType === "OPERADOR") {
+        return res.status(403).json({ error: "Você não possui nível de permissão suficiente para editar faturamentos." });
+      }
 
-    const { url, nome, tipo } = req.body;
-    if (!url || !nome || !tipo) {
-      return res.status(400).json({ error: "Nome, tipo e URL do anexo são obrigatórios." });
+      const list = FileDatabase.get("contas_a_receber" as any) || [];
+      const idx = list.findIndex((x: any) => x.id === req.params.id);
+      if (idx === -1) return res.status(404).json({ error: "Título não localizado." });
+
+      const current = list[idx];
+      const updated = { ...current, ...req.body };
+      list[idx] = updated;
+
+      FileDatabase.set("contas_a_receber" as any, list);
+
+      FileDatabase.logAudit(
+        user.email,
+        "RECEBIMENTO_ATUALIZADO",
+        `Título faturado ${req.params.id} do cliente ${updated.cliente} foi alterado.`,
+        updated.unidadeId
+      );
+
+      res.json({ success: true, item: updated });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
     }
+  });
 
-    const nowObj = new Date();
-    const dStr = nowObj.toLocaleDateString("pt-BR");
-    const tStr = nowObj.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+  app.delete("/api/recebimentos/:id", (req, res) => {
+    try {
+      const user = getRequestUser(req);
+      if (!user) return res.status(401).json({ error: "Não autorizado" });
 
-    const anexoItem = {
-      id: "anx-" + Math.random().toString(36).substring(2, 9),
-      nome,
-      tipo,
-      url,
-      data: dStr
-    };
+      const profileType = user.tipo_usuario || "";
+      if (profileType !== "MASTER" && user.perfil !== "admin_master") {
+        return res.status(403).json({ error: "Apenas administradores MASTER podem expurgar faturamentos." });
+      }
 
-    const anexolList = current.anexos || [];
-    const updatedOff = {
-      anexos: [...anexolList, anexoItem]
-    } as any;
+      const list = FileDatabase.get("contas_a_receber" as any) || [];
+      const idx = list.findIndex((x: any) => x.id === req.params.id);
+      if (idx === -1) return res.status(404).json({ error: "Título não localizado." });
 
-    // Track as a change log
-    const logAlteracoes = current.log_alteracoes || [];
-    updatedOff.log_alteracoes = [{
-      data: dStr,
-      hora: tStr,
-      usuario: user.nome || user.email,
-      campo: "Novo Anexo",
-      antes: "-",
-      depois: `${tipo}: ${nome}`
-    }, ...logAlteracoes];
+      const deleted = list.splice(idx, 1)[0];
+      FileDatabase.set("contas_a_receber" as any, list);
 
-    const updated = FileDatabase.update("entregas_off", req.params.id, updatedOff, user.email);
-    const nfsList = FileDatabase.get("entregas_off_nfs" as any) || [];
-    const finalUpdated = {
-      ...updated,
-      nfs: nfsList.filter((nf: any) => nf.entrega_off_id === req.params.id)
-    };
-    res.json({ success: true, updated: finalUpdated, anexoItem });
+      FileDatabase.logAudit(
+        user.email,
+        "RECEBIMENTO_EXPURGADO",
+        `Título faturado ${req.params.id} do cliente ${deleted.cliente} foi expurgado sob segurança máxima.`,
+        deleted.unidadeId
+      );
+
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/recebimentos/:id/receber", (req, res) => {
+    try {
+      const user = getRequestUser(req);
+      if (!user) return res.status(401).json({ error: "Não autorizado" });
+
+      const profileType = user.tipo_usuario || "";
+      if (profileType === "OPERADOR" || profileType === "SUPERVISOR") {
+        return res.status(403).json({ error: "Nível de permissão insuficiente para efetuar baixas financeiras." });
+      }
+
+      const { data, valorRecebido, formaRecebimento, observacao } = req.body;
+      if (!data || !valorRecebido || !formaRecebimento) {
+        return res.status(400).json({ error: "Data, valor e forma de recebimento são obrigatórios." });
+      }
+
+      const list = FileDatabase.get("contas_a_receber" as any) || [];
+      const idx = list.findIndex((x: any) => x.id === req.params.id);
+      if (idx === -1) return res.status(404).json({ error: "Título não localizado." });
+
+      const current = list[idx];
+      
+      const previousPaid = (current.historicoBaixas || []).reduce((sum: number, b: any) => sum + Number(b.valor), 0);
+      const remainingBalance = Number(current.valorTotal) - previousPaid;
+      const newPaid = Number(valorRecebido);
+
+      if (newPaid <= 0) {
+        return res.status(400).json({ error: "O valor recebido deve ser maior que zero." });
+      }
+
+      if (newPaid > remainingBalance + 0.01) {
+        return res.status(400).json({ error: `Valor recebido excede o saldo em aberto de R$ ${remainingBalance.toFixed(2)}.` });
+      }
+
+      const newBaixa = {
+        data,
+        valor: newPaid,
+        forma: formaRecebimento,
+        observacao: observacao || "",
+        usuario: user.email
+      };
+
+      const newHistory = [...(current.historicoBaixas || []), newBaixa];
+      const totalPaidUpdated = previousPaid + newPaid;
+      
+      let finalStatus: "Recebido" | "Parcial" = "Parcial";
+      if (Math.abs(totalPaidUpdated - Number(current.valorTotal)) < 0.1) {
+        finalStatus = "Recebido";
+      }
+
+      const updated = {
+        ...current,
+        status: finalStatus,
+        dataRecebimento: data,
+        valorRecebido: totalPaidUpdated,
+        formaRecebimento: formaRecebimento,
+        observacaoBaixa: observacao || "",
+        historicoBaixas: newHistory
+      };
+
+      list[idx] = updated;
+      FileDatabase.set("contas_a_receber" as any, list);
+
+      FileDatabase.logAudit(
+        user.email,
+        "RECEBIMENTO_BAIXA",
+        `Baixa ${finalStatus === "Recebido" ? "total" : "parcial"} efetuada no faturamento ${current.id} do cliente ${current.cliente}. Recebeu R$ ${newPaid}.`,
+        current.unidadeId
+      );
+
+      const currentMovements = FileDatabase.get("movimentacoes_financeiras") || [];
+      const newMovement = {
+        id: `MOV-REC-${Date.now()}`,
+        pessoaId: current.cliente,
+        data: data,
+        hora: new Date().toTimeString().split(" ")[0],
+        tipo: "Crédito" as "Crédito",
+        origem: "Recebimento Cliente" as string,
+        valor: newPaid,
+        observacao: `Recebimento Ref: ${current.id} • DT: ${current.dt} • Cliente: ${current.cliente}`,
+        saldoAnterior: 0,
+        saldoPosterior: 0,
+        usuario: user.email,
+        dtId: current.dt,
+        criadoEm: new Date().toISOString()
+      };
+      currentMovements.push(newMovement);
+      FileDatabase.set("movimentacoes_financeiras", currentMovements);
+
+      res.json({ success: true, item: updated });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ----------------------------------------------------
+  // CONTAS A PAGAR / CENTRO DE PAGAMENTOS API
+  // ----------------------------------------------------
+  app.get("/api/pagamentos", (req, res) => {
+    try {
+      const user = getRequestUser(req);
+      if (!user) return res.status(401).json({ error: "Não autorizado" });
+
+      const list = FileDatabase.get("contas_a_pagar" as any) || [];
+      const activeUnit = getRequestUnitContext(req, user);
+
+      let filtered = [...list];
+      if (activeUnit !== "Todas") {
+        filtered = filtered.filter((r: any) => r.unidadeId === activeUnit);
+      }
+
+      // If contas_a_pagar is completely empty, auto-generate realistic ones from existing closed DTs (not Frota Própria)!
+      if (list.length === 0) {
+        const fechamentos = FileDatabase.get("fechamentos_dt") || [];
+        const rotas = FileDatabase.get("rotas") || [];
+        const motoristas = FileDatabase.get("motoristas") || [];
+        const veiculos = FileDatabase.get("veiculos") || [];
+        const generated: any[] = [];
+
+        fechamentos.forEach((f: any, idx: number) => {
+          const associatedRoute = rotas.find((r: any) => r.dt === f.dt);
+          const associatedVeiculo = veiculos.find((v: any) => v.id === f.veiculoId || v.placa === f.veiculoId);
+          
+          // Only create for third-party or aggregated vehicles
+          if (associatedVeiculo && associatedVeiculo.tipo === "Frota Própria") {
+            return;
+          }
+
+          const driverObj = motoristas.find((m: any) => m.id === f.motoristaId);
+          const driverName = driverObj?.nome || f.motoristaId || "Motorista";
+
+          const fretePagar = f.freteValor !== undefined ? Number(f.freteValor) : 1850.00;
+          const disp = f.disponibilidadeValor !== undefined ? Number(f.disponibilidadeValor) : 0.00;
+          const diar = f.diariasBonificacoes !== undefined ? Number(f.diariasBonificacoes) : 0.00;
+          const adiantamentosVal = f.adiantamentos !== undefined ? Number(f.adiantamentos) : 250.00;
+          const valDescontos = f.multasDescontos !== undefined ? Number(f.multasDescontos) : 0.00;
+          const payTotal = (fretePagar + disp + diar) - (adiantamentosVal + valDescontos);
+
+          const dateStr = f.dataAcerto || new Date().toISOString().split("T")[0];
+          let dueDate = dateStr;
+          try {
+            const d = new Date(dateStr + "T12:00:00");
+            d.setDate(d.getDate() + 15);
+            dueDate = d.toISOString().split("T")[0];
+          } catch (e) {}
+
+          const payableObj = {
+            id: `PAG-${f.dt}-${1000 + idx}`,
+            dt: f.dt,
+            cliente: "Heineken",
+            motoristaId: f.motoristaId || "mot-1",
+            motoristaNome: driverName,
+            veiculoId: f.veiculoId || "AAA-0000",
+            unidadeId: f.unidadeId || "un-go",
+            valorFrete: fretePagar,
+            valorDisponibilidade: disp,
+            valorDiarias: diar,
+            adiantamentos: adiantamentosVal,
+            multasDescontos: valDescontos,
+            valorTotal: payTotal,
+            status: "A Pagar",
+            dataGeracao: dateStr,
+            dataVencimento: dueDate,
+            responsavel: "sistema@ampla.com.br",
+            observacoes: `Gerado automaticamente a partir do acerto de viagem da DT ${f.dt}`,
+            historicoBaixas: []
+          };
+
+          generated.push(payableObj);
+        });
+
+        if (generated.length > 0) {
+          FileDatabase.set("contas_a_pagar" as any, generated);
+          filtered = activeUnit !== "Todas" ? generated.filter((r: any) => r.unidadeId === activeUnit) : generated;
+        }
+      }
+
+      res.json(filtered);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/pagamentos", (req, res) => {
+    try {
+      const user = getRequestUser(req);
+      if (!user) return res.status(401).json({ error: "Não autorizado" });
+
+      const profileType = user.tipo_usuario || "";
+      if (profileType === "OPERADOR") {
+        return res.status(403).json({ error: "Você não possui nível de permissão suficiente para realizar lançamentos." });
+      }
+
+      const item = req.body;
+      const operator = user.email;
+
+      if (!item.dt || !item.motoristaNome || !item.valorTotal) {
+        return res.status(400).json({ error: "Campos obrigatórios ausentes." });
+      }
+
+      const list = FileDatabase.get("contas_a_pagar" as any) || [];
+      const newId = `PAG-${item.dt}-${Math.floor(1000 + Math.random() * 9000)}`;
+
+      const newTitle = {
+        id: newId,
+        dt: item.dt,
+        cliente: item.cliente || "Heineken",
+        motoristaId: item.motoristaId || "manual",
+        motoristaNome: item.motoristaNome,
+        veiculoId: item.veiculoId || "AAA-0000",
+        unidadeId: user.unidadeId !== "Todas" ? user.unidadeId : (item.unidadeId || "un-go"),
+        valorFrete: Number(item.valorFrete || 0),
+        valorDisponibilidade: Number(item.valorDisponibilidade || 0),
+        valorDiarias: Number(item.valorDiarias || 0),
+        adiantamentos: Number(item.adiantamentos || 0),
+        multasDescontos: Number(item.multasDescontos || 0),
+        valorTotal: Number(item.valorTotal || 0),
+        status: item.status || "A Pagar",
+        dataGeracao: item.dataGeracao || new Date().toISOString().split("T")[0],
+        dataVencimento: item.dataVencimento || new Date().toISOString().split("T")[0],
+        responsavel: operator,
+        observacoes: item.observacoes || "",
+        historicoBaixas: []
+      };
+
+      list.push(newTitle);
+      FileDatabase.set("contas_a_pagar" as any, list);
+
+      FileDatabase.logAudit(
+        operator,
+        "PAGAMENTO_MANUAL_CRIADO",
+        `Lançamento manual de pagamento criado para o motorista ${item.motoristaNome}, DT: ${item.dt}, Valor: R$ ${item.valorTotal}.`,
+        newTitle.unidadeId
+      );
+
+      res.json({ success: true, item: newTitle });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.put("/api/pagamentos/:id", (req, res) => {
+    try {
+      const user = getRequestUser(req);
+      if (!user) return res.status(401).json({ error: "Não autorizado" });
+
+      const profileType = user.tipo_usuario || "";
+      if (profileType === "OPERADOR") {
+        return res.status(403).json({ error: "Você não possui nível de permissão suficiente para editar pagamentos." });
+      }
+
+      const list = FileDatabase.get("contas_a_pagar" as any) || [];
+      const idx = list.findIndex((x: any) => x.id === req.params.id);
+      if (idx === -1) return res.status(404).json({ error: "Título não localizado." });
+
+      const current = list[idx];
+      const updated = { ...current, ...req.body };
+      list[idx] = updated;
+
+      FileDatabase.set("contas_a_pagar" as any, list);
+
+      FileDatabase.logAudit(
+        user.email,
+        "PAGAMENTO_ATUALIZADO",
+        `Título a pagar ${req.params.id} do motorista ${updated.motoristaNome} foi alterado.`,
+        updated.unidadeId
+      );
+
+      res.json({ success: true, item: updated });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.delete("/api/pagamentos/:id", (req, res) => {
+    try {
+      const user = getRequestUser(req);
+      if (!user) return res.status(401).json({ error: "Não autorizado" });
+
+      const profileType = user.tipo_usuario || "";
+      if (profileType !== "MASTER" && user.perfil !== "admin_master") {
+        return res.status(403).json({ error: "Apenas administradores MASTER podem expurgar pagamentos." });
+      }
+
+      const list = FileDatabase.get("contas_a_pagar" as any) || [];
+      const idx = list.findIndex((x: any) => x.id === req.params.id);
+      if (idx === -1) return res.status(404).json({ error: "Título não localizado." });
+
+      const deleted = list.splice(idx, 1)[0];
+      FileDatabase.set("contas_a_pagar" as any, list);
+
+      FileDatabase.logAudit(
+        user.email,
+        "PAGAMENTO_EXPURGADO",
+        `Título a pagar ${req.params.id} do motorista ${deleted.motoristaNome} foi expurgado sob segurança máxima.`,
+        deleted.unidadeId
+      );
+
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/pagamentos/:id/pagar", (req, res) => {
+    try {
+      const user = getRequestUser(req);
+      if (!user) return res.status(401).json({ error: "Não autorizado" });
+
+      const profileType = user.tipo_usuario || "";
+      if (profileType === "OPERADOR" || profileType === "SUPERVISOR") {
+        return res.status(403).json({ error: "Nível de permissão insuficiente para efetuar baixas financeiras." });
+      }
+
+      const { data, valorPago, formaPagamento, observacao } = req.body;
+      if (!data || !valorPago || !formaPagamento) {
+        return res.status(400).json({ error: "Data, valor e forma de pagamento são obrigatórios." });
+      }
+
+      const list = FileDatabase.get("contas_a_pagar" as any) || [];
+      const idx = list.findIndex((x: any) => x.id === req.params.id);
+      if (idx === -1) return res.status(404).json({ error: "Título não localizado." });
+
+      const current = list[idx];
+      
+      const previousPaid = (current.historicoBaixas || []).reduce((sum: number, b: any) => sum + Number(b.valor), 0);
+      const remainingBalance = Number(current.valorTotal) - previousPaid;
+      const newPaid = Number(valorPago);
+
+      if (newPaid <= 0) {
+        return res.status(400).json({ error: "O valor pago deve ser maior que zero." });
+      }
+
+      if (newPaid > remainingBalance + 0.01) {
+        return res.status(400).json({ error: `Valor pago excede o saldo em aberto de R$ ${remainingBalance.toFixed(2)}.` });
+      }
+
+      const newBaixa = {
+        data,
+        valor: newPaid,
+        forma: formaPagamento,
+        observacao: observacao || "",
+        usuario: user.email
+      };
+
+      const newHistory = [...(current.historicoBaixas || []), newBaixa];
+      const totalPaidUpdated = previousPaid + newPaid;
+      
+      let finalStatus: "Pago" | "Parcial" = "Parcial";
+      if (Math.abs(totalPaidUpdated - Number(current.valorTotal)) < 0.1) {
+        finalStatus = "Pago";
+      }
+
+      const updated = {
+        ...current,
+        status: finalStatus,
+        dataPagamento: data,
+        valorPago: totalPaidUpdated,
+        formaPagamento: formaPagamento,
+        observacaoBaixa: observacao || "",
+        historicoBaixas: newHistory
+      };
+
+      list[idx] = updated;
+      FileDatabase.set("contas_a_pagar" as any, list);
+
+      FileDatabase.logAudit(
+        user.email,
+        "PAGAMENTO_BAIXA",
+        `Baixa ${finalStatus === "Pago" ? "total" : "parcial"} efetuada no pagamento ${current.id} do motorista ${current.motoristaNome}. Pagou R$ ${newPaid}.`,
+        current.unidadeId
+      );
+
+      const currentMovements = FileDatabase.get("movimentacoes_financeiras") || [];
+      const newMovement = {
+        id: `MOV-PAG-${Date.now()}`,
+        pessoaId: current.motoristaNome,
+        data: data,
+        hora: new Date().toTimeString().split(" ")[0],
+        tipo: "Débito" as "Débito",
+        origem: "Pagamento Motorista" as string,
+        valor: newPaid,
+        observacao: `Pagamento Ref: ${current.id} • DT: ${current.dt} • Motorista: ${current.motoristaNome}`,
+        saldoAnterior: 0,
+        saldoPosterior: 0,
+        usuario: user.email,
+        dtId: current.dt,
+        criadoEm: new Date().toISOString()
+      };
+      currentMovements.push(newMovement);
+      FileDatabase.set("movimentacoes_financeiras", currentMovements);
+
+      res.json({ success: true, item: updated });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
   });
 
   // ----------------------------------------------------
@@ -3350,6 +3758,72 @@ async function startServer() {
     );
 
     res.json({ success: true, message: "Manutenção excluída com sucesso." });
+  });
+
+  // ----------------------------------------------------
+  // ABASTECIMENTOS API
+  // ----------------------------------------------------
+  app.get("/api/abastecimentos", (req, res) => {
+    const user = getRequestUser(req);
+    if (!user) return res.status(401).json({ error: "Não autorizado" });
+    const list = FileDatabase.get("abastecimentos") || [];
+    const activeUnit = getRequestUnitContext(req, user);
+    if (activeUnit === "Todas") return res.json(list);
+    res.json(list.filter((a: any) => a.unidadeId === activeUnit));
+  });
+
+  app.post("/api/abastecimentos", (req, res) => {
+    const user = getRequestUser(req);
+    if (!user) return res.status(401).json({ error: "Não autorizado" });
+
+    const item = req.body;
+    item.id = item.id || `abs-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    const operator = user.email;
+
+    if (user.perfil !== "admin_master") {
+      item.unidadeId = user.unidadeId;
+    }
+
+    const added = FileDatabase.add("abastecimentos", item, operator);
+
+    // Log to Audit
+    const auditDetail = `Abastecimento Registrado - Veículo: ${item.placa} | Combustível: ${item.combustivel} | Litros: ${item.litros}L | Valor: R$ ${item.valor} | Posto: ${item.posto}`;
+    FileDatabase.logAudit(
+      user.email,
+      "ABASTECIMENTO_CRIADO",
+      auditDetail,
+      user.unidadeId || item.unidadeId || ""
+    );
+
+    res.json(added);
+  });
+
+  app.delete("/api/abastecimentos/:id", (req, res) => {
+    const user = getRequestUser(req);
+    if (!user) return res.status(401).json({ error: "Não autorizado" });
+
+    const currentList = FileDatabase.get("abastecimentos") || [];
+    const found = currentList.find((x: any) => x.id === req.params.id);
+    if (!found) {
+      return res.status(404).json({ error: "Abastecimento não encontrado." });
+    }
+
+    if (user.perfil !== "admin_master" && found.unidadeId !== user.unidadeId) {
+      return res.status(403).json({ error: "Você não tem permissão para excluir abastecimento de outra unidade." });
+    }
+
+    const operator = user.email;
+    FileDatabase.delete("abastecimentos", req.params.id, operator);
+
+    const auditDetail = `Abastecimento Excluído - ID: ${found.id} | Veículo: ${found.placa} | Combustível: ${found.combustivel} | Litros: ${found.litros}L | Valor: R$ ${found.valor}`;
+    FileDatabase.logAudit(
+      user.email,
+      "ABASTECIMENTO_EXCLUIDO",
+      auditDetail,
+      user.unidadeId || found.unidadeId || ""
+    );
+
+    res.json({ success: true, message: "Abastecimento excluído com sucesso." });
   });
 
   // ----------------------------------------------------
@@ -4045,6 +4519,160 @@ async function startServer() {
     res.json(filteredAlerts);
   });
 
+  // ----------------------------------------------------
+  // DOCUMENTOS CENTRAL APIs (v2.2)
+  // ----------------------------------------------------
+  app.get("/api/documentos/historico", (req, res) => {
+    try {
+      const user = getRequestUser(req);
+      if (!user) return res.status(401).json({ error: "Não autorizado" });
+      const hist = FileDatabase.get("historico_documentos" as any) || [];
+      res.json(hist);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/documentos/renovar", (req, res) => {
+    try {
+      const user = getRequestUser(req);
+      if (!user) return res.status(401).json({ error: "Não autorizado" });
+
+      const {
+        pessoaId,
+        documentoTipo,
+        novaValidade,
+        novoArquivo,
+        motivo
+      } = req.body;
+
+      if (!pessoaId || !documentoTipo) {
+        return res.status(400).json({ error: "Parâmetros pessoaId e documentoTipo são obrigatórios." });
+      }
+
+      const db = FileDatabase.getFull();
+      const motorista = db.motoristas.find((m: any) => m.id === pessoaId);
+      if (!motorista) {
+        return res.status(404).json({ error: "Profissional não encontrado." });
+      }
+
+      // Identify property names
+      let validadeProp = "";
+      let urlProp = "";
+      let statusProp = "";
+
+      switch (documentoTipo) {
+        case "CNH":
+          validadeProp = "cnhVencimento";
+          urlProp = "cnhDocumentoUrl";
+          break;
+        case "ASO":
+          validadeProp = "asoVencimento";
+          urlProp = "asoDocumentoUrl";
+          statusProp = "aso";
+          break;
+        case "Integração":
+          validadeProp = "integracaoVencimento";
+          urlProp = "integracaoDocumentoUrl";
+          statusProp = "integracao";
+          break;
+        case "Pesquisa GR":
+          validadeProp = "pesquisaVencimento";
+          urlProp = "pesquisaDocumentoUrl";
+          statusProp = "pesquisa";
+          break;
+        case "MOPP":
+          validadeProp = "moppVencimento";
+          urlProp = "moppDocumentoUrl";
+          statusProp = "mopp";
+          break;
+        case "Toxicológico":
+          validadeProp = "toxicologicoVencimento";
+          urlProp = "toxicologicoDocumentoUrl";
+          statusProp = "toxicologico";
+          break;
+        case "Ficha EPI":
+          validadeProp = "fichaEpiVencimento";
+          urlProp = "fichaEpiDocumentoUrl";
+          statusProp = "fichaEpi";
+          break;
+        case "Documento Pessoal":
+          validadeProp = "documentoPessoalVencimento";
+          urlProp = "documentoPessoalDocumentoUrl";
+          statusProp = "documentoPessoal";
+          break;
+        case "Comprovante":
+          validadeProp = "comprovanteVencimento";
+          urlProp = "comprovanteDocumentoUrl";
+          statusProp = "comprovante";
+          break;
+        case "Foto":
+          validadeProp = "fotoVencimento";
+          urlProp = "fotoDocumentoUrl";
+          statusProp = "foto";
+          break;
+        default:
+          return res.status(400).json({ error: "Tipo de documento inválido." });
+      }
+
+      const arquivoAntigo = motorista[urlProp] || "Nenhum";
+      const validadeAnterior = motorista[validadeProp] || "Nenhuma";
+
+      // Perform updates
+      const updatedFields: any = {};
+      if (urlProp) {
+        updatedFields[urlProp] = novoArquivo || `${documentoTipo.toLowerCase()}_renovado.pdf`;
+      }
+      if (validadeProp && novaValidade) {
+        updatedFields[validadeProp] = novaValidade;
+      }
+      if (statusProp) {
+        updatedFields[statusProp] = "Feito";
+      }
+
+      // Update motorista
+      FileDatabase.update("motoristas", pessoaId, updatedFields, user.email);
+
+      // Create historical entry
+      const now = new Date();
+      const dateStr = now.toISOString().split("T")[0];
+      const timeStr = now.toTimeString().split(" ")[0];
+
+      const histItem = {
+        id: `hist-doc-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+        pessoaId,
+        pessoaNome: motorista.nome,
+        documentoTipo,
+        dataTroca: `${dateStr} ${timeStr}`,
+        usuarioResponsavel: user.nome || user.email,
+        arquivoAntigo,
+        arquivoNovo: novoArquivo || `${documentoTipo.toLowerCase()}_renovado.pdf`,
+        validadeAnterior,
+        novaValidade: novaValidade || "Nenhuma",
+        motivo: motivo || ""
+      };
+
+      if (!db.historico_documentos) {
+        db.historico_documentos = [];
+      }
+      db.historico_documentos.push(histItem);
+      FileDatabase.write(db);
+      FileDatabase.asyncWriteToSupabase("historico_documentos" as any, db.historico_documentos);
+
+      // Recalculate alerts & statuses
+      FileDatabase.recalculateAlerts(db);
+      FileDatabase.write(db);
+
+      res.json({
+        success: true,
+        motorista: db.motoristas.find((m: any) => m.id === pessoaId),
+        history: histItem
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // ====================================================
   // FECHAMENTO DE DT & CONTROLE DE VALES ENDPOINTS
   // ====================================================
@@ -4089,16 +4717,83 @@ async function startServer() {
         faltaValorUnit,
         faltaValorTotal,
         faltaObservacao,
-        statusFechamento
+        statusFechamento,
+        
+        // New Recibo de Descarga (AMPLA v2.2 - Fase 11)
+        houveReciboDescarga,
+        descargaCliente,
+        descargaCodigoCliente,
+        descargaNumeroNF,
+        descargaValor,
+        descargaData,
+        descargaObservacoes,
+        descargaReciboFile,
+        descargaResponsavel,
+
+        // New financial inputs
+        reentregaValor,
+        abastecimentoValor
       } = req.body;
 
       if (!dt) {
         return res.status(400).json({ error: "Número da DT é obrigatório." });
       }
 
-      // Check if already closed
+      // Protocol counter generator
+      const getNextProtocol = (): string => {
+        const closures = FileDatabase.get("fechamentos_dt") || [];
+        let maxProtocolNum = 0;
+        
+        for (const c of closures) {
+          if (c.protocoloFechamento) {
+            const pNum = parseInt(c.protocoloFechamento, 10);
+            if (!isNaN(pNum) && pNum > maxProtocolNum) {
+              maxProtocolNum = pNum;
+            }
+          }
+          if (c.historicoFechamentos) {
+            for (const h of c.historicoFechamentos) {
+              if (h.protocolo) {
+                const pNum = parseInt(h.protocolo, 10);
+                if (!isNaN(pNum) && pNum > maxProtocolNum) {
+                  maxProtocolNum = pNum;
+                }
+              }
+            }
+          }
+        }
+
+        const counterFilePath = path.join(process.cwd(), "data", "protocol_counter.json");
+        let fileCounter = 0;
+        try {
+          if (fs.existsSync(counterFilePath)) {
+            const data = JSON.parse(fs.readFileSync(counterFilePath, "utf8"));
+            if (typeof data.counter === "number") {
+              fileCounter = data.counter;
+            }
+          }
+        } catch (e) {
+          console.error("Error reading protocol counter file:", e);
+        }
+
+        const nextNum = Math.max(maxProtocolNum, fileCounter, 10540) + 1;
+
+        try {
+          const dataDir = path.join(process.cwd(), "data");
+          if (!fs.existsSync(dataDir)) {
+            fs.mkdirSync(dataDir, { recursive: true });
+          }
+          fs.writeFileSync(counterFilePath, JSON.stringify({ counter: nextNum }), "utf8");
+        } catch (e) {
+          console.error("Error writing protocol counter file:", e);
+        }
+
+        return String(nextNum).padStart(5, "0");
+      };
+
+      // Check if already closed (unless it is in EM_ABERTO status)
       const existing = (FileDatabase.get("fechamentos_dt") || []).find((c: any) => c.dt === dt);
-      if (existing) {
+      if (existing && existing.statusFechamento !== "EM_ABERTO") {
         return res.status(400).json({ error: `A DT ${dt} já se encontra fechada operacionalmente.` });
       }
 
@@ -4166,12 +4861,33 @@ async function startServer() {
         }
       }
 
-      const newClosure = {
-        id: `cl-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-        dt,
+      const nextProtocol = getNextProtocol();
+
+      const newHistoryItem = {
+        protocolo: nextProtocol,
+        acao: "FECHAMENTO",
+        usuario: user.email,
+        data: dateStr,
+        hora: timeStr,
+        motivo: existing ? "Novo fechamento após reabertura." : "Primeiro fechamento.",
+        snapshot: {
+          freteValor: req.body.freteValor !== undefined ? Number(req.body.freteValor) : 0,
+          adiantamentos: req.body.adiantamentos !== undefined ? Number(req.body.adiantamentos) : 0,
+          vales: resolvedOcorrencias.filter((o: any) => o.tipo === "Falta de Mercadoria"),
+          multasDescontos: req.body.multasDescontos !== undefined ? Number(req.body.multasDescontos) : 0,
+          statusFechamento: resolvedStatus
+        }
+      };
+
+      const history = existing ? [...(existing.historicoFechamentos || []), newHistoryItem] : [newHistoryItem];
+
+      const closureData = {
         dataFechamento: dateStr,
         horaFechamento: timeStr,
         usuarioResponsavel: user.email,
+        usuarioFechamento: user.email,
+        protocoloFechamento: nextProtocol,
+        historicoFechamentos: history,
         motoristaId,
         veiculoId,
         unidadeId,
@@ -4189,17 +4905,55 @@ async function startServer() {
         faltaValorTotal: Number(faltaValorTotal || 0),
         faltaObservacao: faltaObservacao || "",
         statusFechamento: resolvedStatus,
-        criadoEm: now.toISOString()
+        criadoEm: existing ? existing.criadoEm : now.toISOString(),
+        atualizadoEm: now.toISOString(),
+        
+        // Phase 5 financial structure fields (Bloco 1 & Bloco 2)
+        freteValor: req.body.freteValor !== undefined ? Number(req.body.freteValor) : undefined,
+        valorFaturado: req.body.valorFaturado !== undefined ? Number(req.body.valorFaturado) : undefined,
+        disponibilidadeValor: req.body.disponibilidadeValor !== undefined ? Number(req.body.disponibilidadeValor) : undefined,
+        diariasBonificacoes: req.body.diariasBonificacoes !== undefined ? Number(req.body.diariasBonificacoes) : undefined,
+        adiantamentos: req.body.adiantamentos !== undefined ? Number(req.body.adiantamentos) : undefined,
+        outrosCreditos: req.body.outrosCreditos !== undefined ? Number(req.body.outrosCreditos) : undefined,
+        multasDescontos: req.body.multasDescontos !== undefined ? Number(req.body.multasDescontos) : undefined,
+        descargaChapa: req.body.descargaChapa !== undefined ? Number(req.body.descargaChapa) : undefined,
+        pedagios: req.body.pedagios !== undefined ? Number(req.body.pedagios) : undefined,
+        lavagensHospedagens: req.body.lavagensHospedagens !== undefined ? Number(req.body.lavagensHospedagens) : undefined,
+        alimentacao: req.body.alimentacao !== undefined ? Number(req.body.alimentacao) : undefined,
+        manutencaoOutros: req.body.manutencaoOutros !== undefined ? Number(req.body.manutencaoOutros) : undefined,
+
+        // AMPLA v2.2 - Fase 11 - Descarga and financial enhancements
+        houveReciboDescarga: req.body.houveReciboDescarga || "Não",
+        descargaCliente: req.body.descargaCliente || "",
+        descargaCodigoCliente: req.body.descargaCodigoCliente || "",
+        descargaNumeroNF: req.body.descargaNumeroNF || "",
+        descargaValor: req.body.descargaValor !== undefined ? Number(req.body.descargaValor) : 0,
+        descargaData: req.body.descargaData || "",
+        descargaObservacoes: req.body.descargaObservacoes || "",
+        descargaReciboFile: req.body.descargaReciboFile || "",
+        descargaResponsavel: req.body.descargaResponsavel || "",
+        reentregaValor: req.body.reentregaValor !== undefined ? Number(req.body.reentregaValor) : 0,
+        abastecimentoValor: req.body.abastecimentoValor !== undefined ? Number(req.body.abastecimentoValor) : 0
       };
 
-      // Add closure
-      FileDatabase.add("fechamentos_dt", newClosure, user.email);
+      let finalClosure: any;
+      if (existing) {
+        finalClosure = { ...existing, ...closureData };
+        FileDatabase.update("fechamentos_dt", existing.id, closureData, user.email);
+      } else {
+        finalClosure = {
+          id: `cl-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+          dt,
+          ...closureData
+        };
+        FileDatabase.add("fechamentos_dt", finalClosure, user.email);
+      }
 
       // Audit DT closure
       FileDatabase.logAudit(
         user.email,
         "FECHAMENTO_DT_CRIADO",
-        `Fechamento residencial efetuado para a DT ${dt} com status: ${resolvedStatus}.`,
+        `Fechamento residencial efetuado para a DT ${dt} com protocolo ${nextProtocol} e status: ${resolvedStatus}.`,
         unidadeId || ""
       );
 
@@ -4262,13 +5016,338 @@ async function startServer() {
         );
       }
 
+      // FASE 7 & AMPLA v2.2 Fase 11 - Automatic accounts receivable creation/update
+      try {
+        const contas = FileDatabase.get("contas_a_receber" as any) || [];
+        const existingReceivableIndex = contas.findIndex((c: any) => c.dt === dt);
+        
+        const nfs = FileDatabase.get("notas_fiscais") || [];
+        const motoristas = FileDatabase.get("motoristas") || [];
+        
+        const associatedNf = nfs.find((nf: any) => nf.dtId === `DT-${dt}` || nf.dtId === dt);
+        const clientName = associatedNf?.cliente || (houveReciboDescarga === "Sim" && descargaCliente ? descargaCliente : "Cliente Não Definido");
+        
+        const driverObj = motoristas.find((m: any) => m.id === motoristaId);
+        const driverName = driverObj?.nome || motoristaId || "Motorista";
+
+        // Separate Client's Billing (Receivable) and Driver's Freight (Payable)
+        const valorFaturadoInput = req.body.valorFaturado !== undefined ? Number(req.body.valorFaturado) : undefined;
+        const freteFaturado = valorFaturadoInput !== undefined ? valorFaturadoInput : (req.body.freteValor !== undefined ? Number(req.body.freteValor) : 1850.00);
+
+        const fretePagar = req.body.freteValor !== undefined ? Number(req.body.freteValor) : 1850.00;
+        const ped = req.body.pedagios !== undefined ? Number(req.body.pedagios) : 0.00;
+        const diar = req.body.diariasBonificacoes !== undefined ? Number(req.body.diariasBonificacoes) : 0.00;
+        const acresc = req.body.outrosCreditos !== undefined ? Number(req.body.outrosCreditos) : 0.00;
+        const disp = req.body.disponibilidadeValor !== undefined ? Number(req.body.disponibilidadeValor) : 0.00;
+        const desc = (houveReciboDescarga === "Sim" && descargaValor) ? Number(descargaValor) : 0.00;
+        const reent = req.body.reentregaValor !== undefined ? Number(req.body.reentregaValor) : 0.00;
+
+        // Custos
+        const valVale = resolvedOcorrencias
+          .filter((o: any) => o.tipo === "Falta de Mercadoria")
+          .reduce((sum: number, o: any) => sum + Number(o.valorTotal || 0), 0);
+        const valPedagio = ped;
+        const valAbastecimento = req.body.abastecimentoValor !== undefined ? Number(req.body.abastecimentoValor) : 0.00;
+        const valDescontos = req.body.multasDescontos !== undefined ? Number(req.body.multasDescontos) : 0.00;
+        const valChapas = req.body.descargaChapa !== undefined ? Number(req.body.descargaChapa) : 0.00;
+        const valOutrosCustos = Number(req.body.lavagensHospedagens || 0) + Number(req.body.alimentacao || 0) + Number(req.body.manutencaoOutros || 0);
+
+        // Revenue is calculated based on the client's faturamento
+        const recTotal = freteFaturado + disp + desc + reent + acresc;
+        const cstTotal = valVale + valPedagio + valAbastecimento + valDescontos + valChapas + valOutrosCustos;
+        const resOperacional = recTotal - cstTotal;
+
+        const dParts = dateStr.split("-");
+        let dueDate = dateStr;
+        if (dParts.length === 3) {
+          const d = new Date(Number(dParts[0]), Number(dParts[1]) - 1, Number(dParts[2]));
+          d.setDate(d.getDate() + 30);
+          dueDate = d.toISOString().split("T")[0];
+        }
+
+        // Heineken Specificities (AJUSTE 04)
+        let finalClient = clientName;
+        let finalEmpresa = "Ampla Logística";
+        let finalOrigem = "Fechamento de DT";
+
+        if (clientName && clientName.toLowerCase().includes("heineken")) {
+          finalClient = "Heineken";
+          finalEmpresa = "Heineken Brasil";
+        }
+
+        const receivableObj = {
+          id: `REC-${dt}`,
+          dt: dt,
+          cliente: finalClient,
+          empresa: finalEmpresa,
+          veiculoId: veiculoId || "AAA-0000",
+          motoristaId: driverName,
+          origem: finalOrigem,
+          destino: "São Paulo - Capital",
+          
+          // Detailed financial fields
+          valorFrete: freteFaturado,
+          valorPedagiosReembolsaveis: ped,
+          valorDiarias: diar,
+          outrosAcrescimos: acresc,
+          valorDisponibilidade: disp,
+          valorDescarga: desc,
+          valorReentrega: reent,
+          outrasReceitas: acresc,
+          
+          valorVale: valVale,
+          valorPedagio: valPedagio,
+          valorAbastecimento: valAbastecimento,
+          valorDescontos: valDescontos,
+          valorChapas: valChapas,
+          outrosCustos: valOutrosCustos,
+          
+          receitaTotal: recTotal,
+          custoTotal: cstTotal,
+          resultadoOperacional: resOperacional,
+          valorTotal: recTotal, // Total receivable is the total revenue
+
+          dataEntrega: dateStr,
+          dataVencimento: dueDate,
+          responsavel: user.email,
+          observacoes: `Gerado automaticamente a partir do faturamento da DT ${dt}`,
+          unidadeId: unidadeId || "un-go"
+        };
+
+        if (existingReceivableIndex >= 0) {
+          // Preserve status, historicoBaixas, etc.
+          const old = contas[existingReceivableIndex];
+          contas[existingReceivableIndex] = {
+            ...old,
+            ...receivableObj,
+            status: old.status || "A Receber",
+            historicoBaixas: old.historicoBaixas || [],
+            dataRecebimento: old.dataRecebimento,
+            valorRecebido: old.valorRecebido,
+            formaRecebimento: old.formaRecebimento,
+            observacaoBaixa: old.observacaoBaixa
+          };
+          FileDatabase.set("contas_a_receber" as any, contas);
+
+          FileDatabase.logAudit(
+            user.email,
+            "RECEBIMENTO_ATUALIZADO_AUTOMATICO",
+            `Título de Contas a Receber REC-${dt} atualizado automaticamente. Receita Total: R$ ${recTotal.toFixed(2)}, Custos: R$ ${cstTotal.toFixed(2)}, Resultado: R$ ${resOperacional.toFixed(2)}.`,
+            unidadeId || ""
+          );
+        } else {
+          const newReceivable = {
+            ...receivableObj,
+            status: "A Receber",
+            historicoBaixas: []
+          };
+          contas.push(newReceivable);
+          FileDatabase.set("contas_a_receber" as any, contas);
+
+          FileDatabase.logAudit(
+            user.email,
+            "RECEBIMENTO_GERADO_AUTOMATICO",
+            `Título de Contas a Receber REC-${dt} gerado automaticamente para o cliente ${finalClient}. Receita: R$ ${recTotal.toFixed(2)}, Custos: R$ ${cstTotal.toFixed(2)}.`,
+            unidadeId || ""
+          );
+        }
+
+        // Process Contas a Pagar (AJUSTE 03)
+        const allVeiculos = FileDatabase.get("veiculos") || [];
+        const matchedVeiculo = allVeiculos.find((v: any) => v.id === veiculoId || v.placa === veiculoId);
+        const isFrotaPropria = matchedVeiculo?.tipo === "Frota Própria";
+
+        const contasPagar = FileDatabase.get("contas_a_pagar" as any) || [];
+        const existingPayableIndex = contasPagar.findIndex((c: any) => c.dt === dt);
+
+        if (isFrotaPropria) {
+          // If the vehicle is Frota Própria, do not register accounts payable.
+          // Remove any old entry for this DT.
+          if (existingPayableIndex >= 0) {
+            contasPagar.splice(existingPayableIndex, 1);
+            FileDatabase.set("contas_a_pagar" as any, contasPagar);
+            FileDatabase.logAudit(
+              user.email,
+              "PAGAMENTO_DELETADO_FROTA_PROPRIA",
+              `Título de Contas a Pagar para DT ${dt} foi removido pois o veículo é de Frota Própria.`,
+              unidadeId || ""
+            );
+          }
+        } else {
+          // Calculate payTotal = (fretePagar + disp + diar) - (adiantamentos + multasDescontos)
+          const adiantamentosVal = req.body.adiantamentos !== undefined ? Number(req.body.adiantamentos) : 0.00;
+          const payTotal = (fretePagar + disp + diar) - (adiantamentosVal + valDescontos);
+
+          const payableObj = {
+            id: `PAG-${dt}`,
+            dt: dt,
+            cliente: finalClient,
+            motoristaId: motoristaId,
+            motoristaNome: driverName,
+            veiculoId: veiculoId || "AAA-0000",
+            unidadeId: unidadeId || "un-go",
+            valorFrete: fretePagar,
+            valorDisponibilidade: disp,
+            valorDiarias: diar,
+            adiantamentos: adiantamentosVal,
+            multasDescontos: valDescontos,
+            valorTotal: payTotal,
+            status: "A Pagar",
+            dataGeracao: dateStr,
+            dataVencimento: dueDate,
+            responsavel: user.email,
+            observacoes: `Gerado automaticamente a partir do acerto de viagem da DT ${dt}`
+          };
+
+          if (existingPayableIndex >= 0) {
+            const oldP = contasPagar[existingPayableIndex];
+            contasPagar[existingPayableIndex] = {
+              ...oldP,
+              ...payableObj,
+              status: oldP.status || "A Pagar"
+            };
+          } else {
+            contasPagar.push(payableObj);
+          }
+          FileDatabase.set("contas_a_pagar" as any, contasPagar);
+
+          FileDatabase.logAudit(
+            user.email,
+            "PAGAMENTO_GERADO_AUTOMATICO",
+            `Título de Contas a Pagar PAG-${dt} gerado/atualizado automaticamente para o motorista ${driverName}. Valor Total a Pagar: R$ ${payTotal.toFixed(2)}.`,
+            unidadeId || ""
+          );
+        }
+      } catch (autoErr: any) {
+        console.error("Erro ao gerar/atualizar conta a receber/pagar automática:", autoErr);
+      }
+
       res.json({
         success: true,
-        closure: newClosure,
+        closure: finalClosure,
         generatedVales: generatedValesCount
       });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/fechamentos_dt/reabrir", (req, res) => {
+    try {
+      const user = getRequestUser(req);
+      if (!user) return res.status(401).json({ error: "Não autorizado" });
+
+      const { dt, motivo, protocolo } = req.body;
+      if (!dt) {
+        return res.status(400).json({ error: "Número da DT é obrigatório." });
+      }
+      if (!motivo || !motivo.trim()) {
+        return res.status(400).json({ error: "Motivo da reabertura é obrigatório." });
+      }
+      if (!protocolo || !protocolo.trim()) {
+        return res.status(400).json({ error: "Protocolo de fechamento é obrigatório para reabertura." });
+      }
+
+      // Check closure existence
+      const closures = FileDatabase.get("fechamentos_dt") || [];
+      const existing = closures.find((c: any) => c.dt === dt);
+      if (!existing) {
+        return res.status(404).json({ error: "DT não localizada." });
+      }
+
+      const cleanProtocolInput = (protocolo || "").toString().trim();
+      const savedProtocolVal = (existing.protocoloFechamento || "").toString().trim();
+
+      let isProtocolValid = false;
+
+      // 1. Direct exact comparison
+      if (cleanProtocolInput === savedProtocolVal) {
+        isProtocolValid = true;
+      }
+      
+      // 2. Numeric comparison (e.g. "00001" vs "1" or "00010541" vs "10541")
+      if (!isProtocolValid) {
+        const intInput = parseInt(cleanProtocolInput, 10);
+        const intSaved = parseInt(savedProtocolVal, 10);
+        if (!isNaN(intInput) && !isNaN(intSaved) && intInput === intSaved) {
+          isProtocolValid = true;
+        }
+      }
+
+      // 3. Fallback comparison: if stored is "N/A" or empty, and user typed "10541" (the UI fallback)
+      if (!isProtocolValid && (savedProtocolVal === "" || savedProtocolVal === "N/A")) {
+        const intInput = parseInt(cleanProtocolInput, 10);
+        if (cleanProtocolInput === "10541" || intInput === 10541) {
+          isProtocolValid = true;
+        }
+      }
+
+      if (!isProtocolValid) {
+        return res.status(400).json({ error: "Protocolo inválido." });
+      }
+
+      if (existing.statusFechamento === "EM_ABERTO") {
+        return res.status(400).json({ error: `A DT ${dt} já está em aberto.` });
+      }
+
+      // Permissions check:
+      // MASTER: Can re-open any DT.
+      const isMaster = user.perfil === "admin_master" || user.tipo_usuario === "MASTER";
+
+      if (!isMaster) {
+        return res.status(403).json({ error: "Apenas usuários MASTER podem reabrir DTs finalizadas." });
+      }
+
+      // Prepare reopening history item
+      const now = new Date();
+      const dateStr = now.toISOString().split("T")[0];
+      const timeStr = now.toTimeString().split(" ")[0];
+
+      const reopeningEvent = {
+        protocolo: existing.protocoloFechamento || "N/A",
+        acao: "REABERTURA",
+        usuario: user.email,
+        data: dateStr,
+        hora: timeStr,
+        motivo: motivo
+      };
+
+      const history = [...(existing.historicoFechamentos || []), reopeningEvent];
+
+      // Update closure record status to EM_ABERTO
+      FileDatabase.update("fechamentos_dt", existing.id, {
+        statusFechamento: "EM_ABERTO",
+        historicoFechamentos: history,
+        atualizadoEm: now.toISOString()
+      }, user.email);
+
+      // Change Rota status back to "Em rota" so it can be closed again
+      const foundRota = (FileDatabase.get("rotas") || []).find((r: any) => r.dt === dt);
+      if (foundRota) {
+        FileDatabase.update("rotas", foundRota.id, {
+          status: "Em rota",
+          status_viagem: undefined
+        }, user.email);
+        
+        FileDatabase.logAudit(
+          user.email,
+          "ROTA_REABERTA",
+          `DT ${dt} reaberta operacionalmente. Status alterado de volta para 'Em rota'.`,
+          existing.unidadeId || ""
+        );
+      }
+
+      // Log audit
+      FileDatabase.logAudit(
+        user.email,
+        "REABERTURA_DT",
+        `DT: ${dt} | Protocolo: ${existing.protocoloFechamento || "N/A"} | Usuário: ${user.email} | Data/Hora: ${dateStr} ${timeStr} | Motivo: ${motivo}`,
+        existing.unidadeId || ""
+      );
+
+      return res.json({ success: true, message: `DT ${dt} reaberta com sucesso.` });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
     }
   });
 
@@ -4516,6 +5595,547 @@ async function startServer() {
       filename,
       metadata: { uploadedAt: new Date().toISOString(), size: "2.4 MB" }
     });
+  });
+
+  // ----------------------------------------------------
+  // CENTRO FINANCEIRO DA FROTA (CONTA CORRENTE OPERACIONAL) - v2.2 REFORMULADA
+  // ----------------------------------------------------
+  function getMovementsForVehicle(db: any, veiculoId: string) {
+    const veiculo = (db.veiculos || []).find((v: any) => v.id === veiculoId);
+    if (!veiculo) return [];
+
+    const veiculoPlaca = veiculo.placa;
+    const cleanPlaca = (p: string) => p ? p.replace(/\s|-/g, "").toLowerCase() : "";
+
+    // 1. Receitas: Frete + Disponibilidade based on closed DTs (fechamentos_dt)
+    const dts = (db.fechamentos_dt || []).filter((f: any) => f.veiculoId === veiculoId);
+    
+    const autoFretes: any[] = [];
+    const autoDisps: any[] = [];
+
+    const getStandardRates = (perfil: string) => {
+      const p = (perfil || "").toLowerCase();
+      if (p.includes("van") || p.includes("utilitário") || p.includes("utilitario")) {
+        return { frete: 550.00, disp: 50.00 };
+      }
+      if (p.includes("vuc")) {
+        return { frete: 750.00, disp: 70.00 };
+      }
+      if (p.includes("3/4") || p.includes("tres quartos")) {
+        return { frete: 850.00, disp: 80.00 };
+      }
+      if (p.includes("toco")) {
+        return { frete: 1100.00, disp: 100.00 };
+      }
+      if (p.includes("truck")) {
+        return { frete: 1500.00, disp: 150.00 };
+      }
+      if (p.includes("carreta")) {
+        return { frete: 2200.00, disp: 200.00 };
+      }
+      return { frete: 1200.00, disp: 100.00 };
+    };
+
+    const rates = getStandardRates(veiculo.perfil);
+
+    dts.forEach((f: any) => {
+      // Use custom freteValor if available, otherwise fallback to standard rates
+      const freteVal = f.freteValor !== undefined && f.freteValor !== null ? Number(f.freteValor) : rates.frete;
+      const dispVal = f.disponibilidadeValor !== undefined && f.disponibilidadeValor !== null ? Number(f.disponibilidadeValor) : rates.disp;
+
+      // Frete Credit
+      autoFretes.push({
+        id: `auto-frete-${f.id || f.dt}`,
+        veiculoId,
+        data: f.dataFechamento || f.data || "2026-06-19",
+        hora: f.horaFechamento || f.hora || "12:00:00",
+        tipo: "Crédito" as const,
+        origem: "Frete",
+        valor: freteVal,
+        observacao: `Frete DT ${f.dt || "N/A"}`,
+        usuario: f.usuarioResponsavel || "Sistema",
+        dtId: f.dt,
+        criadoEm: f.criadoEm || `${f.dataFechamento || "2026-06-19"}T12:00:00.000Z`
+      });
+
+      // Disponibilidade Credit
+      autoDisps.push({
+        id: `auto-disp-${f.id || f.dt}`,
+        veiculoId,
+        data: f.dataFechamento || f.data || "2026-06-19",
+        hora: f.horaFechamento || f.hora || "12:05:00",
+        tipo: "Crédito" as const,
+        origem: "Disponibilidade",
+        valor: dispVal,
+        observacao: `Disponibilidade DT ${f.dt || "N/A"}`,
+        usuario: f.usuarioResponsavel || "Sistema",
+        dtId: f.dt,
+        criadoEm: f.criadoEm || `${f.dataFechamento || "2026-06-19"}T12:05:00.000Z`
+      });
+
+      // Diárias / Bonificações (Crédito)
+      if (f.diariasBonificacoes !== undefined && f.diariasBonificacoes !== null && Number(f.diariasBonificacoes) > 0) {
+        autoFretes.push({
+          id: `auto-diarias-bonif-${f.id || f.dt}`,
+          veiculoId,
+          data: f.dataFechamento || f.data || "2026-06-19",
+          hora: f.horaFechamento || f.hora || "12:06:00",
+          tipo: "Crédito" as const,
+          origem: "Bonificação",
+          valor: Number(f.diariasBonificacoes),
+          observacao: `Diárias / Bonificações DT ${f.dt || "N/A"}`,
+          usuario: f.usuarioResponsavel || "Sistema",
+          dtId: f.dt,
+          criadoEm: f.criadoEm || `${f.dataFechamento || "2026-06-19"}T12:06:00.000Z`
+        });
+      }
+
+      // Outros Créditos (Crédito)
+      if (f.outrosCreditos !== undefined && f.outrosCreditos !== null && Number(f.outrosCreditos) > 0) {
+        autoFretes.push({
+          id: `auto-outros-cred-${f.id || f.dt}`,
+          veiculoId,
+          data: f.dataFechamento || f.data || "2026-06-19",
+          hora: f.horaFechamento || f.hora || "12:07:00",
+          tipo: "Crédito" as const,
+          origem: "Outros Créditos",
+          valor: Number(f.outrosCreditos),
+          observacao: `Outros Créditos DT ${f.dt || "N/A"}`,
+          usuario: f.usuarioResponsavel || "Sistema",
+          dtId: f.dt,
+          criadoEm: f.criadoEm || `${f.dataFechamento || "2026-06-19"}T12:07:00.000Z`
+        });
+      }
+
+      // Adiantamentos (Débito)
+      if (f.adiantamentos !== undefined && f.adiantamentos !== null && Number(f.adiantamentos) > 0) {
+        autoFretes.push({
+          id: `auto-adiantamentos-${f.id || f.dt}`,
+          veiculoId,
+          data: f.dataFechamento || f.data || "2026-06-19",
+          hora: f.horaFechamento || f.hora || "12:08:00",
+          tipo: "Débito" as const,
+          origem: "Adiantamento",
+          valor: Number(f.adiantamentos),
+          observacao: `Adiantamento de viagem DT ${f.dt || "N/A"}`,
+          usuario: f.usuarioResponsavel || "Sistema",
+          dtId: f.dt,
+          criadoEm: f.criadoEm || `${f.dataFechamento || "2026-06-19"}T12:08:00.000Z`
+        });
+      }
+
+      // Multas / Descontos (Débito)
+      if (f.multasDescontos !== undefined && f.multasDescontos !== null && Number(f.multasDescontos) > 0) {
+        autoFretes.push({
+          id: `auto-multas-desc-${f.id || f.dt}`,
+          veiculoId,
+          data: f.dataFechamento || f.data || "2026-06-19",
+          hora: f.horaFechamento || f.hora || "12:09:00",
+          tipo: "Débito" as const,
+          origem: "Desconto",
+          valor: Number(f.multasDescontos),
+          observacao: `Multas / Descontos DT ${f.dt || "N/A"}`,
+          usuario: f.usuarioResponsavel || "Sistema",
+          dtId: f.dt,
+          criadoEm: f.criadoEm || `${f.dataFechamento || "2026-06-19"}T12:09:00.000Z`
+        });
+      }
+    });
+
+    // 2. Vales (Débito)
+    const autoVales = (db.vales || [])
+      .filter((v: any) => v.veiculoId === veiculoId)
+      .map((v: any) => ({
+        id: `auto-vale-${v.id}`,
+        veiculoId,
+        data: v.data,
+        hora: "12:10:00",
+        tipo: "Débito" as const,
+        origem: "Vale",
+        valor: Number(v.valorCobrado || v.valor || 0),
+        observacao: `Vale: ${v.produto || "Falta de mercadoria"} (DT ${v.dt || "N/A"})`,
+        usuario: v.responsavel || "Sistema",
+        valeId: v.id,
+        dtId: v.dt,
+        criadoEm: v.criadoEm || `${v.data}T12:10:00.000Z`
+      }));
+
+    // Filter by weekly closures that are "Pago" for this vehicle to mark as faturado
+    const weeklyClosures = (db.fechamentos_semanais || []).filter((w: any) => w.veiculoId === veiculoId && w.status === "Pago");
+
+    const payments = weeklyClosures.map((w: any) => ({
+      id: `payment-${w.id}`,
+      veiculoId,
+      data: w.dataPagamento || w.dataFim,
+      hora: "23:59:59", // Sort at the very end of the day
+      tipo: "Débito" as const,
+      origem: "Pagamento",
+      valor: Number(w.saldoFinal || 0),
+      observacao: `Pagamento: ${w.numeroFechamento}. Obs: ${w.observacoes || "Sem observações"}`,
+      usuario: w.criadoPor || "Sistema",
+      dtId: "",
+      criadoEm: w.criadoEm || `${w.dataPagamento || "2026-06-19"}T23:59:59.000Z`,
+      isPayment: true
+    }));
+
+    // Combine all movements (Decoupled completely from company operational costs such as Descargas and Manutencoes)
+    const allMovements = [...autoFretes, ...autoDisps, ...autoVales, ...payments];
+
+    // Sort chronologically
+    allMovements.sort((a, b) => {
+      const compDate = a.data.localeCompare(b.data);
+      if (compDate !== 0) return compDate;
+      const compTime = (a.hora || "").localeCompare(b.hora || "");
+      if (compTime !== 0) return compTime;
+      return (a.id || "").localeCompare(b.id || "");
+    });
+
+    // Sequential running balances
+    let currentBalance = 0;
+    return allMovements.map((mov) => {
+      const mDate = mov.data ? mov.data.slice(0, 10) : "";
+      const isFaturado = mov.isPayment ? true : weeklyClosures.some((w: any) => mDate >= w.dataInicio && mDate <= w.dataFim);
+
+      const isCredit = mov.tipo === "Crédito";
+      const val = Number(mov.valor || 0);
+      const saldoAnterior = currentBalance;
+      
+      if (isCredit) {
+        currentBalance += val;
+      } else {
+        currentBalance -= val;
+      }
+      
+      const saldoPosterior = currentBalance;
+      return {
+        ...mov,
+        saldoAnterior,
+        saldoPosterior,
+        faturado: isFaturado
+      };
+    });
+  }
+
+  // 1. GET ALL VEHICLE FINANCIAL ACCOUNTS
+  app.get("/api/financeiro/pessoas", (req, res) => {
+    try {
+      const user = getRequestUser(req);
+      if (!user) return res.status(401).json({ error: "Não autorizado" });
+      
+      const db = FileDatabase.getFull();
+      const veiculos = db.veiculos || [];
+      const motoristas = db.motoristas || [];
+      const activeUnit = getRequestUnitContext(req, user);
+      
+      let filtered = veiculos;
+      if (activeUnit !== "Todas") {
+        filtered = veiculos.filter((v: any) => v.unidadeId === activeUnit);
+      }
+      
+      const result = filtered.map(v => {
+        const movements = getMovementsForVehicle(db, v.id);
+        
+        // Only active/unfaturado movements count towards the current active balance period
+        const activeMovements = movements.filter((m: any) => !m.faturado);
+        const lastMov = movements[movements.length - 1];
+        
+        const creditos = activeMovements.filter(mov => mov.tipo === "Crédito").reduce((acc, mov) => acc + Number(mov.valor || 0), 0);
+        const debitos = activeMovements.filter(mov => mov.tipo === "Débito").reduce((acc, mov) => acc + Number(mov.valor || 0), 0);
+        const saldo = creditos - debitos;
+
+        // Find current driver if any
+        const motorista = motoristas.find((m: any) => m.id === v.motoristaId || m.id === v.motoristaPreferencialId);
+        
+        return {
+          id: v.id,
+          nome: `${v.modelo} (${v.placa})`,
+          placa: v.placa,
+          perfil: v.perfil || "Utilitário",
+          modelo: v.modelo,
+          marca: v.marca,
+          unidadeId: v.unidadeId,
+          motoristaNome: motorista ? motorista.nome : "Sem Motorista Vinculado",
+          statusFinanceiro: v.statusFinanceiro || "Ativo",
+          dataCriacaoContaFinanceira: v.dataCriacaoContaFinanceira || "2026-06-15",
+          saldo,
+          saldoDisponivel: v.statusFinanceiro === "Bloqueado" ? 0 : saldo,
+          creditos,
+          debitos,
+          ultimaMovimentacao: lastMov ? {
+            data: lastMov.data,
+            tipo: lastMov.tipo,
+            origem: lastMov.origem,
+            valor: lastMov.valor,
+            observacao: lastMov.observacao
+          } : null
+        };
+      });
+      
+      res.json(result);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // 1.5 GET ALL WEEKLY CLOSURES (HISTÓRICO GERAL DE PAGAMENTOS)
+  app.get("/api/financeiro/fechamentos", (req, res) => {
+    try {
+      const user = getRequestUser(req);
+      if (!user) return res.status(401).json({ error: "Não autorizado" });
+
+      const isOperator = user.perfil === "operador" || user.tipo_usuario === "OPERADOR";
+      if (isOperator) return res.status(403).json({ error: "Sem acesso" });
+
+      const db = FileDatabase.getFull();
+      const closures = db.fechamentos_semanais || [];
+      
+      const enriched = closures.map((c: any) => {
+        const veiculo = db.veiculos.find((v: any) => v.id === c.veiculoId);
+        const motorista = veiculo ? db.motoristas.find((m: any) => m.id === veiculo.motoristaId || m.id === veiculo.motoristaPreferencialId) : null;
+        return {
+          ...c,
+          veiculoModelo: veiculo ? veiculo.modelo : "N/A",
+          veiculoPlaca: veiculo ? veiculo.placa : c.placa || "N/A",
+          motoristaNome: motorista ? motorista.nome : "Sem Motorista"
+        };
+      });
+
+      res.json(enriched);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // 2. GET SINGLE VEHICLE FINANCIAL LEDGER
+  app.get("/api/financeiro/pessoas/:id/extrato", (req, res) => {
+    try {
+      const user = getRequestUser(req);
+      if (!user) return res.status(401).json({ error: "Não autorizado" });
+      
+      const { id } = req.params;
+      const db = FileDatabase.getFull();
+      const veiculo = db.veiculos.find((v: any) => v.id === id);
+      if (!veiculo) return res.status(404).json({ error: "Veículo não encontrado" });
+      
+      const movements = getMovementsForVehicle(db, id);
+      const activeMovements = movements.filter((m: any) => !m.faturado);
+      
+      const creditos = activeMovements.filter(mov => mov.tipo === "Crédito").reduce((acc, mov) => acc + Number(mov.valor || 0), 0);
+      const debitos = activeMovements.filter(mov => mov.tipo === "Débito").reduce((acc, mov) => acc + Number(mov.valor || 0), 0);
+      const saldo = creditos - debitos;
+
+      const motorista = db.motoristas.find((m: any) => m.id === veiculo.motoristaId || m.id === veiculo.motoristaPreferencialId);
+      const weeklyClosures = (db.fechamentos_semanais || []).filter((w: any) => w.veiculoId === id);
+
+      res.json({
+        pessoa: {
+          id: veiculo.id,
+          nome: `${veiculo.modelo} (${veiculo.placa})`,
+          placa: veiculo.placa,
+          perfil: veiculo.perfil || "Utilitário",
+          modelo: veiculo.modelo,
+          marca: veiculo.marca,
+          unidadeId: veiculo.unidadeId,
+          motoristaNome: motorista ? motorista.nome : "Sem Motorista Vinculado",
+          statusFinanceiro: veiculo.statusFinanceiro || "Ativo",
+          dataCriacaoContaFinanceira: veiculo.dataCriacaoContaFinanceira || "2026-06-15",
+          saldo,
+          saldoDisponivel: veiculo.statusFinanceiro === "Bloqueado" ? 0 : saldo,
+          creditos,
+          debitos
+        },
+        extrato: movements,
+        fechamentosSemanais: weeklyClosures
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // 3. POST WEEKLY CLOSURE (FECHAR SEMANA)
+  app.post("/api/financeiro/pessoas/:id/fechar-semana", (req, res) => {
+    try {
+      const user = getRequestUser(req);
+      if (!user) return res.status(401).json({ error: "Não autorizado" });
+
+      const isMaster = user.perfil === "admin_master" || user.tipo_usuario === "MASTER";
+      if (!isMaster) {
+        return res.status(403).json({ error: "Apenas usuários MASTER podem fechar pagamentos." });
+      }
+
+      const { id } = req.params;
+      const { 
+        dataInicio, 
+        dataFim, 
+        receitasFretes, 
+        receitasDisponibilidade, 
+        receitasBonificacoes,
+        receitasOutros,
+        totalReceitas, 
+        descontosVales, 
+        descontosAdiantamentos,
+        descontosGerais,
+        descontosDescargas, 
+        descontosManutencoes, 
+        descontosOutros, 
+        totalDescontos, 
+        saldoFinal,
+        formaPagamento,
+        observacoes,
+        dataPagamento,
+        horaPagamento
+      } = req.body;
+
+      if (!dataInicio || !dataFim) {
+        return res.status(400).json({ error: "Período (Início e Fim) é obrigatório." });
+      }
+
+      const db = FileDatabase.getFull();
+      const veiculo = db.veiculos.find((v: any) => v.id === id);
+      if (!veiculo) return res.status(404).json({ error: "Veículo não encontrado" });
+
+      if (!db.fechamentos_semanais) {
+        db.fechamentos_semanais = [];
+      }
+
+      // Check overlapping closures to block alterations in that period
+      const overlaps = db.fechamentos_semanais.some((w: any) => {
+        if (w.veiculoId !== id) return false;
+        return (dataInicio <= w.dataFim) && (dataFim >= w.dataInicio);
+      });
+
+      if (overlaps) {
+        return res.status(400).json({ error: "Este período de datas já possui um fechamento registrado (conflito de períodos)." });
+      }
+
+      const generatedNumber = `FC-${dataInicio.replace(/-/g, "")}-${dataFim.replace(/-/g, "")}-${Math.floor(1000 + Math.random() * 9000)}`;
+
+      const newClosure = {
+        id: `fs-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+        veiculoId: id,
+        placa: veiculo.placa,
+        dataInicio,
+        dataFim,
+        receitasFretes: Number(receitasFretes || 0),
+        receitasDisponibilidade: Number(receitasDisponibilidade || 0),
+        receitasBonificacoes: Number(receitasBonificacoes || 0),
+        receitasOutros: Number(receitasOutros || 0),
+        totalReceitas: Number(totalReceitas || 0),
+        descontosVales: Number(descontosVales || 0),
+        descontosAdiantamentos: Number(descontosAdiantamentos || 0),
+        descontosGerais: Number(descontosGerais || 0),
+        descontosDescargas: Number(descontosDescargas || 0),
+        descontosManutencoes: Number(descontosManutencoes || 0),
+        descontosOutros: Number(descontosOutros || 0),
+        totalDescontos: Number(totalDescontos || 0),
+        saldoFinal: Number(saldoFinal || 0),
+        status: "Pago" as const,
+        criadoEm: new Date().toISOString(),
+        criadoPor: user.email,
+        formaPagamento: formaPagamento || "PIX",
+        observacoes: observacoes || "",
+        numeroFechamento: generatedNumber,
+        dataPagamento: dataPagamento || new Date().toISOString().split("T")[0],
+        horaPagamento: horaPagamento || new Date().toTimeString().split(" ")[0],
+        ipAddress: req.ip || "127.0.0.1"
+      };
+
+      db.fechamentos_semanais.push(newClosure);
+      FileDatabase.write(db);
+      FileDatabase.asyncWriteToSupabase("fechamentos_semanais" as any, db.fechamentos_semanais);
+
+      FileDatabase.logAudit(
+        user.email,
+        "FIN_FECHAMENTO_SEMANAL",
+        `Fechamento semanal realizado para o veículo ${veiculo.modelo} (${veiculo.placa}) do período ${dataInicio} até ${dataFim}. Saldo pago: R$ ${Number(saldoFinal).toFixed(2)}. N° Fechamento: ${generatedNumber}.`,
+        veiculo.unidadeId || ""
+      );
+
+      res.json({ success: true, closure: newClosure });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // DELETE WEEKLY CLOSURE (EXCLUIR FECHAMENTO / REABRIR PERÍODO)
+  app.delete("/api/financeiro/pessoas/:id/fechamentos/:closureId", (req, res) => {
+    try {
+      const user = getRequestUser(req);
+      if (!user) return res.status(401).json({ error: "Não autorizado" });
+
+      const isMaster = user.perfil === "admin_master" || user.tipo_usuario === "MASTER";
+      if (!isMaster) {
+        return res.status(403).json({ error: "Apenas usuários MASTER podem reabrir períodos ou excluir fechamentos." });
+      }
+
+      const { id, closureId } = req.params;
+      const db = FileDatabase.getFull();
+      
+      const veiculo = db.veiculos.find((v: any) => v.id === id);
+      if (!veiculo) return res.status(404).json({ error: "Veículo não encontrado" });
+
+      if (!db.fechamentos_semanais) {
+        db.fechamentos_semanais = [];
+      }
+
+      const closureIndex = db.fechamentos_semanais.findIndex((w: any) => w.id === closureId && w.veiculoId === id);
+      if (closureIndex === -1) {
+        return res.status(404).json({ error: "Fechamento não encontrado" });
+      }
+
+      const deletedClosure = db.fechamentos_semanais[closureIndex];
+      db.fechamentos_semanais.splice(closureIndex, 1);
+      FileDatabase.write(db);
+      FileDatabase.asyncWriteToSupabase("fechamentos_semanais" as any, db.fechamentos_semanais);
+
+      FileDatabase.logAudit(
+        user.email,
+        "FIN_EXCLUIR_FECHAMENTO_SEMANAL",
+        `Exclusão de fechamento/reabertura de período para o veículo ${veiculo.modelo} (${veiculo.placa}) de ${deletedClosure.dataInicio} a ${deletedClosure.dataFim}. Valor estornado: R$ ${Number(deletedClosure.saldoFinal).toFixed(2)}.`,
+        veiculo.unidadeId || ""
+      );
+
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // 4. PUT UPDATE VEHICLE ACCOUNT STATUS
+  app.put("/api/financeiro/pessoas/:id/status", (req, res) => {
+    try {
+      const user = getRequestUser(req);
+      if (!user) return res.status(401).json({ error: "Não autorizado" });
+      
+      const isOperator = user.perfil === "operador" || user.tipo_usuario === "OPERADOR";
+      if (isOperator) return res.status(403).json({ error: "Sem permissão para alterar status financeiro" });
+      
+      const { id } = req.params;
+      const { statusFinanceiro } = req.body;
+      
+      if (!statusFinanceiro) {
+        return res.status(400).json({ error: "Status financeiro é obrigatório." });
+      }
+      
+      const db = FileDatabase.getFull();
+      const veiculo = db.veiculos.find((v: any) => v.id === id);
+      if (!veiculo) return res.status(404).json({ error: "Veículo não encontrado" });
+      
+      veiculo.statusFinanceiro = statusFinanceiro;
+      FileDatabase.write(db);
+      FileDatabase.asyncWriteToSupabase("veiculos", db.veiculos);
+      
+      FileDatabase.logAudit(
+        user.email,
+        "FIN_STATUS_ALTERADO",
+        `Status financeiro do veículo ${veiculo.modelo} (${veiculo.placa}) alterado para ${statusFinanceiro}.`,
+        veiculo.unidadeId || ""
+      );
+      
+      res.json({ success: true, statusFinanceiro });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
   });
 
   // ----------------------------------------------------
