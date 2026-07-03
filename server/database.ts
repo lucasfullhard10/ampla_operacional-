@@ -76,6 +76,20 @@ export interface Unidade {
   updated_at?: string;
 }
 
+export interface DocumentoHistorico {
+  id: string;
+  pessoaId: string;
+  pessoaNome: string;
+  documentoTipo: string;
+  dataTroca: string;
+  usuarioResponsavel: string;
+  arquivoAntigo?: string;
+  arquivoNovo: string;
+  validadeAnterior?: string;
+  novaValidade?: string;
+  motivo?: string;
+}
+
 export interface Motorista {
   id: string;
   nome: string;
@@ -86,12 +100,46 @@ export interface Motorista {
   asoVencimento: string;
   // Status check (Pendente / Feito)
   integracao: "Feito" | "Pendente";
-  pesquisa: "Feito" | "Pendente";
+  pesquisa: "Feito" | "Pendente" | "Reprovada";
   aso: "Feito" | "Pendente";
   fichaEpi: "Feito" | "Pendente";
   statusFinal: "LIBERADO" | "PENDENTE" | "BLOQUEADO";
+  statusConformidade?: "APTO" | "ATENÇÃO" | "CRÍTICO" | "BLOQUEADO";
+  motivoBloqueio?: string;
   cnhDocumentoUrl?: string;
   asoDocumentoUrl?: string;
+  
+  // v2.2 additions
+  tipo?: "Motorista" | "Ajudante Fixo" | "Ajudante Geral";
+  integracaoData?: string;
+  integracaoVencimento?: string;
+  integracaoDocumentoUrl?: string;
+  pesquisaVencimento?: string;
+  pesquisaDocumentoUrl?: string;
+  moppVencimento?: string;
+  moppDocumentoUrl?: string;
+  mopp?: "Feito" | "Pendente";
+  toxicologicoVencimento?: string;
+  toxicologicoDocumentoUrl?: string;
+  toxicologico?: "Feito" | "Pendente";
+  fichaEpiVencimento?: string;
+  fichaEpiDocumentoUrl?: string;
+  documentoPessoalVencimento?: string;
+  documentoPessoalDocumentoUrl?: string;
+  documentoPessoal?: "Feito" | "Pendente";
+  comprovanteVencimento?: string;
+  comprovanteDocumentoUrl?: string;
+  comprovante?: "Feito" | "Pendente";
+  fotoVencimento?: string;
+  fotoDocumentoUrl?: string;
+  foto?: "Feito" | "Pendente";
+  motoristaPreferencialId?: string;
+  motoristasVinculadosIds?: string[];
+  
+  // Financial integration fields
+  identificador_unico_financeiro?: string;
+  statusFinanceiro?: string;
+  dataCriacaoContaFinanceira?: string;
 }
 
 export interface Veiculo {
@@ -119,6 +167,19 @@ export interface Veiculo {
   proximaManutencao?: string;
   ultimaRevisao?: string;
   documentacaoStatus?: "Completa" | "Pendente";
+  motoristaPreferencialId?: string;
+  identificador_unico_financeiro?: string;
+  statusFinanceiro?: string;
+  dataCriacaoContaFinanceira?: string;
+
+  // Phase 10 additions
+  chassi?: string;
+  combustivel?: string;
+  capacidade?: string;
+  antt?: string;
+  anttVencimento?: string;
+  anttUrl?: string;
+  documentacaoObservacoes?: string;
 }
 
 export interface Disponibilidade {
@@ -182,7 +243,10 @@ export interface Rota {
   unidadeId: string;
   veiculoId: string;
   motoristaId: string;
-  tipo: "Entrega" | "Recarga" | "Reentrega";
+  ajudantesIds?: string[];
+  equipeSugeridaIds?: string[];
+  equipeUtilizadaIds?: string[];
+  tipo: "Entrega" | "Recarga" | "Reentrega" | "Entrega OFF";
   status: "Aguardando carregamento" | "Em carregamento" | "Em rota" | "Em descarga" | "Finalizada";
   status_viagem?: string;
   historico_status?: StatusLogEntry[];
@@ -194,6 +258,18 @@ export interface Rota {
   observacoes_operacionais?: string;
   ocorrencias?: OccurrenceEntry[];
   log_alteracoes?: ChangeLogEntry[];
+  
+  // Entrega OFF specific fields
+  clienteCodigo?: string;
+  clienteNome?: string;
+  clienteCNPJ?: string;
+  clienteEndereco?: string;
+  clienteCidade?: string;
+  clienteUF?: string;
+  qtdNF?: number;
+  valorTotalEntrega?: number;
+  qtdVolumes?: number;
+  observacoesEntrega?: string;
 }
 
 export interface EntregaOffNF {
@@ -271,6 +347,23 @@ export interface Manutencao {
     motor: boolean;
     lanternas: boolean;
   };
+}
+
+export interface Abastecimento {
+  id: string;
+  veiculoId: string;
+  placa: string;
+  data: string; // YYYY-MM-DD
+  motoristaId: string;
+  motoristaNome?: string;
+  litros: number;
+  valor: number;
+  posto: string;
+  combustivel: string;
+  odometro: number;
+  observacoes?: string;
+  unidadeId?: string;
+  created_at?: string;
 }
 
 export interface EstoqueEpi {
@@ -408,6 +501,25 @@ export interface ProcessoColuna {
   unidadeId?: string;
 }
 
+export interface MovimentacaoFinanceira {
+  id: string;
+  pessoaId: string;
+  data: string; // YYYY-MM-DD
+  hora: string; // HH:MM:SS
+  tipo: "Crédito" | "Débito";
+  origem: string; // Frete, Diária, Descarga, Bonificação, Acerto, Pagamento manual, Vale, Combustível, Pedágio, Multa, Desconto, Adiantamento, Reembolso, Estorno, Outros
+  valor: number;
+  observacao?: string;
+  saldoAnterior: number;
+  saldoPosterior: number;
+  usuario: string;
+  dtId?: string;
+  descargaId?: string;
+  valeId?: string;
+  estornado?: boolean;
+  criadoEm: string;
+}
+
 export interface DatabaseSchema {
   usuarios: Usuario[];
   unidades: Unidade[];
@@ -434,7 +546,13 @@ export interface DatabaseSchema {
   processo_notificacoes: ProcessoNotificacao[];
   vales: any[];
   fechamentos_dt: any[];
+  movimentacoes_financeiras?: MovimentacaoFinanceira[];
+  fechamentos_semanais?: any[];
   noshows?: any[];
+  historico_documentos?: DocumentoHistorico[];
+  contas_a_receber?: any[];
+  contas_a_pagar?: any[];
+  abastecimentos?: Abastecimento[];
 }
 
 const DEFAULT_UNIDADES: Unidade[] = [
@@ -522,7 +640,12 @@ const INITIAL_DATABASE: DatabaseSchema = {
   processo_notificacoes: [],
   vales: [],
   fechamentos_dt: [],
+  movimentacoes_financeiras: [],
   noshows: [],
+  historico_documentos: [],
+  contas_a_receber: [],
+  contas_a_pagar: [],
+  abastecimentos: [],
 };
 
 export class FileDatabase {
@@ -701,7 +824,7 @@ export class FileDatabase {
     }
   }
 
-  private static async asyncWriteToSupabase(key: string, value: any): Promise<void> {
+  public static async asyncWriteToSupabase(key: string, value: any): Promise<void> {
     const promise = (async () => {
       if (!supabase) return;
       try {
@@ -794,8 +917,24 @@ export class FileDatabase {
         schema.fechamentos_dt = [];
         updated = true;
       }
+      if (!schema.movimentacoes_financeiras) {
+        schema.movimentacoes_financeiras = [];
+        updated = true;
+      }
       if (!schema.noshows) {
         schema.noshows = [];
+        updated = true;
+      }
+      if (!schema.contas_a_receber) {
+        schema.contas_a_receber = [];
+        updated = true;
+      }
+      if (!schema.contas_a_pagar) {
+        schema.contas_a_pagar = [];
+        updated = true;
+      }
+      if (!schema.abastecimentos) {
+        schema.abastecimentos = [];
         updated = true;
       }
  
@@ -897,6 +1036,139 @@ export class FileDatabase {
         }
         return e;
       });
+
+      // Automatically migrate old entregas_off records to rotas (Registro de DT)
+      const oldOffs = schema.entregas_off || [];
+      if (oldOffs.length > 0) {
+        schema.rotas = schema.rotas || [];
+        oldOffs.forEach((e: any) => {
+          const dtVal = e.dt || "";
+          const targetId = `DT-${dtVal}` || e.id;
+          
+          // Check if already exists in rotas
+          const exists = schema.rotas.some((r: any) => r.dt === dtVal || r.id === targetId);
+          if (!exists) {
+            // Map status_entrega to Rota status
+            let rStatus = "Finalizada";
+            const se = (e.status_entrega || "").trim().toLowerCase();
+            if (se === "em rota" || se === "em rota (entregando)") {
+              rStatus = "Em rota";
+            } else if (se === "aguardando carregamento") {
+              rStatus = "Aguardando carregamento";
+            } else if (se === "em carregamento") {
+              rStatus = "Em carregamento";
+            } else if (se === "em descarga") {
+              rStatus = "Em descarga";
+            }
+            
+            // Map NFs from entregas_off_nfs
+            const nfsForThisOff = (schema.entregas_off_nfs || []).filter((nf: any) => nf.entrega_off_id === e.id);
+            const qtdNf = nfsForThisOff.length || e.qtd_nfs || 1;
+            const valorTotal = nfsForThisOff.reduce((acc: number, nf: any) => acc + (Number(nf.valor_nf) || 0), 0) || e.valor_total || 0;
+
+            const migratedRoute: any = {
+              id: targetId,
+              dt: dtVal,
+              data: e.data || new Date().toISOString().split("T")[0],
+              unidadeId: e.unidadeId || "un-go",
+              veiculoId: e.veiculoId || "",
+              motoristaId: e.motoristaId || "",
+              tipo: "Entrega OFF",
+              status: rStatus,
+              status_viagem: e.status_entrega || "Finalizada",
+              totalEntregas: qtdNf,
+              entregues: e.qtd_entregues ?? (rStatus === "Finalizada" ? qtdNf : 0),
+              devolucoes: e.qtd_devolvida ?? 0,
+              recusadas: e.qtd_recusada ?? 0,
+              dataPrevista: e.data,
+              observacoes_operacionais: e.observacoes || "",
+              ocorrencias: e.ocorrencias || [],
+              log_alteracoes: e.log_alteracoes || [],
+              anexos: e.anexos || [],
+              
+              // Entrega OFF specific fields in Rota
+              clienteCodigo: "OFF",
+              clienteNome: e.cliente || "Cliente OFF",
+              clienteCNPJ: "",
+              clienteEndereco: e.endereco || "",
+              clienteCidade: e.cidade || "",
+              clienteUF: "GO", // default
+              qtdNF: qtdNf,
+              valorTotalEntrega: valorTotal,
+              qtdVolumes: e.qtd_volumes || 0,
+              observacoesEntrega: e.observacoes || ""
+            };
+            
+            schema.rotas.push(migratedRoute);
+            backfilled = true;
+          }
+        });
+      }
+
+      // Backfill missing protocols in fechamentos_dt (AMPLA v2.2)
+      const fechamentos = schema.fechamentos_dt || [];
+      let maxProtocolNum = 10540;
+      
+      // First find the max existing protocol
+      fechamentos.forEach((c: any) => {
+        if (c.protocoloFechamento && c.protocoloFechamento !== "N/A") {
+          const pNum = parseInt(c.protocoloFechamento, 10);
+          if (!isNaN(pNum) && pNum > maxProtocolNum) {
+            maxProtocolNum = pNum;
+          }
+        }
+        if (c.historicoFechamentos) {
+          c.historicoFechamentos.forEach((h: any) => {
+            if (h.protocolo && h.protocolo !== "N/A") {
+              const pNum = parseInt(h.protocolo, 10);
+              if (!isNaN(pNum) && pNum > maxProtocolNum) {
+                maxProtocolNum = pNum;
+              }
+            }
+          });
+        }
+      });
+
+      // Now fill in any missing ones
+      fechamentos.forEach((c: any) => {
+        if (!c.protocoloFechamento || c.protocoloFechamento === "N/A") {
+          maxProtocolNum++;
+          const nextProtocol = String(maxProtocolNum).padStart(5, "0");
+          c.protocoloFechamento = nextProtocol;
+          
+          if (!c.dataFechamento) {
+            c.dataFechamento = new Date().toISOString().split("T")[0];
+          }
+          if (!c.horaFechamento) {
+            c.horaFechamento = new Date().toTimeString().split(" ")[0];
+          }
+          if (!c.usuarioFechamento) {
+            c.usuarioFechamento = c.usuarioResponsavel || "sistema";
+          }
+          
+          // Ensure first history item matches or is created
+          c.historicoFechamentos = c.historicoFechamentos || [];
+          if (c.historicoFechamentos.length === 0) {
+            c.historicoFechamentos.push({
+              protocolo: nextProtocol,
+              acao: "FECHAMENTO",
+              usuario: c.usuarioFechamento,
+              data: c.dataFechamento,
+              hora: c.horaFechamento,
+              motivo: "Primeiro fechamento (migrado)."
+            });
+          } else {
+            // Update the first FECHAMENTO event's protocol if missing
+            const firstClose = c.historicoFechamentos.find((h: any) => h.acao === "FECHAMENTO");
+            if (firstClose && (!firstClose.protocolo || firstClose.protocolo === "N/A")) {
+              firstClose.protocolo = nextProtocol;
+            }
+          }
+          
+          backfilled = true;
+        }
+      });
+
       if (backfilled) {
         updated = true;
       }
@@ -935,6 +1207,30 @@ export class FileDatabase {
       return this.cache;
     }
     const db = this.readLocalFile();
+    let changed = false;
+    if (db.motoristas) {
+      db.motoristas = db.motoristas.map(m => {
+        let updatedItem = false;
+        if (!m.tipo) {
+          m.tipo = "Motorista";
+          updatedItem = true;
+        }
+        if (!m.identificador_unico_financeiro) {
+          const sanitizedId = m.id.toUpperCase().replace(/[^A-Z0-9]/g, "");
+          m.identificador_unico_financeiro = `FIN-${sanitizedId || "PES"}-${Math.floor(100000 + Math.random() * 900000)}`;
+          m.statusFinanceiro = "Ativo";
+          m.dataCriacaoContaFinanceira = new Date().toISOString().split("T")[0];
+          updatedItem = true;
+        }
+        if (updatedItem) {
+          changed = true;
+        }
+        return m;
+      });
+    }
+    if (changed) {
+      this.writeLocalFile(db);
+    }
     this.cache = db;
     return db;
   }
@@ -947,14 +1243,14 @@ export class FileDatabase {
     }
   }
 
-  private static write(data: DatabaseSchema) {
+  public static write(data: DatabaseSchema) {
     this.cache = data;
     this.writeLocalFile(data);
   }
 
   public static get<K extends keyof DatabaseSchema>(key: K): DatabaseSchema[K] {
     const db = this.read();
-    if (key === "alertas") {
+    if (key === "alertas" || key === "motoristas") {
       this.recalculateAlerts(db);
     }
     return db[key];
@@ -1055,6 +1351,108 @@ export class FileDatabase {
   }
 
 
+  public static computeDriverStatus(m: Motorista): "LIBERADO" | "PENDENTE" | "BLOQUEADO" {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const isMotorista = m.tipo === "Motorista" || !m.tipo;
+
+    const diffInDays = (d1: string) => {
+      const date1 = new Date(d1);
+      const d1Midnight = new Date(date1.getFullYear(), date1.getMonth(), date1.getDate());
+      const todayMidnight = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+      const diffTime = d1Midnight.getTime() - todayMidnight.getTime();
+      return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    };
+
+    const cnhDays = (isMotorista && m.cnhVencimento) ? diffInDays(m.cnhVencimento) : null;
+    const asoDays = m.asoVencimento ? diffInDays(m.asoVencimento) : null;
+    const toxDays = (isMotorista && m.toxicologicoVencimento) ? diffInDays(m.toxicologicoVencimento) : null;
+    const moppDays = (isMotorista && m.moppVencimento) ? diffInDays(m.moppVencimento) : null;
+    const intDays = m.integracaoVencimento ? diffInDays(m.integracaoVencimento) : null;
+
+    const isCnhExpired = cnhDays !== null && cnhDays < 0;
+    const isAsoExpired = asoDays !== null && asoDays < 0;
+    const isToxExpired = toxDays !== null && toxDays < 0;
+    const isMoppExpired = moppDays !== null && moppDays < 0;
+    const isIntExpired = intDays !== null && intDays < 0;
+    const isPesquisaReprovada = m.pesquisa === "Reprovada";
+
+    const formatarDataBr = (val?: string) => {
+      if (!val) return "";
+      const parts = val.split("-");
+      if (parts.length === 3) {
+        return `${parts[2]}/${parts[1]}/${parts[0]}`;
+      }
+      return val;
+    };
+
+    const reasons: string[] = [];
+    if (isCnhExpired) {
+      reasons.push(`CNH vencida em ${formatarDataBr(m.cnhVencimento)}`);
+    }
+    if (isAsoExpired) {
+      reasons.push(`ASO vencido em ${formatarDataBr(m.asoVencimento)}`);
+    }
+    if (isToxExpired) {
+      reasons.push(`Exame Toxicológico vencido em ${formatarDataBr(m.toxicologicoVencimento)}`);
+    }
+    if (isMoppExpired) {
+      reasons.push(`Curso MOPP vencido em ${formatarDataBr(m.moppVencimento)}`);
+    }
+    if (isIntExpired) {
+      reasons.push(`Integração vencida em ${formatarDataBr(m.integracaoVencimento)}`);
+    }
+    if (isPesquisaReprovada) {
+      reasons.push("Pesquisa GR reprovada");
+    }
+
+    if (reasons.length > 0) {
+      m.motivoBloqueio = "BLOQUEADO — " + reasons.join(", ") + ".";
+      m.statusFinal = "BLOQUEADO";
+      m.statusConformidade = "BLOQUEADO";
+      return "BLOQUEADO";
+    }
+
+    m.motivoBloqueio = undefined;
+
+    // Check if any required field is Pendente
+    const hasPendente =
+      (isMotorista && (!m.cnhVencimento || m.cnhVencimento === "Pendente")) ||
+      (!m.asoVencimento || m.asoVencimento === "Pendente") ||
+      m.integracao === "Pendente" ||
+      m.pesquisa === "Pendente" ||
+      m.aso === "Pendente" ||
+      m.fichaEpi === "Pendente";
+
+    const statusObj: "LIBERADO" | "PENDENTE" = hasPendente ? "PENDENTE" : "LIBERADO";
+    m.statusFinal = statusObj;
+
+    // Calculate dynamic statusConformidade based on days left:
+    // 🟠 Entre 1 e 15 dias -> CRÍTICO
+    // 🟡 Entre 16 e 30 dias -> ATENÇÃO
+    // 🟢 Mais de 30 dias -> APTO
+    const activeDays: number[] = [];
+    if (cnhDays !== null) activeDays.push(cnhDays);
+    if (asoDays !== null) activeDays.push(asoDays);
+    if (toxDays !== null) activeDays.push(toxDays);
+    if (moppDays !== null) activeDays.push(moppDays);
+    if (intDays !== null) activeDays.push(intDays);
+
+    let finalConformidade: "APTO" | "ATENÇÃO" | "CRÍTICO" = "APTO";
+    if (activeDays.length > 0) {
+      const minDays = Math.min(...activeDays);
+      if (minDays >= 1 && minDays <= 15) {
+        finalConformidade = "CRÍTICO";
+      } else if (minDays >= 16 && minDays <= 30) {
+        finalConformidade = "ATENÇÃO";
+      }
+    }
+    m.statusConformidade = finalConformidade;
+
+    return statusObj;
+  }
+
   // Check expirations and append alerts dynamically
   public static recalculateAlerts(db: DatabaseSchema) {
     const now = new Date();
@@ -1067,49 +1465,151 @@ export class FileDatabase {
       return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
     };
 
-    // Evaluate motoristas: CNH e ASO
+    // Evaluate motoristas: CNH, ASO, Toxicológico, MOPP, Integração
     db.motoristas.forEach((mot) => {
-      const cnhDays = diffInDays(mot.cnhVencimento);
-      if (cnhDays < 0) {
-        alertList.push({
-          id: `al-cnh-v-${mot.id}`,
-          tipo: "CNH",
-          refId: mot.id,
-          mensagem: `CNH do motorista ${mot.nome} está VENCIDA (${mot.cnhVencimento})`,
-          severidade: "Crítica",
-          status: "Ativo",
-          dataCriacao: now.toISOString().split("T")[0],
-        });
-      } else if (cnhDays <= 30) {
-        alertList.push({
-          id: `al-cnh-w-${mot.id}`,
-          tipo: "CNH",
-          refId: mot.id,
-          mensagem: `CNH do motorista ${mot.nome} vence em ${cnhDays} dias (${mot.cnhVencimento})`,
-          severidade: "Atenção",
-          status: "Ativo",
-          dataCriacao: now.toISOString().split("T")[0],
-        });
+      // Set computed statusFinal automatically
+      mot.statusFinal = FileDatabase.computeDriverStatus(mot);
+
+      const isMotorista = mot.tipo === "Motorista" || !mot.tipo;
+
+      // CNH (only for motoristas)
+      if (isMotorista && mot.cnhVencimento) {
+        const cnhDays = diffInDays(mot.cnhVencimento);
+        if (cnhDays < 0) {
+          alertList.push({
+            id: `al-cnh-v-${mot.id}`,
+            tipo: "CNH",
+            refId: mot.id,
+            mensagem: `CNH do motorista ${mot.nome} está VENCIDA (${mot.cnhVencimento})`,
+            severidade: "Crítica",
+            status: "Ativo",
+            dataCriacao: now.toISOString().split("T")[0],
+          });
+        } else if (cnhDays <= 30) {
+          alertList.push({
+            id: `al-cnh-w-${mot.id}`,
+            tipo: "CNH",
+            refId: mot.id,
+            mensagem: `CNH do motorista ${mot.nome} vence em ${cnhDays} dias (${mot.cnhVencimento})`,
+            severidade: "Atenção",
+            status: "Ativo",
+            dataCriacao: now.toISOString().split("T")[0],
+          });
+        }
       }
 
-      const asoDays = diffInDays(mot.asoVencimento);
-      if (asoDays < 0) {
+      // ASO (all roles)
+      if (mot.asoVencimento) {
+        const asoDays = diffInDays(mot.asoVencimento);
+        if (asoDays < 0) {
+          alertList.push({
+            id: `al-aso-v-${mot.id}`,
+            tipo: "ASO",
+            refId: mot.id,
+            mensagem: `ASO do profissional ${mot.nome} está VENCIDO (${mot.asoVencimento})`,
+            severidade: "Crítica",
+            status: "Ativo",
+            dataCriacao: now.toISOString().split("T")[0],
+          });
+        } else if (asoDays <= 15) {
+          alertList.push({
+            id: `al-aso-w-${mot.id}`,
+            tipo: "ASO",
+            refId: mot.id,
+            mensagem: `ASO do profissional ${mot.nome} vence em ${asoDays} dias (${mot.asoVencimento})`,
+            severidade: "Atenção",
+            status: "Ativo",
+            dataCriacao: now.toISOString().split("T")[0],
+          });
+        }
+      }
+
+      // Toxicológico (only for motoristas)
+      if (isMotorista && mot.toxicologicoVencimento) {
+        const toxDays = diffInDays(mot.toxicologicoVencimento);
+        if (toxDays < 0) {
+          alertList.push({
+            id: `al-tox-v-${mot.id}`,
+            tipo: "CNH",
+            refId: mot.id,
+            mensagem: `Exame Toxicológico do motorista ${mot.nome} está VENCIDO (${mot.toxicologicoVencimento})`,
+            severidade: "Crítica",
+            status: "Ativo",
+            dataCriacao: now.toISOString().split("T")[0],
+          });
+        } else if (toxDays <= 30) {
+          alertList.push({
+            id: `al-tox-w-${mot.id}`,
+            tipo: "CNH",
+            refId: mot.id,
+            mensagem: `Exame Toxicológico do motorista ${mot.nome} vence em ${toxDays} dias (${mot.toxicologicoVencimento})`,
+            severidade: "Atenção",
+            status: "Ativo",
+            dataCriacao: now.toISOString().split("T")[0],
+          });
+        }
+      }
+
+      // Curso MOPP (only for motoristas)
+      if (isMotorista && mot.moppVencimento) {
+        const moppDays = diffInDays(mot.moppVencimento);
+        if (moppDays < 0) {
+          alertList.push({
+            id: `al-mopp-v-${mot.id}`,
+            tipo: "CNH",
+            refId: mot.id,
+            mensagem: `Curso MOPP do motorista ${mot.nome} está VENCIDO (${mot.moppVencimento})`,
+            severidade: "Crítica",
+            status: "Ativo",
+            dataCriacao: now.toISOString().split("T")[0],
+          });
+        } else if (moppDays <= 30) {
+          alertList.push({
+            id: `al-mopp-w-${mot.id}`,
+            tipo: "CNH",
+            refId: mot.id,
+            mensagem: `Curso MOPP do motorista ${mot.nome} vence em ${moppDays} dias (${mot.moppVencimento})`,
+            severidade: "Atenção",
+            status: "Ativo",
+            dataCriacao: now.toISOString().split("T")[0],
+          });
+        }
+      }
+
+      // Integração
+      if (mot.integracaoVencimento) {
+        const intDays = diffInDays(mot.integracaoVencimento);
+        if (intDays < 0) {
+          alertList.push({
+            id: `al-int-v-${mot.id}`,
+            tipo: "CNH",
+            refId: mot.id,
+            mensagem: `Integração do profissional ${mot.nome} está VENCIDA (${mot.integracaoVencimento})`,
+            severidade: "Crítica",
+            status: "Ativo",
+            dataCriacao: now.toISOString().split("T")[0],
+          });
+        } else if (intDays <= 15) {
+          alertList.push({
+            id: `al-int-w-${mot.id}`,
+            tipo: "CNH",
+            refId: mot.id,
+            mensagem: `Integração do profissional ${mot.nome} vence em ${intDays} dias (${mot.integracaoVencimento})`,
+            severidade: "Atenção",
+            status: "Ativo",
+            dataCriacao: now.toISOString().split("T")[0],
+          });
+        }
+      }
+
+      // Pesquisa GR status check
+      if (mot.pesquisa === "Reprovada") {
         alertList.push({
-          id: `al-aso-v-${mot.id}`,
-          tipo: "ASO",
+          id: `al-pesq-rep-${mot.id}`,
+          tipo: "CNH",
           refId: mot.id,
-          mensagem: `ASO do motorista ${mot.nome} está VENCIDO (${mot.asoVencimento})`,
+          mensagem: `Pesquisa GR de ${mot.nome} foi REPROVADA!`,
           severidade: "Crítica",
-          status: "Ativo",
-          dataCriacao: now.toISOString().split("T")[0],
-        });
-      } else if (asoDays <= 15) {
-        alertList.push({
-          id: `al-aso-w-${mot.id}`,
-          tipo: "ASO",
-          refId: mot.id,
-          mensagem: `ASO do motorista ${mot.nome} vence logo em ${asoDays} dias (${mot.asoVencimento})`,
-          severidade: "Atenção",
           status: "Ativo",
           dataCriacao: now.toISOString().split("T")[0],
         });
