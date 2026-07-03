@@ -510,10 +510,10 @@ export default function App() {
 
         <div className="flex flex-col items-center max-w-sm w-full space-y-6 relative z-10">
           <div className="flex flex-col items-center space-y-2">
-            <div className="p-3 bg-sky-500/10 border border-sky-400/20 rounded-2xl flex items-center justify-center">
-              <Truck className="w-8 h-8 text-sky-400 animate-pulse" />
+            <div className="p-1 rounded-2xl flex items-center justify-center">
+              <img src="/assets/logo.svg" className="w-16 h-16 object-contain" alt="AMPLA Logo" referrerPolicy="no-referrer" />
             </div>
-            <h1 className="text-2xl font-bold tracking-tight text-white mt-1">AMPLA</h1>
+            <h1 className="text-2xl font-bold tracking-tight text-white mt-1">SISTEMA AMPLA</h1>
             <p className="text-xs text-slate-500 font-mono uppercase tracking-widest">sistema operacional</p>
           </div>
 
@@ -711,14 +711,18 @@ export default function App() {
           <div className={`hidden md:flex items-center ${sidebarCollapsed ? "justify-center py-4" : "justify-between px-5 py-4.5"} border-b border-slate-800 shrink-0 transition-all duration-250`}>
             {!sidebarCollapsed ? (
               <div className="flex items-center gap-2.5 min-w-0">
-                <div className="w-7 h-7 bg-sky-600 rounded flex items-center justify-center font-bold text-white italic text-sm shrink-0">A</div>
+                <div className="w-8 h-8 rounded flex items-center justify-center shrink-0">
+                  <img src="/assets/logo.svg" className="w-8 h-8 object-contain" alt="SISTEMA AMPLA" referrerPolicy="no-referrer" />
+                </div>
                 <div className="min-w-0">
-                  <h1 className="text-white font-bold tracking-tight text-[11px] uppercase truncate">AMPLA</h1>
+                  <h1 className="text-white font-bold tracking-tight text-[11px] uppercase truncate">SISTEMA AMPLA</h1>
                   <span className="text-sky-400 font-normal text-[8px] block lowercase tracking-wider -mt-0.5">sistema operacional</span>
                 </div>
               </div>
             ) : (
-              <div className="w-7 h-7 bg-sky-600 rounded flex items-center justify-center font-bold text-white italic text-sm shrink-0">A</div>
+              <div className="w-8 h-8 rounded flex items-center justify-center shrink-0">
+                <img src="/assets/logo.svg" className="w-8 h-8 object-contain" alt="SISTEMA AMPLA" referrerPolicy="no-referrer" />
+              </div>
             )}
             
             <button 
