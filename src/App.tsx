@@ -1,3 +1,4 @@
+import logoAmpla from "./assets/logo.svg";
 import React, { useState, useEffect } from "react";
 import { 
   Building, Truck, Users, Calendar, Layers, Navigation, DollarSign, Hammer, 
@@ -30,6 +31,7 @@ import MasterUnidadesView from "./components/MasterUnidadesView";
 import CentralProcessos from "./components/CentralProcessos";
 import DatabaseSettingsModal from "./components/DatabaseSettingsModal";
 import CentralDocumentosView from "./components/CentralDocumentosView";
+
 
 const TAB_TITLES: Record<string, string> = {
   dashboard: "Dashboard Operativo",
@@ -511,7 +513,7 @@ export default function App() {
         <div className="flex flex-col items-center max-w-sm w-full space-y-6 relative z-10">
           <div className="flex flex-col items-center space-y-2">
             <div className="p-1 rounded-2xl flex items-center justify-center">
-              <img src="/assets/logo.svg" className="w-16 h-16 object-contain" alt="AMPLA Logo" referrerPolicy="no-referrer" />
+ <img src={logoAmpla} className="w-16 h-16 object-contain" alt="AMPLA Logo" referrerPolicy="no-referrer" />
             </div>
             <h1 className="text-2xl font-bold tracking-tight text-white mt-1">SISTEMA AMPLA</h1>
             <p className="text-xs text-slate-500 font-mono uppercase tracking-widest">sistema operacional</p>
