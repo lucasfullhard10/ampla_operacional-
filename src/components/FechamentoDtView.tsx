@@ -119,38 +119,74 @@ export default function FechamentoDtView({
     dt: string;
   }>>([]);
 
-  const handleViewAttachment = (anx: any) => {
+  const handleViewAttachment = async (anx: any) => {
     try {
-      if (anx.url.startsWith("data:")) {
+      let fileUrl = anx.url;
+      if (fileUrl && fileUrl.startsWith("/api/")) {
+        const res = await fetch(fileUrl, {
+          headers: {
+            "x-user-email": userEmail
+          }
+        });
+        if (res.ok) {
+          const data = await res.json();
+          fileUrl = data.base64;
+        } else {
+          setNotification({ type: "error", message: "Erro ao obter o documento do servidor." });
+          return;
+        }
+      }
+
+      if (fileUrl && fileUrl.startsWith("data:")) {
         const w = window.open();
         if (w) {
-          w.document.write(`<iframe src="${anx.url}" style="border:none; width:100%; height:100%;" title="${anx.nome}"></iframe>`);
+          w.document.write(`<iframe src="${fileUrl}" style="border:none; width:100%; height:100%;" title="${anx.nome}"></iframe>`);
         } else {
           const tempLink = document.createElement("a");
-          tempLink.href = anx.url;
+          tempLink.href = fileUrl;
           tempLink.target = "_blank";
           document.body.appendChild(tempLink);
           tempLink.click();
           document.body.removeChild(tempLink);
         }
-      } else {
-        window.open(anx.url, "_blank");
+      } else if (fileUrl) {
+        window.open(fileUrl, "_blank");
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
+      setNotification({ type: "error", message: `Erro ao visualizar documento: ${err.message}` });
     }
   };
 
-  const handleDownloadAttachment = (anx: any) => {
+  const handleDownloadAttachment = async (anx: any) => {
     try {
-      const tempLink = document.createElement("a");
-      tempLink.href = anx.url;
-      tempLink.download = anx.nome;
-      document.body.appendChild(tempLink);
-      tempLink.click();
-      document.body.removeChild(tempLink);
-    } catch (err) {
+      let fileUrl = anx.url;
+      if (fileUrl && fileUrl.startsWith("/api/")) {
+        const res = await fetch(fileUrl, {
+          headers: {
+            "x-user-email": userEmail
+          }
+        });
+        if (res.ok) {
+          const data = await res.json();
+          fileUrl = data.base64;
+        } else {
+          setNotification({ type: "error", message: "Erro ao baixar o documento do servidor." });
+          return;
+        }
+      }
+
+      if (fileUrl) {
+        const tempLink = document.createElement("a");
+        tempLink.href = fileUrl;
+        tempLink.download = anx.nome;
+        document.body.appendChild(tempLink);
+        tempLink.click();
+        document.body.removeChild(tempLink);
+      }
+    } catch (err: any) {
       console.error(err);
+      setNotification({ type: "error", message: `Erro ao baixar documento: ${err.message}` });
     }
   };
 

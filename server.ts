@@ -4677,18 +4677,81 @@ async function startServer() {
   // FECHAMENTO DE DT & CONTROLE DE VALES ENDPOINTS
   // ====================================================
 
+  // GET endpoint to retrieve specific attachment content on-demand
+  app.get("/api/fechamentos_dt/anexo/:id", (req, res) => {
+    try {
+      const user = getRequestUser(req);
+      if (!user) return res.status(401).json({ error: "Não autorizado" });
+
+      const { id } = req.params;
+      const data = FileDatabase.get(`anexo_conteudo_${id}` as any) as any;
+
+      if (!data || !data.base64) {
+        return res.status(404).json({ error: "Anexo não encontrado ou sem conteúdo." });
+      }
+
+      return res.json({
+        id: data.id,
+        nome: data.nome,
+        tipo: data.tipo,
+        base64: data.base64,
+        dt: data.dt,
+        usuario: data.usuario,
+        dataUpload: data.dataUpload
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.get("/api/fechamentos_dt", (req, res) => {
     try {
       const user = getRequestUser(req);
       if (!user) return res.status(401).json({ error: "Não autorizado" });
       
       const closures = FileDatabase.get("fechamentos_dt") || [];
+      
+      // Auto-migrate pre-existing Base64 attachments to separate database records
+      let migratedAny = false;
+      const migratedClosures = closures.map((c: any) => {
+        if (c.anexos && c.anexos.some((anx: any) => anx.url && anx.url.startsWith("data:"))) {
+          const updatedAnexos = c.anexos.map((anx: any) => {
+            if (anx.url && anx.url.startsWith("data:")) {
+              const attachmentId = anx.id || `anx-dt-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+              FileDatabase.set(`anexo_conteudo_${attachmentId}` as any, {
+                id: attachmentId,
+                nome: anx.nome,
+                tipo: anx.tipo,
+                base64: anx.url,
+                dt: anx.dt || c.dt,
+                dataUpload: anx.dataUpload || c.dataFechamento || new Date().toISOString(),
+                usuario: anx.usuario || c.usuarioResponsavel || "Sistema"
+              } as any);
+              migratedAny = true;
+              return {
+                ...anx,
+                id: attachmentId,
+                url: `/api/fechamentos_dt/anexo/${attachmentId}`
+              };
+            }
+            return anx;
+          });
+          return { ...c, anexos: updatedAnexos };
+        }
+        return c;
+      });
+
+      if (migratedAny) {
+        console.log("[Fechamentos DT Migration] Migrated Base64 attachment data to separate keys.");
+        FileDatabase.set("fechamentos_dt", migratedClosures);
+      }
+
       const activeUnit = getRequestUnitContext(req, user);
       
       if (activeUnit === "Todas") {
-        return res.json(closures);
+        return res.json(migratedAny ? migratedClosures : closures);
       }
-      return res.json(closures.filter((c: any) => c.unidadeId === activeUnit));
+      return res.json((migratedAny ? migratedClosures : closures).filter((c: any) => c.unidadeId === activeUnit));
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -4881,6 +4944,36 @@ async function startServer() {
 
       const history = existing ? [...(existing.historicoFechamentos || []), newHistoryItem] : [newHistoryItem];
 
+      // Process attachments separately to keep fechamentos_dt lightweight in DB and prevent payload-too-large errors on Supabase
+      const processedAnexos = (req.body.anexos || []).map((anx: any) => {
+        if (anx.url && anx.url.startsWith("data:")) {
+          const attachmentId = anx.id || `anx-dt-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+          
+          // Save the base64 content under a unique key in database
+          FileDatabase.set(`anexo_conteudo_${attachmentId}` as any, {
+            id: attachmentId,
+            nome: anx.nome,
+            tipo: anx.tipo,
+            base64: anx.url,
+            dt: anx.dt || dt,
+            dataUpload: anx.dataUpload || dateStr,
+            usuario: anx.usuario || user.email
+          } as any);
+
+          // Return metadata with URL pointing to our backend endpoint instead of embedding the massive Base64
+          return {
+            id: attachmentId,
+            nome: anx.nome,
+            tipo: anx.tipo,
+            url: `/api/fechamentos_dt/anexo/${attachmentId}`,
+            dataUpload: anx.dataUpload || dateStr,
+            usuario: anx.usuario || user.email,
+            dt: anx.dt || dt
+          };
+        }
+        return anx; // Already processed or external URL
+      });
+
       const closureData = {
         dataFechamento: dateStr,
         horaFechamento: timeStr,
@@ -4933,7 +5026,8 @@ async function startServer() {
         descargaReciboFile: req.body.descargaReciboFile || "",
         descargaResponsavel: req.body.descargaResponsavel || "",
         reentregaValor: req.body.reentregaValor !== undefined ? Number(req.body.reentregaValor) : 0,
-        abastecimentoValor: req.body.abastecimentoValor !== undefined ? Number(req.body.abastecimentoValor) : 0
+        abastecimentoValor: req.body.abastecimentoValor !== undefined ? Number(req.body.abastecimentoValor) : 0,
+        anexos: processedAnexos
       };
 
       let finalClosure: any;
