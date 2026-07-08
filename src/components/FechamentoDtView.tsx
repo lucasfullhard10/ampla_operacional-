@@ -4,7 +4,7 @@ import {
   MapPin, User, Truck, DollarSign, X, Layers, RefreshCw, AlertTriangle, 
   Calendar, Save, History, ChevronRight, Shield, Activity, ArrowLeftRight, 
   Download, TrendingUp, BarChart2, SlidersHorizontal, ShieldCheck, ClipboardCheck,
-  Receipt, Coins
+  Receipt, Coins, Eye, Image
 } from "lucide-react";
 import { Rota, Veiculo, Motorista, Unidade } from "../types";
 import { NotificationModal, ConfirmModal, NotificationType, ConfirmType } from "./NotificationModal";
@@ -108,6 +108,51 @@ export default function FechamentoDtView({
   const [descargaObservacoes, setDescargaObservacoes] = useState<string>("");
   const [descargaReciboFile, setDescargaReciboFile] = useState<string>("");
   const [descargaResponsavel, setDescargaResponsavel] = useState<string>("");
+
+  const [closureAttachments, setClosureAttachments] = useState<Array<{
+    id: string;
+    nome: string;
+    url: string;
+    tipo: string;
+    dataUpload: string;
+    usuario: string;
+    dt: string;
+  }>>([]);
+
+  const handleViewAttachment = (anx: any) => {
+    try {
+      if (anx.url.startsWith("data:")) {
+        const w = window.open();
+        if (w) {
+          w.document.write(`<iframe src="${anx.url}" style="border:none; width:100%; height:100%;" title="${anx.nome}"></iframe>`);
+        } else {
+          const tempLink = document.createElement("a");
+          tempLink.href = anx.url;
+          tempLink.target = "_blank";
+          document.body.appendChild(tempLink);
+          tempLink.click();
+          document.body.removeChild(tempLink);
+        }
+      } else {
+        window.open(anx.url, "_blank");
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleDownloadAttachment = (anx: any) => {
+    try {
+      const tempLink = document.createElement("a");
+      tempLink.href = anx.url;
+      tempLink.download = anx.nome;
+      document.body.appendChild(tempLink);
+      tempLink.click();
+      document.body.removeChild(tempLink);
+    } catch (err) {
+      console.error(err);
+    }
+  };
 
   // New financial inputs
   const [reentregaValor, setReentregaValor] = useState<number>(0);
@@ -474,6 +519,7 @@ export default function FechamentoDtView({
       setDescargaResponsavel(currentUser?.nome || userEmail || "Operador");
       setReentregaValor(0);
       setAbastecimentoValor(0);
+      setClosureAttachments([]);
 
       const alreadyClosed = fechamentosDt.find(c => c.dt === found.dt && c.statusFechamento !== "EM_ABERTO");
       if (alreadyClosed) {
@@ -538,6 +584,7 @@ export default function FechamentoDtView({
     setDescargaResponsavel(currentUser?.nome || userEmail || "Operador");
     setReentregaValor(0);
     setAbastecimentoValor(0);
+    setClosureAttachments([]);
   };
 
   // Add occurrences to current closure draft list
@@ -717,7 +764,8 @@ export default function FechamentoDtView({
           descargaReciboFile,
           descargaResponsavel,
           reentregaValor,
-          abastecimentoValor
+          abastecimentoValor,
+          anexos: closureAttachments
         })
       });
 
@@ -773,6 +821,7 @@ export default function FechamentoDtView({
         setDescargaData(new Date().toISOString().split("T")[0]);
         setDescargaObservacoes("");
         setDescargaReciboFile("");
+        setClosureAttachments([]);
         setDescargaResponsavel("");
         setReentregaValor(0);
         setAbastecimentoValor(0);
@@ -1874,6 +1923,82 @@ export default function FechamentoDtView({
                               </div>
                             </div>
 
+                            {/* DOCUMENTOS DO FECHAMENTO */}
+                            <div className="space-y-2">
+                              <h5 className="text-[10px] font-extrabold uppercase font-mono tracking-wider text-teal-400 border-b border-slate-850 pb-1 flex items-center gap-1.5">
+                                <FileText className="w-3.5 h-3.5 text-teal-400" />
+                                DOCUMENTOS DO FECHAMENTO
+                              </h5>
+                              <div className="space-y-2">
+                                {(() => {
+                                  const activeAnexos = closureObj.anexos || [];
+                                  const displayAnexos = [...activeAnexos];
+                                  if (displayAnexos.length === 0 && closureObj.descargaReciboFile) {
+                                    displayAnexos.push({
+                                      id: "fallback-recibo",
+                                      nome: closureObj.descargaReciboFile,
+                                      url: closureObj.descargaReciboFile.startsWith("data:") ? closureObj.descargaReciboFile : `https://images.unsplash.com/photo-1554224155-8d04cb21cd6c?q=80&w=1500&auto=format&fit=crop`,
+                                      tipo: closureObj.descargaReciboFile.toLowerCase().endsWith(".pdf") ? "PDF" : "IMAGEM",
+                                      dataUpload: closureObj.descargaData || closureObj.dataFechamento || new Date().toISOString(),
+                                      usuario: closureObj.usuarioFechamento || closureObj.usuarioResponsavel || "Sistema",
+                                      dt: closureObj.dt
+                                    });
+                                  }
+
+                                  if (displayAnexos.length > 0) {
+                                    return (
+                                      <div className="grid grid-cols-1 gap-2">
+                                        {displayAnexos.map((anx: any, idx: number) => {
+                                          const isPdf = anx.tipo === "PDF" || anx.nome.toLowerCase().endsWith(".pdf");
+                                          return (
+                                            <div key={idx} className="flex items-center justify-between p-2.5 bg-slate-950 rounded-lg border border-slate-850/60 font-mono text-[10px]">
+                                              <div className="flex items-center gap-2 min-w-0">
+                                                <div className="p-1.5 bg-slate-900 border border-slate-800 rounded shrink-0">
+                                                  {isPdf ? (
+                                                    <FileText className="w-4 h-4 text-red-400" />
+                                                  ) : (
+                                                    <Image className="w-4 h-4 text-emerald-400" />
+                                                  )}
+                                                </div>
+                                                <div className="min-w-0">
+                                                  <p className="text-slate-200 font-bold truncate max-w-[150px] sm:max-w-[320px]" title={anx.nome}>
+                                                    {anx.nome}
+                                                  </p>
+                                                  <p className="text-[8px] text-slate-500">
+                                                    Enviado por <span className="text-slate-400">{anx.usuario ? anx.usuario.split("@")[0] : "Sistema"}</span> em {anx.dataUpload ? anx.dataUpload.split("T")[0] : "N/A"}
+                                                  </p>
+                                                </div>
+                                              </div>
+                                              <div className="flex items-center gap-1.5 ml-2">
+                                                <button
+                                                  type="button"
+                                                  onClick={() => handleViewAttachment(anx)}
+                                                  className="px-2 py-1 bg-slate-900 hover:bg-slate-850 text-slate-300 hover:text-white border border-slate-800 rounded text-[9px] font-bold transition flex items-center gap-1 cursor-pointer font-sans"
+                                                >
+                                                  <Eye className="w-3 h-3 text-sky-400" />
+                                                  Visualizar
+                                                </button>
+                                                <button
+                                                  type="button"
+                                                  onClick={() => handleDownloadAttachment(anx)}
+                                                  className="px-2 py-1 bg-slate-900 hover:bg-slate-850 text-slate-300 hover:text-white border border-slate-800 rounded text-[9px] font-bold transition flex items-center gap-1 cursor-pointer font-sans"
+                                                >
+                                                  <Download className="w-3 h-3 text-emerald-400" />
+                                                  Baixar
+                                                </button>
+                                              </div>
+                                            </div>
+                                          );
+                                        })}
+                                      </div>
+                                    );
+                                  }
+
+                                  return <p className="text-slate-500 italic text-[10px] font-mono py-1">Nenhum documento anexado.</p>;
+                                })()}
+                              </div>
+                            </div>
+
                             {/* Timeline/History Audit Log */}
                             <div className="space-y-2 pt-1">
                               <h5 className="text-[10px] font-extrabold uppercase font-mono tracking-wider text-sky-400 border-b border-slate-850 pb-1 flex items-center gap-1.5">
@@ -2313,26 +2438,84 @@ export default function FechamentoDtView({
                             </div>
 
                             {/* Custom File Upload for receipt */}
-                            <div className="space-y-1">
-                              <label className="text-slate-400 font-mono text-[10px] uppercase block">Upload do Recibo (Imagem ou PDF)</label>
-                              <div className="border border-dashed border-slate-800 hover:border-teal-500 bg-slate-900/60 hover:bg-slate-900 rounded-lg p-3 text-center transition cursor-pointer relative">
+                            <div className="space-y-2">
+                              <label className="text-slate-400 font-mono text-[10px] uppercase block">Upload de Recibos / Comprovantes</label>
+                              <div className="border border-dashed border-slate-800 hover:border-teal-500 bg-slate-900/60 hover:bg-slate-900 rounded-lg p-4 text-center transition cursor-pointer relative">
                                 <input
                                   type="file"
                                   accept="image/*,application/pdf"
+                                  multiple
                                   onChange={(e) => {
-                                    if (e.target.files && e.target.files[0]) {
-                                      setDescargaReciboFile(e.target.files[0].name);
+                                    if (e.target.files && e.target.files.length > 0) {
+                                      Array.from(e.target.files).forEach((file: any) => {
+                                        const reader = new FileReader();
+                                        reader.onload = (event) => {
+                                          const base64Url = event.target?.result as string;
+                                          if (!base64Url) return;
+                                          
+                                          let tipo = "OUTROS";
+                                          if (file.type.includes("pdf") || file.name.toLowerCase().endsWith(".pdf")) tipo = "PDF";
+                                          else if (file.type.includes("image") || file.name.toLowerCase().endsWith(".png") || file.name.toLowerCase().endsWith(".jpg") || file.name.toLowerCase().endsWith(".jpeg")) tipo = "IMAGEM";
+
+                                          const newAnx = {
+                                            id: `anx-dt-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+                                            nome: file.name,
+                                            url: base64Url,
+                                            tipo: tipo,
+                                            dataUpload: new Date().toISOString(),
+                                            usuario: userEmail,
+                                            dt: activeSearchedDt?.dt || ""
+                                          };
+
+                                          setClosureAttachments((prev) => {
+                                            const updated = [...prev, newAnx];
+                                            setDescargaReciboFile(updated.map(x => x.nome).join(", "));
+                                            return updated;
+                                          });
+                                        };
+                                        reader.readAsDataURL(file);
+                                      });
                                     }
                                   }}
                                   className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
                                 />
                                 <div className="space-y-1">
                                   <p className="text-[11px] text-slate-300 font-bold">
-                                    {descargaReciboFile ? `✅ Selecionado: ${descargaReciboFile}` : "Clique para selecionar ou arraste o arquivo"}
+                                    Clique para selecionar ou arraste os arquivos
                                   </p>
-                                  <p className="text-[9px] text-slate-500">Suporta PNG, JPG, JPEG ou PDF</p>
+                                  <p className="text-[9px] text-slate-500">Suporta múltiplos PDFs ou imagens (PNG, JPG, JPEG)</p>
                                 </div>
                               </div>
+
+                              {/* Selected files list */}
+                              {closureAttachments.length > 0 && (
+                                <div className="space-y-1.5 mt-2 bg-slate-950 p-2.5 rounded-lg border border-slate-850">
+                                  <span className="text-[9px] text-slate-500 font-bold uppercase font-mono block">Arquivos selecionados ({closureAttachments.length}):</span>
+                                  <div className="space-y-1">
+                                    {closureAttachments.map((anx) => (
+                                      <div key={anx.id} className="flex items-center justify-between text-[10px] bg-slate-900 border border-slate-850 p-1.5 rounded">
+                                        <span className="text-slate-300 truncate max-w-[200px]" title={anx.nome}>
+                                          {anx.nome}
+                                        </span>
+                                        <button
+                                          type="button"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            setClosureAttachments((prev) => {
+                                              const filtered = prev.filter((x) => x.id !== anx.id);
+                                              setDescargaReciboFile(filtered.map(x => x.nome).join(", "));
+                                              return filtered;
+                                            });
+                                          }}
+                                          className="text-red-400 hover:text-red-300 px-1 py-0.5 rounded transition font-bold cursor-pointer font-mono"
+                                        >
+                                          Remover
+                                        </button>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
                             </div>
 
                             <div className="space-y-1">
