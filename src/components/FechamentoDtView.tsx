@@ -3724,6 +3724,81 @@ export default function FechamentoDtView({
               )}
             </div>
 
+            {/* DOCUMENTOS DO FECHAMENTO */}
+            <div className="bg-slate-950 p-4 rounded-xl border border-slate-850 text-left space-y-2">
+              <h4 className="font-bold text-white uppercase font-mono text-[10px] tracking-wider border-b border-slate-850 pb-1 flex items-center gap-1.5">
+                <FileText className="w-3.5 h-3.5 text-teal-400" /> DOCUMENTOS DO FECHAMENTO
+              </h4>
+              <div className="space-y-2">
+                {(() => {
+                  const activeAnexos = selectedClosureForDetails.anexos || [];
+                  const displayAnexos = [...activeAnexos];
+                  if (displayAnexos.length === 0 && selectedClosureForDetails.descargaReciboFile) {
+                    displayAnexos.push({
+                      id: "fallback-recibo",
+                      nome: selectedClosureForDetails.descargaReciboFile,
+                      url: selectedClosureForDetails.descargaReciboFile.startsWith("data:") ? selectedClosureForDetails.descargaReciboFile : `https://images.unsplash.com/photo-1554224155-8d04cb21cd6c?q=80&w=1500&auto=format&fit=crop`,
+                      tipo: selectedClosureForDetails.descargaReciboFile.toLowerCase().endsWith(".pdf") ? "PDF" : "IMAGEM",
+                      dataUpload: selectedClosureForDetails.descargaData || selectedClosureForDetails.dataFechamento || new Date().toISOString(),
+                      usuario: selectedClosureForDetails.usuarioFechamento || selectedClosureForDetails.usuarioResponsavel || "Sistema",
+                      dt: selectedClosureForDetails.dt
+                    });
+                  }
+
+                  if (displayAnexos.length > 0) {
+                    return (
+                      <div className="grid grid-cols-1 gap-2">
+                        {displayAnexos.map((anx: any, idx: number) => {
+                          const isPdf = anx.tipo === "PDF" || anx.nome.toLowerCase().endsWith(".pdf");
+                          return (
+                            <div key={idx} className="flex items-center justify-between p-2.5 bg-slate-900 rounded-lg border border-slate-800 font-mono text-[10px]">
+                              <div className="flex items-center gap-2 min-w-0">
+                                <div className="p-1.5 bg-slate-950 border border-slate-850 rounded shrink-0">
+                                  {isPdf ? (
+                                    <FileText className="w-4 h-4 text-red-400" />
+                                  ) : (
+                                    <Image className="w-4 h-4 text-emerald-400" />
+                                  )}
+                                </div>
+                                <div className="min-w-0">
+                                  <p className="text-slate-200 font-bold truncate max-w-[150px] sm:max-w-[320px]" title={anx.nome}>
+                                    {anx.nome}
+                                  </p>
+                                  <p className="text-[8px] text-slate-500">
+                                    Enviado por <span className="text-slate-400">{anx.usuario ? anx.usuario.split("@")[0] : "Sistema"}</span> em {anx.dataUpload ? anx.dataUpload.split("T")[0] : "N/A"}
+                                  </p>
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-1.5 ml-2">
+                                <button
+                                  type="button"
+                                  onClick={() => handleViewAttachment(anx)}
+                                  className="px-2 py-1 bg-slate-950 hover:bg-slate-850 text-slate-300 hover:text-white border border-slate-800 rounded text-[9px] font-bold transition flex items-center gap-1 cursor-pointer font-sans"
+                                >
+                                  <Eye className="w-3 h-3 text-sky-400" />
+                                  Visualizar
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleDownloadAttachment(anx)}
+                                  className="px-2 py-1 bg-slate-950 hover:bg-slate-850 text-slate-300 hover:text-white border border-slate-800 rounded text-[9px] font-bold transition flex items-center gap-1 cursor-pointer font-sans"
+                                >
+                                  <Download className="w-3 h-3 text-emerald-400" />
+                                  Baixar
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    );
+                  }
+
+                  return <p className="text-slate-500 italic text-[10px] font-mono py-1">Nenhum documento anexado.</p>;
+                })()}
+              </div>
+            </div>
+
             {/* OBSERVAÇÕES GERAIS */}
             {selectedClosureForDetails.observacoes && (
               <div className="bg-slate-950 p-4 rounded-xl border border-slate-850 text-left space-y-1">
