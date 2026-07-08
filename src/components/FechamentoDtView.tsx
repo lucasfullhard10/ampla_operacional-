@@ -119,6 +119,18 @@ export default function FechamentoDtView({
     dt: string;
   }>>([]);
 
+  const base64ToBlob = (base64: string): Blob => {
+    const parts = base64.split(";base64,");
+    const contentType = parts[0].split(":")[1];
+    const raw = window.atob(parts[1]);
+    const rawLength = raw.length;
+    const uInt8Array = new Uint8Array(rawLength);
+    for (let i = 0; i < rawLength; ++i) {
+      uInt8Array[i] = raw.charCodeAt(i);
+    }
+    return new Blob([uInt8Array], { type: contentType });
+  };
+
   const handleViewAttachment = async (anx: any) => {
     try {
       let fileUrl = anx.url;
@@ -138,16 +150,23 @@ export default function FechamentoDtView({
       }
 
       if (fileUrl && fileUrl.startsWith("data:")) {
-        const w = window.open();
-        if (w) {
-          w.document.write(`<iframe src="${fileUrl}" style="border:none; width:100%; height:100%;" title="${anx.nome}"></iframe>`);
-        } else {
-          const tempLink = document.createElement("a");
-          tempLink.href = fileUrl;
-          tempLink.target = "_blank";
-          document.body.appendChild(tempLink);
-          tempLink.click();
-          document.body.removeChild(tempLink);
+        try {
+          const blob = base64ToBlob(fileUrl);
+          const blobUrl = URL.createObjectURL(blob);
+          window.open(blobUrl, "_blank");
+        } catch (blobErr) {
+          console.error("Blob conversion failed, falling back to iframe write", blobErr);
+          const w = window.open();
+          if (w) {
+            w.document.write(`<iframe src="${fileUrl}" style="border:none; width:100%; height:100%;" title="${anx.nome}"></iframe>`);
+          } else {
+            const tempLink = document.createElement("a");
+            tempLink.href = fileUrl;
+            tempLink.target = "_blank";
+            document.body.appendChild(tempLink);
+            tempLink.click();
+            document.body.removeChild(tempLink);
+          }
         }
       } else if (fileUrl) {
         window.open(fileUrl, "_blank");
@@ -177,8 +196,17 @@ export default function FechamentoDtView({
       }
 
       if (fileUrl) {
+        let finalUrl = fileUrl;
+        if (fileUrl.startsWith("data:")) {
+          try {
+            const blob = base64ToBlob(fileUrl);
+            finalUrl = URL.createObjectURL(blob);
+          } catch (blobErr) {
+            console.error("Blob conversion failed for download", blobErr);
+          }
+        }
         const tempLink = document.createElement("a");
-        tempLink.href = fileUrl;
+        tempLink.href = finalUrl;
         tempLink.download = anx.nome;
         document.body.appendChild(tempLink);
         tempLink.click();
@@ -3832,6 +3860,74 @@ export default function FechamentoDtView({
 
                   return <p className="text-slate-500 italic text-[10px] font-mono py-1">Nenhum documento anexado.</p>;
                 })()}
+              </div>
+
+              {/* Possibilidade de anexar ou substituir o comprovante real */}
+              <div className="mt-3 pt-2.5 border-t border-slate-900/40 flex flex-col gap-1.5 font-mono text-[10px]">
+                <span className="text-slate-400 font-bold uppercase block text-[9px]">📁 Enviar / Substituir Comprovante Real:</span>
+                <div className="flex gap-2">
+                  <input
+                    type="file"
+                    accept="image/*,application/pdf"
+                    onChange={async (e) => {
+                      if (e.target.files && e.target.files.length > 0) {
+                        const file = e.target.files[0];
+                        const reader = new FileReader();
+                        reader.onload = async (event) => {
+                          const base64Url = event.target?.result as string;
+                          if (!base64Url) return;
+
+                          let tipo = "OUTROS";
+                          if (file.type.includes("pdf") || file.name.toLowerCase().endsWith(".pdf")) tipo = "PDF";
+                          else if (file.type.includes("image") || file.name.toLowerCase().endsWith(".png") || file.name.toLowerCase().endsWith(".jpg") || file.name.toLowerCase().endsWith(".jpeg")) tipo = "IMAGEM";
+
+                          try {
+                            setNotification({ type: "info", message: "Enviando comprovante para o servidor..." });
+                            const res = await fetch("/api/fechamentos_dt/adicionar_anexo", {
+                              method: "POST",
+                              headers: {
+                                "Content-Type": "application/json",
+                                "x-user-email": userEmail
+                              },
+                              body: JSON.stringify({
+                                id: selectedClosureForDetails.id,
+                                nome: file.name,
+                                url: base64Url,
+                                tipo: tipo
+                              })
+                            });
+
+                            if (res.ok) {
+                              const result = await res.json();
+                              setNotification({ type: "success", message: "Documento anexado com sucesso!" });
+                              // Update selected closure for details in local state
+                              setSelectedClosureForDetails(result.closure);
+                              // Refresh global state
+                              onRefresh();
+                            } else {
+                              const errData = await res.json();
+                              setNotification({ type: "error", message: `Erro ao salvar anexo: ${errData.error || "erro desconhecido"}` });
+                            }
+                          } catch (err: any) {
+                            setNotification({ type: "error", message: `Erro ao enviar anexo: ${err.message}` });
+                          }
+                        };
+                        reader.readAsDataURL(file);
+                      }
+                    }}
+                    className="hidden"
+                    id={`detail-anexo-upload-${selectedClosureForDetails.id}`}
+                  />
+                  <label
+                    htmlFor={`detail-anexo-upload-${selectedClosureForDetails.id}`}
+                    className="flex-1 py-1.5 px-3 bg-teal-950/45 hover:bg-teal-900 border border-teal-900/50 hover:border-teal-500 rounded-lg text-teal-350 hover:text-white text-[10px] font-extrabold uppercase font-sans text-center transition cursor-pointer"
+                  >
+                    📂 Clique para Enviar Recibo Real para esta DT
+                  </label>
+                </div>
+                <p className="text-[8px] text-slate-500 leading-normal">
+                  Se você realizou o fechamento em uma versão antiga do sistema (ou se o arquivo exibido for genérico), utilize este botão para enviar o recibo real agora.
+                </p>
               </div>
             </div>
 

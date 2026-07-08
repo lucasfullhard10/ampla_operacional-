@@ -5445,6 +5445,79 @@ async function startServer() {
     }
   });
 
+  app.post("/api/fechamentos_dt/adicionar_anexo", (req, res) => {
+    try {
+      const user = getRequestUser(req);
+      if (!user) return res.status(401).json({ error: "Não autorizado" });
+
+      const { id, nome, url, tipo } = req.body;
+      if (!id || !nome || !url) {
+        return res.status(400).json({ error: "Parâmetros inválidos (id, nome e url são obrigatórios)." });
+      }
+
+      const closures = FileDatabase.get("fechamentos_dt") || [];
+      const existingIdx = closures.findIndex((c: any) => c.id === id);
+      if (existingIdx === -1) {
+        return res.status(404).json({ error: "Fechamento de DT não localizado." });
+      }
+
+      const existing = closures[existingIdx];
+      const now = new Date();
+      const dateStr = now.toISOString().split("T")[0];
+
+      // Save base64 separately to keep DB lightweight
+      const attachmentId = `anx-dt-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+      FileDatabase.set(`anexo_conteudo_${attachmentId}` as any, {
+        id: attachmentId,
+        nome,
+        tipo: tipo || "OUTROS",
+        base64: url,
+        dt: existing.dt,
+        dataUpload: dateStr,
+        usuario: user.email
+      } as any);
+
+      const newAnxMeta = {
+        id: attachmentId,
+        nome,
+        tipo: tipo || "OUTROS",
+        url: `/api/fechamentos_dt/anexo/${attachmentId}`,
+        dataUpload: dateStr,
+        usuario: user.email,
+        dt: existing.dt
+      };
+
+      // Add to existing attachments
+      const existingAnexos = existing.anexos || [];
+      const updatedAnexos = [...existingAnexos, newAnxMeta];
+
+      // Update descargaReciboFile to list names
+      const updatedDescargaReciboFile = updatedAnexos.map((x: any) => x.nome).join(", ");
+
+      const updatedClosure = {
+        ...existing,
+        anexos: updatedAnexos,
+        descargaReciboFile: updatedDescargaReciboFile,
+        atualizadoEm: now.toISOString()
+      };
+
+      closures[existingIdx] = updatedClosure;
+      FileDatabase.set("fechamentos_dt", closures);
+
+      // Log Audit
+      FileDatabase.logAudit(
+        user.email,
+        "ANEXO_DT_ADICIONADO",
+        `Adicionado anexo '${nome}' ao fechamento da DT ${existing.dt}.`,
+        existing.unidadeId || ""
+      );
+
+      return res.json({ success: true, closure: updatedClosure });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
   app.get("/api/vales", (req, res) => {
     try {
       const user = getRequestUser(req);
