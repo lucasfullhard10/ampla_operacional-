@@ -54,7 +54,8 @@ const TAB_TITLES: Record<string, string> = {
   processos: "Painel de Processos",
   noshow: "Vistoria No-Show",
   devolucoes: "Gestão Integrada de Devoluções"
-};
+}; // <--- Chave de fechamento adicionada aqui!
+
 
 interface ErrorBoundaryProps {
   children: React.ReactNode;
