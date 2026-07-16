@@ -81,8 +81,8 @@ select option {
 
 /* Reduce paddings globally on cards and views in compact mode */
 .ultra-compact .p-6,
-.ultra-compact .md:p-6,
-.ultra-compact .lg:p-6 {
+.ultra-compact .md\:p-6,
+.ultra-compact .lg\:p-6 {
   padding: 0.9rem !important;
 }
 
@@ -136,12 +136,12 @@ select option {
 
 /* Charts and metrics boxes smaller */
 .ultra-compact .h-80,
-.ultra-compact .md:h-80 {
+.ultra-compact .md\:h-80 {
   height: 14rem !important;
 }
 
 .ultra-compact .h-96,
-.ultra-compact .md:h-96 {
+.ultra-compact .md\:h-96 {
   height: 18rem !important;
 }
 
@@ -150,15 +150,15 @@ select option {
 }
 
 .ultra-compact .text-4xl,
-.ultra-compact .md:text-4xl,
-.ultra-compact .lg:text-4xl,
+.ultra-compact .md\:text-4xl,
+.ultra-compact .lg\:text-4xl,
 .ultra-compact .text-3xl {
   font-size: 1.5rem !important;
 }
 
 .ultra-compact .text-2xl,
 .ultra-compact .text-xl,
-.ultra-compact .md:text-xl {
+.ultra-compact .md\:text-xl {
   font-size: 1.1rem !important;
 }
 
