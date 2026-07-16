@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Plus, Search, Filter, Calendar, CheckSquare, XCircle, Trash2, Eye, ShieldCheck, RefreshCw, FileText } from "lucide-react";
+import { Plus, Search, Filter, Calendar, CheckSquare, XCircle, Trash2, Eye, ShieldCheck, RefreshCw, FileText, Edit3 } from "lucide-react";
 import { DevolucaoRegistro, DevolucaoCliente, DevolucaoMotorista, DevolucaoMotivo } from "../../types";
 
 interface RegistroProps {
@@ -21,8 +21,21 @@ export default function DevolucoesRegistro({ unidades, currentUser, onRefresh }:
 
   const [isLoading, setIsLoading] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [editFormData, setEditFormData] = useState<any>(null);
   const [isDetailOpen, setIsDetailOpen] = useState(false);
   const [selectedReg, setSelectedReg] = useState<DevolucaoRegistro | null>(null);
+
+  // Autocomplete states
+  const [clientSearch, setClientSearch] = useState("");
+  const [driverSearch, setDriverSearch] = useState("");
+  const [showClientSuggestions, setShowClientSuggestions] = useState(false);
+  const [showDriverSuggestions, setShowDriverSuggestions] = useState(false);
+
+  const [editClientSearch, setEditClientSearch] = useState("");
+  const [editDriverSearch, setEditDriverSearch] = useState("");
+  const [showEditClientSuggestions, setShowEditClientSuggestions] = useState(false);
+  const [showEditDriverSuggestions, setShowEditDriverSuggestions] = useState(false);
 
   // Form states
   const [formData, setFormData] = useState({
@@ -30,6 +43,7 @@ export default function DevolucoesRegistro({ unidades, currentUser, onRefresh }:
     motoristaMatricula: "",
     motoristaNome: "",
     motoristaTelefone: "",
+    motoristaFuncao: "",
     clienteCodigo: "",
     clienteRazaoSocial: "",
     clienteNomeFantasia: "",
@@ -39,6 +53,7 @@ export default function DevolucoesRegistro({ unidades, currentUser, onRefresh }:
     canal: "Rotas",
     telefone: "",
     endereco: "",
+    areaResponsavel: "",
     numeroNF: "",
     valorNF: "",
     motivoCodigo: "Y40",
@@ -52,11 +67,15 @@ export default function DevolucoesRegistro({ unidades, currentUser, onRefresh }:
   const fetchData = async () => {
     setIsLoading(true);
     try {
+      const headers = {
+        "x-user-email": currentUser?.email || "",
+        "x-selected-unit": currentUser?.unidadeId || "Todas"
+      };
       const [resReg, resCli, resMot, resDrv] = await Promise.all([
-        fetch("/api/devolucoes/registros"),
-        fetch("/api/devolucoes/clientes"),
-        fetch("/api/devolucoes/motivos"),
-        fetch("/api/devolucoes/motoristas")
+        fetch("/api/devolucoes/registros", { headers }),
+        fetch("/api/devolucoes/clientes", { headers }),
+        fetch("/api/devolucoes/motivos", { headers }),
+        fetch("/api/devolucoes/motoristas", { headers })
       ]);
 
       if (resReg.ok) setRegistros(await resReg.json());
@@ -74,36 +93,85 @@ export default function DevolucoesRegistro({ unidades, currentUser, onRefresh }:
     fetchData();
   }, [currentUser]);
 
-  // Handle client auto-fill
-  const handleClientSelect = (codigo: string) => {
-    const cli = clientes.find(c => c.codigo === codigo);
-    if (cli) {
-      setFormData(prev => ({
-        ...prev,
-        clienteCodigo: cli.codigo,
-        clienteRazaoSocial: cli.razaoSocial,
-        clienteNomeFantasia: cli.nomeFantasia,
-        vendedor: cli.vendedor || "",
-        supervisor: cli.supervisor || "",
-        gerente: cli.gerente || "",
-        canal: cli.canalVenda || "Rotas",
-        telefone: cli.telefone || "Não cadastrado",
-        endereco: `${cli.cidade} - ${cli.uf}`
-      }));
+  // Sync autocomplete states
+  useEffect(() => {
+    if (isModalOpen) {
+      setClientSearch(formData.clienteCodigo || "");
+      setDriverSearch(formData.motoristaMatricula || "");
     }
+  }, [isModalOpen]);
+
+  useEffect(() => {
+    if (isEditModalOpen && editFormData) {
+      setEditClientSearch(editFormData.clienteCodigo || "");
+      setEditDriverSearch(editFormData.motoristaMatricula || "");
+    }
+  }, [isEditModalOpen, editFormData]);
+
+  // Select Client Callback for Create Form
+  const selectClient = (cli: DevolucaoCliente) => {
+    setFormData(prev => ({
+      ...prev,
+      clienteCodigo: cli.codigo,
+      clienteRazaoSocial: cli.razaoSocial,
+      clienteNomeFantasia: cli.nomeFantasia,
+      vendedor: cli.vendedor || "",
+      supervisor: cli.supervisor || "",
+      gerente: cli.gerente || "",
+      canal: cli.canalVenda || "Rotas",
+      telefone: cli.telefone || "Não cadastrado",
+      endereco: `${cli.cidade} - ${cli.uf}`,
+      areaResponsavel: cli.areaResponsavel || "",
+      unidadeId: cli.unidadeId || prev.unidadeId
+    }));
+    setClientSearch(cli.codigo);
+    setShowClientSuggestions(false);
   };
 
-  // Handle driver auto-fill
-  const handleDriverSelect = (matricula: string) => {
-    const drv = motoristas.find(m => m.matricula === matricula);
-    if (drv) {
-      setFormData(prev => ({
-        ...prev,
-        motoristaMatricula: drv.matricula,
-        motoristaNome: drv.nome,
-        motoristaTelefone: drv.telefone || "Não Informado"
-      }));
-    }
+  // Select Client Callback for Edit Form
+  const selectEditClient = (cli: DevolucaoCliente) => {
+    setEditFormData((prev: any) => ({
+      ...prev,
+      clienteCodigo: cli.codigo,
+      clienteRazaoSocial: cli.razaoSocial,
+      clienteNomeFantasia: cli.nomeFantasia,
+      vendedor: cli.vendedor || "",
+      supervisor: cli.supervisor || "",
+      gerente: cli.gerente || "",
+      canal: cli.canalVenda || "Rotas",
+      telefone: cli.telefone || "Não cadastrado",
+      endereco: `${cli.cidade} - ${cli.uf}`,
+      areaResponsavel: cli.areaResponsavel || "",
+      unidadeId: cli.unidadeId || prev.unidadeId
+    }));
+    setEditClientSearch(cli.codigo);
+    setShowEditClientSuggestions(false);
+  };
+
+  // Select Driver Callback for Create Form
+  const selectDriver = (drv: DevolucaoMotorista) => {
+    setFormData(prev => ({
+      ...prev,
+      motoristaMatricula: drv.matricula,
+      motoristaNome: drv.nome,
+      motoristaTelefone: drv.telefone || "Não Informado",
+      motoristaFuncao: drv.funcao || "Motorista"
+    }));
+    setDriverSearch(drv.matricula);
+    setShowDriverSuggestions(false);
+  };
+
+  // Select Driver Callback for Edit Form
+  const selectEditDriver = (drv: DevolucaoMotorista) => {
+    setEditFormData((prev: any) => ({
+      ...prev,
+      motoristaMatricula: drv.matricula,
+      motoristaNome: drv.nome,
+      motoristaTelefone: drv.telefone || "Não Informado",
+      motoristaFuncao: drv.funcao || "Motorista"
+    }));
+    setEditDriverSearch(drv.matricula);
+    setShowEditDriverSuggestions(false);
   };
 
   // Handle reason auto-fill
@@ -120,18 +188,26 @@ export default function DevolucoesRegistro({ unidades, currentUser, onRefresh }:
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.clienteCodigo || !formData.numeroNF || !formData.valorNF) {
-      alert("Por favor, preencha todos os campos obrigatórios (Cliente, NF e Valor).");
+    if (!formData.clienteCodigo) {
+      alert("Por favor, preencha o campo obrigatório (Cliente).");
       return;
     }
 
     try {
+      const finalNF = formData.numeroNF.trim() || "SEM-NF";
+      const finalValor = parseFloat(String(formData.valorNF)) || 0;
+
       const res = await fetch("/api/devolucoes/registros", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { 
+          "Content-Type": "application/json",
+          "x-user-email": currentUser?.email || "",
+          "x-selected-unit": currentUser?.unidadeId || "Todas"
+        },
         body: JSON.stringify({
           ...formData,
-          valorNF: parseFloat(String(formData.valorNF)) || 0
+          numeroNF: finalNF,
+          valorNF: finalValor
         })
       });
 
@@ -145,6 +221,7 @@ export default function DevolucoesRegistro({ unidades, currentUser, onRefresh }:
           motoristaMatricula: "",
           motoristaNome: "",
           motoristaTelefone: "",
+          motoristaFuncao: "",
           clienteCodigo: "",
           clienteRazaoSocial: "",
           clienteNomeFantasia: "",
@@ -154,6 +231,7 @@ export default function DevolucoesRegistro({ unidades, currentUser, onRefresh }:
           canal: "Rotas",
           telefone: "",
           endereco: "",
+          areaResponsavel: "",
           numeroNF: "",
           valorNF: "",
           motivoCodigo: "Y40",
@@ -168,12 +246,52 @@ export default function DevolucoesRegistro({ unidades, currentUser, onRefresh }:
     }
   };
 
+  const handleUpdate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editFormData || !editFormData.clienteCodigo) {
+      alert("Por favor, selecione o cliente.");
+      return;
+    }
+
+    try {
+      const finalNF = String(editFormData.numeroNF || "").trim() || "SEM-NF";
+      const finalValor = parseFloat(String(editFormData.valorNF)) || 0;
+
+      const res = await fetch(`/api/devolucoes/registros/${editFormData.id}`, {
+        method: "PUT",
+        headers: { 
+          "Content-Type": "application/json",
+          "x-user-email": currentUser?.email || "",
+          "x-selected-unit": currentUser?.unidadeId || "Todas"
+        },
+        body: JSON.stringify({
+          ...editFormData,
+          numeroNF: finalNF,
+          valorNF: finalValor
+        })
+      });
+
+      if (res.ok) {
+        setIsEditModalOpen(false);
+        setEditFormData(null);
+        fetchData();
+        onRefresh();
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
   const toggleStatus = async (reg: DevolucaoRegistro) => {
     const newStatus = reg.status === "Pendente" ? "Resolvida" : "Pendente";
     try {
       const res = await fetch(`/api/devolucoes/registros/${reg.id}`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json" },
+        headers: { 
+          "Content-Type": "application/json",
+          "x-user-email": currentUser?.email || "",
+          "x-selected-unit": currentUser?.unidadeId || "Todas"
+        },
         body: JSON.stringify({ status: newStatus })
       });
       if (res.ok) {
@@ -189,7 +307,11 @@ export default function DevolucoesRegistro({ unidades, currentUser, onRefresh }:
     if (!confirm("Tem certeza que deseja excluir esta devolução de forma permanente? Esta ação será registrada no log de auditoria.")) return;
     try {
       const res = await fetch(`/api/devolucoes/registros/${id}`, {
-        method: "DELETE"
+        method: "DELETE",
+        headers: {
+          "x-user-email": currentUser?.email || "",
+          "x-selected-unit": currentUser?.unidadeId || "Todas"
+        }
       });
       if (res.ok) {
         fetchData();
@@ -304,8 +426,25 @@ export default function DevolucoesRegistro({ unidades, currentUser, onRefresh }:
                       {unidades.find(u => u.id === reg.unidadeId)?.nome?.split(" ")[0] || reg.unidadeId}
                     </td>
                     <td className="py-3 px-4 whitespace-nowrap">
-                      <div className="text-slate-200">NF {reg.numeroNF}</div>
-                      <div className="text-[11px] text-slate-400 font-semibold">
+                      {(reg.numeroNF === "SEM-NF" || reg.numeroNF === "SEM NF" || reg.numeroNF === "NÃO INFORMADA" || !reg.numeroNF) ? (
+                        <div className="space-y-1">
+                          <span className="text-amber-500 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded text-[10px] font-bold block w-fit">
+                            SEM NF
+                          </span>
+                          <button
+                            onClick={() => {
+                              setEditFormData(reg);
+                              setIsEditModalOpen(true);
+                            }}
+                            className="text-sky-400 hover:text-sky-300 hover:underline text-[10px] font-bold flex items-center gap-1 font-mono transition-all"
+                          >
+                            <Plus className="w-3 h-3 stroke-[3]" /> Adicionar NF
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="text-slate-200 font-bold">NF {reg.numeroNF}</div>
+                      )}
+                      <div className="text-[11px] text-slate-400 font-semibold mt-0.5">
                         R$ {reg.valorNF?.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </div>
                     </td>
@@ -344,6 +483,16 @@ export default function DevolucoesRegistro({ unidades, currentUser, onRefresh }:
                           <Eye className="w-3.5 h-3.5" />
                         </button>
                         <button
+                          onClick={() => {
+                            setEditFormData(reg);
+                            setIsEditModalOpen(true);
+                          }}
+                          className="p-1.5 bg-slate-800 hover:bg-slate-700 hover:text-amber-400 text-slate-400 rounded transition-colors"
+                          title="Editar Devolução / Adicionar NF"
+                        >
+                          <Edit3 className="w-3.5 h-3.5" />
+                        </button>
+                        <button
                           onClick={() => handleDelete(reg.id)}
                           className="p-1.5 bg-slate-800/60 hover:bg-rose-500/10 hover:text-rose-400 text-slate-500 rounded transition-colors"
                           title="Excluir Devolução"
@@ -369,97 +518,326 @@ export default function DevolucoesRegistro({ unidades, currentUser, onRefresh }:
       {/* Novo Registro Modal */}
       {isModalOpen && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-slate-950 border border-slate-850 w-full max-w-2xl rounded-xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh]">
-            <div className="p-5 border-b border-slate-850 flex items-center justify-between bg-slate-900/40">
+          <div className="bg-slate-950 border border-slate-850 w-full max-w-3xl rounded-xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh]">
+            <div className="p-5 border-b border-slate-850 flex items-center justify-between bg-slate-900/40 font-mono">
               <div>
-                <h3 className="text-sm font-bold text-slate-100 font-mono tracking-wider uppercase">Registrar Devolução Ampla</h3>
-                <p className="text-[10px] text-slate-500 mt-0.5">Informe os dados da devolução da nota fiscal para gerar o protocolo.</p>
+                <h3 className="text-sm font-bold text-slate-100 uppercase tracking-wider">Registrar Devolução Ampla</h3>
+                <p className="text-[10px] text-slate-500 mt-0.5">Informe o código do cliente e a matrícula do motorista para carregar as informações oficiais.</p>
               </div>
-              <button onClick={() => setIsModalOpen(false)} className="text-slate-400 hover:text-slate-100 text-sm font-bold font-mono">Fechar [X]</button>
+              <button onClick={() => setIsModalOpen(false)} className="text-slate-400 hover:text-slate-100 text-sm font-bold">Fechar [X]</button>
             </div>
 
-            <form onSubmit={handleCreate} className="p-6 overflow-y-auto space-y-4 scrollbar-thin">
-              {/* Cliente Autocomplete & NF details */}
+            <form onSubmit={handleCreate} className="p-6 overflow-y-auto space-y-5 scrollbar-thin">
+              {/* Autocomplete Inputs (Cliente e Motorista) */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="space-y-1.5">
-                  <label className="text-[11px] font-semibold text-slate-400 font-mono uppercase">Cliente / PDV <span className="text-rose-500">*</span></label>
-                  <select
-                    value={formData.clienteCodigo}
-                    onChange={(e) => handleClientSelect(e.target.value)}
-                    className="w-full bg-slate-900 border border-slate-800 hover:border-slate-700 text-xs text-slate-200 rounded-lg p-2 font-mono"
-                    required
-                  >
-                    <option value="">-- Selecione o Cliente (PDV) --</option>
-                    {clientes.map(c => (
-                      <option key={c.codigo} value={c.codigo}>{c.codigo} - {c.nomeFantasia}</option>
-                    ))}
-                  </select>
+                
+                {/* Cliente Código Autocomplete */}
+                <div className="space-y-1.5 relative">
+                  <label className="text-[11px] font-semibold text-slate-400 font-mono uppercase flex items-center gap-1">
+                    Código do Cliente (PDV) <span className="text-rose-500">*</span>
+                  </label>
+                  <div className="relative">
+                    <input
+                      type="text"
+                      value={clientSearch}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setClientSearch(val);
+                        setShowClientSuggestions(true);
+                        
+                        // Find exact match
+                        const exactMatch = clientes.find(c => c.codigo.toLowerCase() === val.trim().toLowerCase());
+                        if (exactMatch) {
+                          selectClient(exactMatch);
+                        } else {
+                          setFormData(prev => ({
+                            ...prev,
+                            clienteCodigo: val,
+                            clienteRazaoSocial: "",
+                            clienteNomeFantasia: "",
+                            vendedor: "",
+                            supervisor: "",
+                            gerente: "",
+                            canal: "Rotas",
+                            telefone: "",
+                            endereco: "",
+                            areaResponsavel: ""
+                          }));
+                        }
+                      }}
+                      onFocus={() => setShowClientSuggestions(true)}
+                      onBlur={() => {
+                        setTimeout(() => setShowClientSuggestions(false), 200);
+                      }}
+                      placeholder="Digite o código (ex: TEST_CLI_100)..."
+                      className="w-full bg-slate-900 border border-slate-800 text-xs text-slate-200 rounded-lg p-2 font-mono focus:border-sky-500 focus:ring-1 focus:ring-sky-500"
+                      required
+                    />
+                    {clientSearch && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setClientSearch("");
+                          setFormData(prev => ({
+                            ...prev,
+                            clienteCodigo: "",
+                            clienteRazaoSocial: "",
+                            clienteNomeFantasia: "",
+                            vendedor: "",
+                            supervisor: "",
+                            gerente: "",
+                            canal: "Rotas",
+                            telefone: "",
+                            endereco: "",
+                            areaResponsavel: ""
+                          }));
+                        }}
+                        className="absolute right-2 top-2.5 text-[10px] text-slate-500 hover:text-slate-300 font-mono uppercase"
+                      >
+                        Limpar
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Client Suggestions Dropdown */}
+                  {showClientSuggestions && clientSearch.trim().length > 0 && (
+                    <div className="absolute z-50 w-full mt-1 bg-slate-950 border border-slate-800 rounded-lg max-h-48 overflow-y-auto shadow-xl">
+                      {(() => {
+                        const query = clientSearch.toLowerCase();
+                        const filtered = clientes.filter(c => 
+                          (c.codigo && c.codigo.toLowerCase().includes(query)) ||
+                          (c.nomeFantasia && c.nomeFantasia.toLowerCase().includes(query)) ||
+                          (c.razaoSocial && c.razaoSocial.toLowerCase().includes(query))
+                        );
+
+                        if (filtered.length === 0) {
+                          return (
+                            <div className="p-2 text-slate-500 text-xs font-mono text-center">
+                              Nenhum cliente correspondente
+                            </div>
+                          );
+                        }
+
+                        return filtered.slice(0, 15).map(c => (
+                          <button
+                            key={c.codigo}
+                            type="button"
+                            onMouseDown={() => selectClient(c)}
+                            className="w-full text-left p-2.5 hover:bg-slate-900 text-slate-300 hover:text-white transition-colors border-b border-slate-900 last:border-0 text-xs font-mono"
+                          >
+                            <div className="font-bold text-sky-400">{c.codigo}</div>
+                            <div className="truncate text-[11px] text-slate-400">{c.nomeFantasia || c.razaoSocial}</div>
+                            <div className="text-[10px] text-slate-500">{c.cidade} - {c.uf}</div>
+                          </button>
+                        ));
+                      })()}
+                    </div>
+                  )}
                 </div>
 
-                <div className="space-y-1.5">
-                  <label className="text-[11px] font-semibold text-slate-400 font-mono uppercase">Motorista Associado</label>
-                  <select
-                    value={formData.motoristaMatricula}
-                    onChange={(e) => handleDriverSelect(e.target.value)}
-                    className="w-full bg-slate-900 border border-slate-800 hover:border-slate-700 text-xs text-slate-200 rounded-lg p-2 font-mono"
-                  >
-                    <option value="">-- Selecione o Motorista --</option>
-                    {motoristas.map(m => (
-                      <option key={m.matricula} value={m.matricula}>{m.matricula} - {m.nome}</option>
-                    ))}
-                  </select>
+                {/* Motorista Matricula Autocomplete */}
+                <div className="space-y-1.5 relative">
+                  <label className="text-[11px] font-semibold text-slate-400 font-mono uppercase flex items-center gap-1">
+                    Matrícula do Motorista <span className="text-slate-500">(Opcional)</span>
+                  </label>
+                  <div className="relative">
+                    <input
+                      type="text"
+                      value={driverSearch}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setDriverSearch(val);
+                        setShowDriverSuggestions(true);
+                        
+                        // Find exact match
+                        const exactMatch = motoristas.find(m => m.matricula.toLowerCase() === val.trim().toLowerCase());
+                        if (exactMatch) {
+                          selectDriver(exactMatch);
+                        } else {
+                          setFormData(prev => ({
+                            ...prev,
+                            motoristaMatricula: val,
+                            motoristaNome: "",
+                            motoristaTelefone: "",
+                            motoristaFuncao: ""
+                          }));
+                        }
+                      }}
+                      onFocus={() => setShowDriverSuggestions(true)}
+                      onBlur={() => {
+                        setTimeout(() => setShowDriverSuggestions(false), 200);
+                      }}
+                      placeholder="Digite a matrícula (ex: TEST_DRV_100)..."
+                      className="w-full bg-slate-900 border border-slate-800 text-xs text-slate-200 rounded-lg p-2 font-mono focus:border-sky-500 focus:ring-1 focus:ring-sky-500"
+                    />
+                    {driverSearch && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setDriverSearch("");
+                          setFormData(prev => ({
+                            ...prev,
+                            motoristaMatricula: "",
+                            motoristaNome: "",
+                            motoristaTelefone: "",
+                            motoristaFuncao: ""
+                          }));
+                        }}
+                        className="absolute right-2 top-2.5 text-[10px] text-slate-500 hover:text-slate-300 font-mono uppercase"
+                      >
+                        Limpar
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Driver Suggestions Dropdown */}
+                  {showDriverSuggestions && driverSearch.trim().length > 0 && (
+                    <div className="absolute z-50 w-full mt-1 bg-slate-950 border border-slate-800 rounded-lg max-h-48 overflow-y-auto shadow-xl">
+                      {(() => {
+                        const query = driverSearch.toLowerCase();
+                        const filtered = motoristas.filter(m => 
+                          (m.matricula && m.matricula.toLowerCase().includes(query)) ||
+                          (m.nome && m.nome.toLowerCase().includes(query))
+                        );
+
+                        if (filtered.length === 0) {
+                          return (
+                            <div className="p-2 text-slate-500 text-xs font-mono text-center">
+                              Nenhum motorista correspondente
+                            </div>
+                          );
+                        }
+
+                        return filtered.slice(0, 15).map(m => (
+                          <button
+                            key={m.matricula}
+                            type="button"
+                            onMouseDown={() => selectDriver(m)}
+                            className="w-full text-left p-2.5 hover:bg-slate-900 text-slate-300 hover:text-white transition-colors border-b border-slate-900 last:border-0 text-xs font-mono"
+                          >
+                            <div className="font-bold text-sky-400">{m.matricula}</div>
+                            <div className="truncate text-[11px] text-slate-400">{m.nome}</div>
+                            <div className="text-[10px] text-slate-500">{m.funcao || "Motorista"}</div>
+                          </button>
+                        ));
+                      })()}
+                    </div>
+                  )}
                 </div>
+
               </div>
 
-              {/* Hierarquia comercial preenchida automaticamente */}
-              <div className="bg-slate-900/40 p-4 rounded-lg border border-slate-850 grid grid-cols-2 md:grid-cols-4 gap-3 text-xs font-mono">
-                <div>
-                  <span className="text-[9px] text-slate-500 block uppercase">Vendedor RCA</span>
-                  <span className="text-slate-300 font-semibold block mt-0.5 truncate">{formData.vendedor || "Selecione o cliente"}</span>
-                </div>
-                <div>
-                  <span className="text-[9px] text-slate-500 block uppercase">Supervisor</span>
-                  <span className="text-slate-300 font-semibold block mt-0.5 truncate">{formData.supervisor || "Selecione o cliente"}</span>
-                </div>
-                <div>
-                  <span className="text-[9px] text-slate-500 block uppercase">Gerente</span>
-                  <span className="text-slate-300 font-semibold block mt-0.5 truncate">{formData.gerente || "Selecione o cliente"}</span>
-                </div>
-                <div>
-                  <span className="text-[9px] text-slate-500 block uppercase">Canal / Região</span>
-                  <span className="text-slate-300 font-semibold block mt-0.5 truncate">{formData.canal}</span>
-                </div>
-              </div>
+              {/* Ficha Cadastral do Cliente (Auto-preenchida e Bloqueada) */}
+              {formData.clienteCodigo && (
+                <div className="p-4 bg-slate-900/40 rounded-xl border border-slate-850 space-y-3 font-mono text-xs">
+                  <div className="flex items-center justify-between border-b border-slate-850 pb-2">
+                    <span className="text-[10px] text-sky-400 font-bold uppercase tracking-wider">Dados Cadastrais do Cliente (Base Oficial)</span>
+                    <span className="text-[9px] px-2 py-0.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded font-bold uppercase">
+                      Bloqueado para Visualização
+                    </span>
+                  </div>
 
-              {/* Informações da Nota Fiscal */}
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3.5">
+                    <div>
+                      <span className="text-[9px] text-slate-500 uppercase block">Razão Social</span>
+                      <span className="text-slate-300 font-semibold block mt-0.5 truncate" title={formData.clienteRazaoSocial}>{formData.clienteRazaoSocial || "—"}</span>
+                    </div>
+                    <div>
+                      <span className="text-[9px] text-slate-500 uppercase block">Nome Fantasia</span>
+                      <span className="text-slate-300 font-semibold block mt-0.5 truncate" title={formData.clienteNomeFantasia}>{formData.clienteNomeFantasia || "—"}</span>
+                    </div>
+                    <div>
+                      <span className="text-[9px] text-slate-500 uppercase block">Endereço (Cidade/UF)</span>
+                      <span className="text-slate-300 font-semibold block mt-0.5 truncate">{formData.endereco || "—"}</span>
+                    </div>
+                    <div>
+                      <span className="text-[9px] text-slate-500 uppercase block">Telefone</span>
+                      <span className="text-slate-300 font-semibold block mt-0.5 truncate">{formData.telefone || "—"}</span>
+                    </div>
+                    <div>
+                      <span className="text-[9px] text-slate-500 uppercase block">Canal / Região</span>
+                      <span className="text-slate-300 font-semibold block mt-0.5 truncate">{formData.canal || "—"}</span>
+                    </div>
+                    <div>
+                      <span className="text-[9px] text-slate-500 uppercase block">Área Responsável</span>
+                      <span className="text-slate-300 font-semibold block mt-0.5 truncate">{formData.areaResponsavel || "—"}</span>
+                    </div>
+                    <div>
+                      <span className="text-[9px] text-slate-500 uppercase block">Vendedor RCA</span>
+                      <span className="text-slate-300 font-semibold block mt-0.5 truncate">{formData.vendedor || "—"}</span>
+                    </div>
+                    <div>
+                      <span className="text-[9px] text-slate-500 uppercase block">Supervisor</span>
+                      <span className="text-slate-300 font-semibold block mt-0.5 truncate">{formData.supervisor || "—"}</span>
+                    </div>
+                    <div>
+                      <span className="text-[9px] text-slate-500 uppercase block">Gerente</span>
+                      <span className="text-slate-300 font-semibold block mt-0.5 truncate">{formData.gerente || "—"}</span>
+                    </div>
+                    <div>
+                      <span className="text-[9px] text-slate-500 uppercase block">Filial</span>
+                      <span className="text-slate-300 font-semibold block mt-0.5 truncate">
+                        {unidades.find(u => u.id === formData.unidadeId)?.nome || formData.unidadeId || "—"}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Ficha Cadastral do Motorista (Auto-preenchida e Bloqueada) */}
+              {formData.motoristaMatricula && (
+                <div className="p-4 bg-slate-900/40 rounded-xl border border-slate-850 space-y-3 font-mono text-xs">
+                  <div className="flex items-center justify-between border-b border-slate-850 pb-2">
+                    <span className="text-[10px] text-sky-400 font-bold uppercase tracking-wider">Dados Operacionais do Motorista (Base Oficial)</span>
+                    <span className="text-[9px] px-2 py-0.5 bg-sky-500/10 text-sky-400 border border-sky-500/20 rounded font-bold uppercase">
+                      Bloqueado para Visualização
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-3.5">
+                    <div>
+                      <span className="text-[9px] text-slate-500 uppercase block">Nome Completo</span>
+                      <span className="text-slate-300 font-semibold block mt-0.5 truncate">{formData.motoristaNome || "—"}</span>
+                    </div>
+                    <div>
+                      <span className="text-[9px] text-slate-500 uppercase block">Telefone</span>
+                      <span className="text-slate-300 font-semibold block mt-0.5 truncate">{formData.motoristaTelefone || "—"}</span>
+                    </div>
+                    <div>
+                      <span className="text-[9px] text-slate-500 uppercase block">Função / Cargo</span>
+                      <span className="text-slate-300 font-semibold block mt-0.5 truncate">{formData.motoristaFuncao || "Motorista"}</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Informações da Nota Fiscal, Valor e Data */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div className="space-y-1.5">
-                  <label className="text-[11px] font-semibold text-slate-400 font-mono uppercase">Número da NF <span className="text-rose-500">*</span></label>
+                  <label className="text-[11px] font-semibold text-slate-400 font-mono uppercase">Número da NF</label>
                   <input
                     type="text"
-                    required
                     value={formData.numeroNF}
                     onChange={(e) => setFormData(prev => ({ ...prev, numeroNF: e.target.value }))}
                     className="w-full bg-slate-900 border border-slate-800 text-xs rounded-lg p-2 font-mono text-slate-200"
-                    placeholder="NF-00000"
+                    placeholder="NF-00000 (Opcional)"
                   />
                 </div>
 
                 <div className="space-y-1.5">
-                  <label className="text-[11px] font-semibold text-slate-400 font-mono uppercase">Valor da Devolução (R$) <span className="text-rose-500">*</span></label>
+                  <label className="text-[11px] font-semibold text-slate-400 font-mono uppercase">Valor da Devolução (R$)</label>
                   <input
                     type="number"
                     step="0.01"
-                    required
                     value={formData.valorNF}
                     onChange={(e) => setFormData(prev => ({ ...prev, valorNF: e.target.value }))}
                     className="w-full bg-slate-900 border border-slate-800 text-xs rounded-lg p-2 font-mono text-slate-200"
-                    placeholder="0.00"
+                    placeholder="0.00 (Opcional)"
                   />
                 </div>
 
                 <div className="space-y-1.5">
-                  <label className="text-[11px] font-semibold text-slate-400 font-mono uppercase">Data do Ocorrido</label>
+                  <label className="text-[11px] font-semibold text-slate-400 font-mono uppercase">Data do Ocorrido <span className="text-rose-500">*</span></label>
                   <input
                     type="date"
                     required
@@ -470,34 +848,19 @@ export default function DevolucoesRegistro({ unidades, currentUser, onRefresh }:
                 </div>
               </div>
 
-              {/* Motivo e Unidade */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="space-y-1.5">
-                  <label className="text-[11px] font-semibold text-slate-400 font-mono uppercase">Motivo Heineken</label>
-                  <select
-                    value={formData.motivoCodigo}
-                    onChange={(e) => handleReasonSelect(e.target.value)}
-                    className="w-full bg-slate-900 border border-slate-800 hover:border-slate-700 text-xs text-slate-200 rounded-lg p-2 font-mono"
-                  >
-                    {motivos.map(m => (
-                      <option key={m.codigo} value={m.codigo}>{m.codigo} - {m.descricao}</option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="space-y-1.5">
-                  <label className="text-[11px] font-semibold text-slate-400 font-mono uppercase">Filial Operacional</label>
-                  <select
-                    value={formData.unidadeId}
-                    onChange={(e) => setFormData(prev => ({ ...prev, unidadeId: e.target.value }))}
-                    className="w-full bg-slate-900 border border-slate-800 text-xs rounded-lg p-2 font-mono text-slate-200"
-                    disabled={currentUser.unidadeId !== "Todas"}
-                  >
-                    {unidades.map(u => (
-                      <option key={u.id} value={u.id}>{u.nome}</option>
-                    ))}
-                  </select>
-                </div>
+              {/* Motivo Heineken */}
+              <div className="space-y-1.5">
+                <label className="text-[11px] font-semibold text-slate-400 font-mono uppercase">Motivo Heineken <span className="text-rose-500">*</span></label>
+                <select
+                  value={formData.motivoCodigo}
+                  onChange={(e) => handleReasonSelect(e.target.value)}
+                  className="w-full bg-slate-900 border border-slate-800 hover:border-slate-700 text-xs text-slate-200 rounded-lg p-2 font-mono"
+                  required
+                >
+                  {motivos.map(m => (
+                    <option key={m.codigo} value={m.codigo}>{m.codigo} - {m.descricao}</option>
+                  ))}
+                </select>
               </div>
 
               {/* Observação */}
@@ -512,17 +875,17 @@ export default function DevolucoesRegistro({ unidades, currentUser, onRefresh }:
               </div>
 
               {/* Action Buttons */}
-              <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-850">
+              <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-850 font-mono">
                 <button
                   type="button"
                   onClick={() => setIsModalOpen(false)}
-                  className="px-4 py-2 bg-slate-900 hover:bg-slate-850 border border-slate-800 text-slate-400 text-xs font-semibold rounded-lg transition-colors font-mono"
+                  className="px-4 py-2 bg-slate-900 hover:bg-slate-850 border border-slate-800 text-slate-400 text-xs font-semibold rounded-lg transition-colors"
                 >
                   Cancelar
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 bg-sky-500 hover:bg-sky-600 text-slate-950 text-xs font-bold rounded-lg transition-all font-mono"
+                  className="px-5 py-2 bg-sky-500 hover:bg-sky-600 text-slate-950 text-xs font-bold rounded-lg transition-all"
                 >
                   Confirmar e Registrar
                 </button>
@@ -633,6 +996,16 @@ export default function DevolucoesRegistro({ unidades, currentUser, onRefresh }:
                 <button
                   onClick={() => {
                     setIsDetailOpen(false);
+                    setEditFormData(selectedReg);
+                    setIsEditModalOpen(true);
+                  }}
+                  className="px-4 py-2 rounded-lg text-xs font-bold bg-slate-800 hover:bg-slate-700 text-amber-400 border border-slate-750 font-mono transition-colors"
+                >
+                  Editar Dados
+                </button>
+                <button
+                  onClick={() => {
+                    setIsDetailOpen(false);
                     toggleStatus(selectedReg);
                   }}
                   className={`px-4 py-2 rounded-lg text-xs font-bold transition-all ${
@@ -645,6 +1018,359 @@ export default function DevolucoesRegistro({ unidades, currentUser, onRefresh }:
                 </button>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Editar Registro Modal */}
+      {isEditModalOpen && editFormData && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-slate-950 border border-slate-850 w-full max-w-3xl rounded-xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh]">
+            <div className="p-5 border-b border-slate-850 flex items-center justify-between bg-slate-900/40">
+              <div>
+                <h3 className="text-sm font-bold text-slate-100 font-mono tracking-wider uppercase flex items-center gap-2">
+                  <Edit3 className="w-4 h-4 text-amber-400" /> Editar Devolução Ampla
+                </h3>
+                <p className="text-[10px] text-slate-500 mt-0.5">Controle de Protocolo: {editFormData.protocolo}</p>
+              </div>
+              <button onClick={() => {
+                setIsEditModalOpen(false);
+                setEditFormData(null);
+              }} className="text-slate-400 hover:text-slate-100 text-sm font-bold font-mono">Fechar [X]</button>
+            </div>
+
+            <form onSubmit={handleUpdate} className="p-6 overflow-y-auto space-y-5 scrollbar-thin">
+              {/* Autocomplete Inputs (Cliente e Motorista) */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                
+                {/* Cliente Código Autocomplete */}
+                <div className="space-y-1.5 relative">
+                  <label className="text-[11px] font-semibold text-slate-400 font-mono uppercase flex items-center gap-1">
+                    Código do Cliente (PDV) <span className="text-rose-500">*</span>
+                  </label>
+                  <div className="relative">
+                    <input
+                      type="text"
+                      value={editClientSearch}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setEditClientSearch(val);
+                        setShowEditClientSuggestions(true);
+                        
+                        // Find exact match
+                        const exactMatch = clientes.find(c => c.codigo.toLowerCase() === val.trim().toLowerCase());
+                        if (exactMatch) {
+                          selectEditClient(exactMatch);
+                        } else {
+                          setEditFormData((prev: any) => ({
+                            ...prev,
+                            clienteCodigo: val,
+                            clienteRazaoSocial: "",
+                            clienteNomeFantasia: "",
+                            vendedor: "",
+                            supervisor: "",
+                            gerente: "",
+                            canal: "Rotas",
+                            telefone: "",
+                            endereco: "",
+                            areaResponsavel: ""
+                          }));
+                        }
+                      }}
+                      onFocus={() => setShowEditClientSuggestions(true)}
+                      onBlur={() => {
+                        setTimeout(() => setShowEditClientSuggestions(false), 200);
+                      }}
+                      placeholder="Digite o código (ex: TEST_CLI_100)..."
+                      className="w-full bg-slate-900 border border-slate-800 text-xs text-slate-200 rounded-lg p-2 font-mono focus:border-sky-500 focus:ring-1 focus:ring-sky-500"
+                      required
+                    />
+                  </div>
+
+                  {/* Edit Client Suggestions Dropdown */}
+                  {showEditClientSuggestions && editClientSearch.trim().length > 0 && (
+                    <div className="absolute z-50 w-full mt-1 bg-slate-950 border border-slate-800 rounded-lg max-h-48 overflow-y-auto shadow-xl">
+                      {(() => {
+                        const query = editClientSearch.toLowerCase();
+                        const filtered = clientes.filter(c => 
+                          (c.codigo && c.codigo.toLowerCase().includes(query)) ||
+                          (c.nomeFantasia && c.nomeFantasia.toLowerCase().includes(query)) ||
+                          (c.razaoSocial && c.razaoSocial.toLowerCase().includes(query))
+                        );
+
+                        if (filtered.length === 0) {
+                          return (
+                            <div className="p-2 text-slate-500 text-xs font-mono text-center">
+                              Nenhum cliente correspondente
+                            </div>
+                          );
+                        }
+
+                        return filtered.slice(0, 15).map(c => (
+                          <button
+                            key={c.codigo}
+                            type="button"
+                            onMouseDown={() => selectEditClient(c)}
+                            className="w-full text-left p-2.5 hover:bg-slate-900 text-slate-300 hover:text-white transition-colors border-b border-slate-900 last:border-0 text-xs font-mono"
+                          >
+                            <div className="font-bold text-sky-400">{c.codigo}</div>
+                            <div className="truncate text-[11px] text-slate-400">{c.nomeFantasia || c.razaoSocial}</div>
+                            <div className="text-[10px] text-slate-500">{c.cidade} - {c.uf}</div>
+                          </button>
+                        ));
+                      })()}
+                    </div>
+                  )}
+                </div>
+
+                {/* Motorista Matricula Autocomplete */}
+                <div className="space-y-1.5 relative">
+                  <label className="text-[11px] font-semibold text-slate-400 font-mono uppercase flex items-center gap-1">
+                    Matrícula do Motorista <span className="text-slate-500">(Opcional)</span>
+                  </label>
+                  <div className="relative">
+                    <input
+                      type="text"
+                      value={editDriverSearch}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setEditDriverSearch(val);
+                        setShowEditDriverSuggestions(true);
+                        
+                        // Find exact match
+                        const exactMatch = motoristas.find(m => m.matricula.toLowerCase() === val.trim().toLowerCase());
+                        if (exactMatch) {
+                          selectEditDriver(exactMatch);
+                        } else {
+                          setEditFormData((prev: any) => ({
+                            ...prev,
+                            motoristaMatricula: val,
+                            motoristaNome: "",
+                            motoristaTelefone: "",
+                            motoristaFuncao: ""
+                          }));
+                        }
+                      }}
+                      onFocus={() => setShowEditDriverSuggestions(true)}
+                      onBlur={() => {
+                        setTimeout(() => setShowEditDriverSuggestions(false), 200);
+                      }}
+                      placeholder="Digite a matrícula (ex: TEST_DRV_100)..."
+                      className="w-full bg-slate-900 border border-slate-800 text-xs text-slate-200 rounded-lg p-2 font-mono focus:border-sky-500 focus:ring-1 focus:ring-sky-500"
+                    />
+                  </div>
+
+                  {/* Edit Driver Suggestions Dropdown */}
+                  {showEditDriverSuggestions && editDriverSearch.trim().length > 0 && (
+                    <div className="absolute z-50 w-full mt-1 bg-slate-950 border border-slate-800 rounded-lg max-h-48 overflow-y-auto shadow-xl">
+                      {(() => {
+                        const query = editDriverSearch.toLowerCase();
+                        const filtered = motoristas.filter(m => 
+                          (m.matricula && m.matricula.toLowerCase().includes(query)) ||
+                          (m.nome && m.nome.toLowerCase().includes(query))
+                        );
+
+                        if (filtered.length === 0) {
+                          return (
+                            <div className="p-2 text-slate-500 text-xs font-mono text-center">
+                              Nenhum motorista correspondente
+                            </div>
+                          );
+                        }
+
+                        return filtered.slice(0, 15).map(m => (
+                          <button
+                            key={m.matricula}
+                            type="button"
+                            onMouseDown={() => selectEditDriver(m)}
+                            className="w-full text-left p-2.5 hover:bg-slate-900 text-slate-300 hover:text-white transition-colors border-b border-slate-900 last:border-0 text-xs font-mono"
+                          >
+                            <div className="font-bold text-sky-400">{m.matricula}</div>
+                            <div className="truncate text-[11px] text-slate-400">{m.nome}</div>
+                            <div className="text-[10px] text-slate-500">{m.funcao || "Motorista"}</div>
+                          </button>
+                        ));
+                      })()}
+                    </div>
+                  )}
+                </div>
+
+              </div>
+
+              {/* Ficha Cadastral do Cliente (Auto-preenchida e Bloqueada) */}
+              {editFormData.clienteCodigo && (
+                <div className="p-4 bg-slate-900/40 rounded-xl border border-slate-850 space-y-3 font-mono text-xs">
+                  <div className="flex items-center justify-between border-b border-slate-850 pb-2">
+                    <span className="text-[10px] text-sky-400 font-bold uppercase tracking-wider">Dados Cadastrais do Cliente (Base Oficial)</span>
+                    <span className="text-[9px] px-2 py-0.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded font-bold uppercase">
+                      Bloqueado para Visualização
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3.5">
+                    <div>
+                      <span className="text-[9px] text-slate-500 uppercase block">Razão Social</span>
+                      <span className="text-slate-300 font-semibold block mt-0.5 truncate" title={editFormData.clienteRazaoSocial}>{editFormData.clienteRazaoSocial || "—"}</span>
+                    </div>
+                    <div>
+                      <span className="text-[9px] text-slate-500 uppercase block">Nome Fantasia</span>
+                      <span className="text-slate-300 font-semibold block mt-0.5 truncate" title={editFormData.clienteNomeFantasia}>{editFormData.clienteNomeFantasia || "—"}</span>
+                    </div>
+                    <div>
+                      <span className="text-[9px] text-slate-500 uppercase block">Endereço (Cidade/UF)</span>
+                      <span className="text-slate-300 font-semibold block mt-0.5 truncate">{editFormData.endereco || "—"}</span>
+                    </div>
+                    <div>
+                      <span className="text-[9px] text-slate-500 uppercase block">Telefone</span>
+                      <span className="text-slate-300 font-semibold block mt-0.5 truncate">{editFormData.telefone || "—"}</span>
+                    </div>
+                    <div>
+                      <span className="text-[9px] text-slate-500 uppercase block">Canal / Região</span>
+                      <span className="text-slate-300 font-semibold block mt-0.5 truncate">{editFormData.canal || "—"}</span>
+                    </div>
+                    <div>
+                      <span className="text-[9px] text-slate-500 uppercase block">Área Responsável</span>
+                      <span className="text-slate-300 font-semibold block mt-0.5 truncate">{editFormData.areaResponsavel || "—"}</span>
+                    </div>
+                    <div>
+                      <span className="text-[9px] text-slate-500 uppercase block">Vendedor RCA</span>
+                      <span className="text-slate-300 font-semibold block mt-0.5 truncate">{editFormData.vendedor || "—"}</span>
+                    </div>
+                    <div>
+                      <span className="text-[9px] text-slate-500 uppercase block">Supervisor</span>
+                      <span className="text-slate-300 font-semibold block mt-0.5 truncate">{editFormData.supervisor || "—"}</span>
+                    </div>
+                    <div>
+                      <span className="text-[9px] text-slate-500 uppercase block">Gerente</span>
+                      <span className="text-slate-300 font-semibold block mt-0.5 truncate">{editFormData.gerente || "—"}</span>
+                    </div>
+                    <div>
+                      <span className="text-[9px] text-slate-500 uppercase block">Filial</span>
+                      <span className="text-slate-300 font-semibold block mt-0.5 truncate">
+                        {unidades.find(u => u.id === editFormData.unidadeId)?.nome || editFormData.unidadeId || "—"}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Ficha Cadastral do Motorista (Auto-preenchida e Bloqueada) */}
+              {editFormData.motoristaMatricula && (
+                <div className="p-4 bg-slate-900/40 rounded-xl border border-slate-850 space-y-3 font-mono text-xs">
+                  <div className="flex items-center justify-between border-b border-slate-850 pb-2">
+                    <span className="text-[10px] text-sky-400 font-bold uppercase tracking-wider">Dados Operacionais do Motorista (Base Oficial)</span>
+                    <span className="text-[9px] px-2 py-0.5 bg-sky-500/10 text-sky-400 border border-sky-500/20 rounded font-bold uppercase">
+                      Bloqueado para Visualização
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-3.5">
+                    <div>
+                      <span className="text-[9px] text-slate-500 uppercase block">Nome Completo</span>
+                      <span className="text-slate-300 font-semibold block mt-0.5 truncate">{editFormData.motoristaNome || "—"}</span>
+                    </div>
+                    <div>
+                      <span className="text-[9px] text-slate-500 uppercase block">Telefone</span>
+                      <span className="text-slate-300 font-semibold block mt-0.5 truncate">{editFormData.motoristaTelefone || "—"}</span>
+                    </div>
+                    <div>
+                      <span className="text-[9px] text-slate-500 uppercase block">Função / Cargo</span>
+                      <span className="text-slate-300 font-semibold block mt-0.5 truncate">{editFormData.motoristaFuncao || "Motorista"}</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Informações da Nota Fiscal e Valor */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="space-y-1.5">
+                  <label className="text-[11px] font-semibold text-slate-400 font-mono uppercase">Número da NF</label>
+                  <input
+                    type="text"
+                    value={editFormData.numeroNF === "SEM-NF" ? "" : editFormData.numeroNF}
+                    onChange={(e) => setEditFormData((prev: any) => ({ ...prev, numeroNF: e.target.value }))}
+                    className="w-full bg-slate-900 border border-slate-800 text-xs rounded-lg p-2 font-mono text-slate-200 focus:border-sky-500"
+                    placeholder="Ex: NF-28490 (vazio = SEM NF)"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-[11px] font-semibold text-slate-400 font-mono uppercase">Valor Devolvido (R$)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={editFormData.valorNF || ""}
+                    onChange={(e) => setEditFormData((prev: any) => ({ ...prev, valorNF: e.target.value }))}
+                    className="w-full bg-slate-900 border border-slate-800 text-xs rounded-lg p-2 font-mono text-slate-200 focus:border-sky-500"
+                    placeholder="0.00"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-[11px] font-semibold text-slate-400 font-mono uppercase">Data do Ocorrido <span className="text-rose-500">*</span></label>
+                  <input
+                    type="date"
+                    required
+                    value={editFormData.data}
+                    onChange={(e) => setEditFormData((prev: any) => ({ ...prev, data: e.target.value }))}
+                    className="w-full bg-slate-900 border border-slate-800 text-xs rounded-lg p-2 font-mono text-slate-200 focus:border-sky-500"
+                  />
+                </div>
+              </div>
+
+              {/* Motivo Heineken */}
+              <div className="space-y-1.5">
+                <label className="text-[11px] font-semibold text-slate-400 font-mono uppercase">Motivo Heineken <span className="text-rose-500">*</span></label>
+                <select
+                  value={editFormData.motivoCodigo}
+                  onChange={(e) => {
+                    const m = motivos.find(item => item.codigo === e.target.value);
+                    setEditFormData((prev: any) => ({
+                      ...prev,
+                      motivoCodigo: e.target.value,
+                      motivoDescricao: m ? m.descricao : prev.motivoDescricao
+                    }));
+                  }}
+                  className="w-full bg-slate-900 border border-slate-800 text-xs text-slate-200 rounded-lg p-2 font-mono focus:border-sky-500"
+                  required
+                >
+                  {motivos.map(m => (
+                    <option key={m.codigo} value={m.codigo}>{m.codigo} - {m.descricao}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Observações */}
+              <div className="space-y-1.5">
+                <label className="text-[11px] font-semibold text-slate-400 font-mono uppercase">Observações / Detalhes Adicionais</label>
+                <textarea
+                  value={editFormData.observacao || ""}
+                  onChange={(e) => setEditFormData((prev: any) => ({ ...prev, observacao: e.target.value }))}
+                  className="w-full bg-slate-900 border border-slate-800 text-xs rounded-lg p-2.5 font-mono text-slate-200 h-20 resize-none focus:border-sky-500"
+                  placeholder="Descreva detalhes específicos do acerto..."
+                />
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-850 font-mono">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsEditModalOpen(false);
+                    setEditFormData(null);
+                  }}
+                  className="px-4 py-2 bg-slate-900 hover:bg-slate-850 border border-slate-800 text-slate-400 text-xs font-semibold rounded-lg transition-colors"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 bg-sky-500 hover:bg-sky-600 text-slate-950 text-xs font-bold rounded-lg transition-all"
+                >
+                  Salvar Alterações
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

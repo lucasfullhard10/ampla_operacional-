@@ -6074,18 +6074,35 @@ async function startServer() {
   app.post("/api/devolucoes/import-sheet", (req, res) => {
     try {
       const user = getRequestUser(req);
-      if (!user) return res.status(401).json({ error: "Não autorizado" });
+      if (!user) {
+        return res.status(401).json({
+          success: false,
+          error: "Não autorizado: Usuário não identificado."
+        });
+      }
       
       const { data } = req.body;
-      if (!data) return res.status(400).json({ error: "Dados ausentes" });
+      if (!data) {
+        return res.status(400).json({
+          success: false,
+          error: "Dados ausentes no corpo da requisição."
+        });
+      }
 
       const { clientes, motoristas, hierarquia, motivos, historico } = data;
+
+      console.log("[API AUDIT - IMPORT DEVOLUÇÕES] Iniciando processamento de lote...");
+      console.log(`- quantidade de clientes: ${Array.isArray(clientes) ? clientes.length : 0}`);
+      console.log(`- quantidade de motoristas: ${Array.isArray(motoristas) ? motoristas.length : 0}`);
+      console.log(`- quantidade de históricos: ${Array.isArray(historico) ? historico.length : 0}`);
+      console.log(`- quantidade de motivos: ${Array.isArray(motivos) ? motivos.length : 0}`);
+      console.log(`- quantidade de hierarquia: ${Array.isArray(hierarquia) ? hierarquia.length : 0}`);
       
-      let clientResults = { success: 0, total: 0 };
-      let driverResults = { success: 0, total: 0 };
-      let hierarchyResults = { success: 0, total: 0 };
-      let reasonsResults = { success: 0, total: 0 };
-      let historyResults = { success: 0, total: 0 };
+      let clientResults = { created: 0, updated: 0, total: 0 };
+      let driverResults = { created: 0, updated: 0, total: 0 };
+      let hierarchyResults = { created: 0, updated: 0, total: 0 };
+      let reasonsResults = { created: 0, updated: 0, total: 0 };
+      let historyResults = { created: 0, updated: 0, total: 0 };
 
       // Process clients
       if (Array.isArray(clientes) && clientes.length > 0) {
@@ -6100,10 +6117,11 @@ async function startServer() {
           const idx = list.findIndex((x: any) => x.id === id);
           if (idx !== -1) {
             list[idx] = { ...list[idx], ...c };
+            clientResults.updated++;
           } else {
             list.push(c);
+            clientResults.created++;
           }
-          clientResults.success++;
         });
         clientResults.total = clientes.length;
         FileDatabase.set("devolucoes_clientes" as any, list);
@@ -6121,10 +6139,11 @@ async function startServer() {
           const idx = list.findIndex((x: any) => x.id === id);
           if (idx !== -1) {
             list[idx] = { ...list[idx], ...m };
+            driverResults.updated++;
           } else {
             list.push(m);
+            driverResults.created++;
           }
-          driverResults.success++;
         });
         driverResults.total = motoristas.length;
         FileDatabase.set("devolucoes_motoristas" as any, list);
@@ -6140,10 +6159,11 @@ async function startServer() {
           const idx = list.findIndex((x: any) => x.id === h.id || (x.vendedor === h.vendedor && x.unidadeId === h.unidadeId));
           if (idx !== -1) {
             list[idx] = { ...list[idx], ...h };
+            hierarchyResults.updated++;
           } else {
             list.push(h);
+            hierarchyResults.created++;
           }
-          hierarchyResults.success++;
         });
         hierarchyResults.total = hierarquia.length;
         FileDatabase.set("devolucoes_hierarquia" as any, list);
@@ -6160,10 +6180,11 @@ async function startServer() {
           const idx = list.findIndex((x: any) => x.id === id);
           if (idx !== -1) {
             list[idx] = { ...list[idx], ...r };
+            reasonsResults.updated++;
           } else {
             list.push(r);
+            reasonsResults.created++;
           }
-          reasonsResults.success++;
         });
         reasonsResults.total = motivos.length;
         FileDatabase.set("devolucoes_motivos" as any, list);
@@ -6187,7 +6208,9 @@ async function startServer() {
         }
 
         historico.forEach((rec: any) => {
-          if (!rec.numeroNF) return;
+          if (!rec.numeroNF || String(rec.numeroNF).trim() === "") {
+            rec.numeroNF = "SEM-NF";
+          }
           
           if (!rec.protocolo) {
             rec.protocolo = `DEV-${currentYear}-${String(nextSeq).padStart(6, "0")}`;
@@ -6200,13 +6223,19 @@ async function startServer() {
           rec.status = rec.status || "Pendente";
           rec.ip = "127.0.0.1";
 
-          const idx = list.findIndex((x: any) => x.id === rec.id || (x.numeroNF === rec.numeroNF && x.unidadeId === rec.unidadeId));
+          const idx = list.findIndex((x: any) => {
+            if (x.id === rec.id) return true;
+            if (rec.numeroNF !== "SEM-NF" && x.numeroNF === rec.numeroNF && x.unidadeId === rec.unidadeId) return true;
+            return false;
+          });
+
           if (idx !== -1) {
             list[idx] = { ...list[idx], ...rec };
+            historyResults.updated++;
           } else {
             list.push(rec);
+            historyResults.created++;
           }
-          historyResults.success++;
         });
         historyResults.total = historico.length;
         FileDatabase.set("devolucoes_registros" as any, list);
@@ -6221,7 +6250,7 @@ async function startServer() {
           data: new Date().toISOString().split("T")[0],
           hora: new Date().toTimeString().split(" ")[0],
           acao: "IMPORT_DEVOLUCOES_SHEET",
-          detalhes: `Importacao inteligente realizada por ${user.nome}. Clientes: ${clientResults.success}, Motoristas: ${driverResults.success}, Hierarquia: ${hierarchyResults.success}, Motivos: ${reasonsResults.success}, Devolucoes: ${historyResults.success}.`
+          detalhes: `Importacao inteligente realizada por ${user.nome}. Clientes criados/at: ${clientResults.created}/${clientResults.updated}, Motoristas criados/at: ${driverResults.created}/${driverResults.updated}, Devolucoes criadas/at: ${historyResults.created}/${historyResults.updated}.`
         });
         FileDatabase.set("auditoria", auditList);
       } catch (ae) {}
@@ -6237,7 +6266,12 @@ async function startServer() {
         }
       });
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      console.error("[API AUDIT - IMPORT DEVOLUÇÕES ERROR]", err);
+      return res.status(500).json({
+        success: false,
+        error: err.message || String(err),
+        stack: process.env.NODE_ENV !== "production" ? err.stack : undefined
+      });
     }
   });
 

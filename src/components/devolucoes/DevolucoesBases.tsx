@@ -69,11 +69,15 @@ export default function DevolucoesBases({ unidades, currentUser }: BasesProps) {
   const fetchBases = async () => {
     setIsLoading(true);
     try {
+      const headers = {
+        "x-user-email": currentUser?.email || "",
+        "x-selected-unit": currentUser?.unidadeId || "Todas"
+      };
       const [resCli, resMot, resHie, resRea] = await Promise.all([
-        fetch("/api/devolucoes/clientes"),
-        fetch("/api/devolucoes/motoristas"),
-        fetch("/api/devolucoes/hierarquia"),
-        fetch("/api/devolucoes/motivos")
+        fetch("/api/devolucoes/clientes", { headers }),
+        fetch("/api/devolucoes/motoristas", { headers }),
+        fetch("/api/devolucoes/hierarquia", { headers }),
+        fetch("/api/devolucoes/motivos", { headers })
       ]);
 
       if (resCli.ok) setClientes(await resCli.json());
@@ -100,7 +104,13 @@ export default function DevolucoesBases({ unidades, currentUser }: BasesProps) {
         activeSubTab === "hierarquia" ? `/api/devolucoes/hierarquia/${id}` :
         `/api/devolucoes/motivos/${id}`;
 
-      const res = await fetch(endpoint, { method: "DELETE" });
+      const res = await fetch(endpoint, { 
+        method: "DELETE",
+        headers: {
+          "x-user-email": currentUser?.email || "",
+          "x-selected-unit": currentUser?.unidadeId || "Todas"
+        }
+      });
       if (res.ok) {
         fetchBases();
       }
@@ -131,7 +141,11 @@ export default function DevolucoesBases({ unidades, currentUser }: BasesProps) {
 
       const res = await fetch(endpoint, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { 
+          "Content-Type": "application/json",
+          "x-user-email": currentUser?.email || "",
+          "x-selected-unit": currentUser?.unidadeId || "Todas"
+        },
         body: JSON.stringify(payload)
       });
 
