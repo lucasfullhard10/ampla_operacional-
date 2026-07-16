@@ -16,13 +16,22 @@ interface ModuleDef {
 
 const MODULES: ModuleDef[] = [
   { key: "dashboard", name: "📋 Painel Executivo / Dashboard", desc: "Acesso às telemetrias de conformidade e consolidados." },
+  { key: "processos", name: "💼 Central de Processos", desc: "Visualização e acompanhamento de processos operacionais." },
   { key: "veiculos", name: "🚛 Frotas / Veículos", desc: "Controle de chassis, modelos, rastreadores e documentações." },
   { key: "motoristas", name: "👥 Cadastro Condutores", desc: "Listagem de condutores habilitados, exames e logs de vencimento." },
+  { key: "central-documentos", name: "📁 Central de Documentos", desc: "Gerenciamento de uploads e documentos de condutores." },
   { key: "disponibilidade", name: "📅 Agenda Disponibilidade", desc: "Quadro de escalas preventivas e saídas programadas." },
   { key: "monitoramento", name: "🔎 Vistoria & DTs", desc: "Inspeções obrigatórias de segurança no escoamento de cargas." },
+  { key: "fechamento-dt", name: "🛡️ Fechamento de DT", desc: "Controle de fechamento de viagens e emissão de vales." },
+  { key: "noshow", name: "⚠️ Controle de No Show", desc: "Registro de faltas e justificativas operacionais." },
+  { key: "devolucoes", name: "🔄 Gestão Devoluções", desc: "Controle de devoluções, motivos e acertos de notas fiscais." },
   { key: "descargas", name: "💸 Taxas Descarga / Chapa", desc: "Lançamento de custos operantes e chapas auxiliares." },
+  { key: "financeiro-pessoas", name: "💳 Financeiro de Pessoas", desc: "Controle de faturamentos e pagamentos de colaboradores." },
+  { key: "recebimentos", name: "💵 Contas a Receber", desc: "Gestão de contas, faturas e recebimentos operacionais." },
+  { key: "manutencao", name: "🔧 Ficha Manutenção", desc: "Controle de ordens e histórico de manutenção da frota." },
   { key: "epi", name: "📦 Estoque de EPIs", desc: "Movimentação de botas, cones de sinalização e óculos de proteção." },
-  { key: "alertas", name: "⚠️ Central de Conformidades", desc: "Alertas automáticos de documentos e exames vencidos." }
+  { key: "alertas", name: "⚠️ Central de Conformidades", desc: "Alertas automáticos de documentos e exames vencidos." },
+  { key: "auditoria", name: "🔒 Logs de Auditoria", desc: "Acesso aos logs transacionais e de segurança de auditoria." }
 ];
 
 export default function MasterPermissoesView({ unidades, userEmail }: MasterPermissoesProps) {
