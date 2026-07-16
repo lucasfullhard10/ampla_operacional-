@@ -511,7 +511,7 @@ export interface DevolucaoCliente {
 }
 
 export interface DevolucaoMotorista {
-  id: string; // Matricula
+  id: string; // Matrícula como identificador único
   matricula: string;
   nome: string;
   telefone: string;
@@ -522,46 +522,56 @@ export interface DevolucaoMotorista {
 }
 
 export interface DevolucaoHierarquia {
-  id: string; // Auto generated or linked
+  id: string; // Gerado automaticamente ou vinculado
   vendedor: string;
   supervisor: string;
   gerente: string;
   area: string;
   canal: string;
-  telefone: string;
+  telefone: string; // Contato comercial direto do vendedor
   email: string;
   status: "Ativo" | "Inativo";
   unidadeId: string;
 }
 
 export interface DevolucaoMotivo {
-  id: string; // Codigo like Y40
+  id: string; // Código de devolução como chave primária (ex: "Y40")
   codigo: string;
   descricao: string;
 }
 
 export interface DevolucaoRegistro {
-  id: string; // DEV-YYYY-NNNNNN
+  id: string; // Padrão: DEV-YYYY-NNNNNN
   protocolo: string;
   data: string;
+  
+  // Informações do motorista copiadas no momento do registro (histórico resiliente)
   motoristaMatricula: string;
   motoristaNome: string;
   motoristaTelefone: string;
+  
+  // Informações do cliente
   clienteCodigo: string;
   clienteRazaoSocial: string;
-  clienteNomeFantasia: string;
+  clienteNomeFantasia?: string; // Definido como opcional caso o cliente não possua
+  
+  // Estrutura comercial copiada no momento do registro
   vendedor: string;
   supervisor: string;
   gerente: string;
   areaResponsavel: string;
   canal: string;
-  telefone: string;
+  telefone?: string; // Telefone do cliente (opcional)
   endereco: string;
+  
+  // Dados do documento fiscal e motivo
   numeroNF: string;
   valorNF: number;
   motivoCodigo: string;
   motivoDescricao: string;
-  observacao: string;
+  observacao?: string; // Opcional, pois nem todo registro exige observações detalhadas
+  
+  // Controle operacional e auditoria
   unidadeId: string;
   status: "Pendente" | "Resolvida";
   criadoPor: string;
@@ -570,4 +580,3 @@ export interface DevolucaoRegistro {
   alteradoEm?: string;
   ip?: string;
 }
-
