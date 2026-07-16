@@ -754,7 +754,7 @@ export class FileDatabase {
           } else {
             this.isSupabaseConnected = false;
             this.connectionError = resOld.error.message;
-            console.error(`[FileDatabase] Critical database query failure: Both column formats failed to resolve. Primary: ${primaryErrorMsg}, Fallback: ${resOld.error.message}`);
+            console.log(`[FileDatabase] Supabase connection is offline or restricted (e.g. exceed_egress_quota). Falling back to local offline JSON database. Reason: ${resOld.error.message}`);
             return;
           }
         } else {
@@ -769,7 +769,7 @@ export class FileDatabase {
           } else {
             this.isSupabaseConnected = false;
             this.connectionError = resNew.error.message;
-            console.error(`[FileDatabase] Critical database query failure: Both column formats failed to resolve. Primary: ${primaryErrorMsg}, Fallback: ${resNew.error.message}`);
+            console.log(`[FileDatabase] Supabase connection is offline or restricted (e.g. exceed_egress_quota). Falling back to local offline JSON database. Reason: ${resNew.error.message}`);
             return;
           }
         }
@@ -845,6 +845,10 @@ export class FileDatabase {
   public static async asyncWriteToSupabase(key: string, value: any): Promise<void> {
     const promise = (async () => {
       if (!supabase) return;
+      if (!this.isSupabaseConnected) {
+        // Skip attempting Supabase writes if we are in local offline mode
+        return;
+      }
       try {
         const payload = this.schemaVariant === "new"
           ? { chave: key, valor: value }
@@ -855,7 +859,7 @@ export class FileDatabase {
           .upsert(payload as any);
 
         if (error) {
-          console.error(`[FileDatabase] Async write error for key '${key}':`, error.message);
+          console.warn(`[FileDatabase] Async write warning for key '${key}':`, error.message);
           let recoverySucceeded = false;
           
           // Dynamic Recovery: If it fails because of missing/unrecognized columns, we can try the alternative variant!
@@ -884,24 +888,23 @@ export class FileDatabase {
               this.connectionError = null;
               recoverySucceeded = true;
             } else {
-              console.error(`[FileDatabase] Recovery write also failed for key '${key}':`, recoveryError.message);
+              console.log(`[FileDatabase] Recovery write also failed for key '${key}':`, recoveryError.message);
             }
           }
 
           if (!recoverySucceeded) {
             this.isSupabaseConnected = false;
             this.connectionError = error.message;
-            throw new Error(`Erro ao salvar no Supabase para chave '${key}': ${error.message}`);
+            console.log(`[FileDatabase] Gracefully falling back to local file storage only for key '${key}' due to Supabase write restriction.`);
           }
         } else {
           this.isSupabaseConnected = true;
           this.connectionError = null;
         }
       } catch (err: any) {
-        console.error(`[FileDatabase] Async write exception for key '${key}':`, err);
+        console.log(`[FileDatabase] Async write exception for key '${key}':`, err.message || err);
         this.isSupabaseConnected = false;
         this.connectionError = err.message || String(err);
-        throw err;
       }
     })();
 
