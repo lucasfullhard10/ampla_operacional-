@@ -553,6 +553,11 @@ export interface DatabaseSchema {
   contas_a_receber?: any[];
   contas_a_pagar?: any[];
   abastecimentos?: Abastecimento[];
+  devolucoes_clientes?: any[];
+  devolucoes_motoristas?: any[];
+  devolucoes_hierarquia?: any[];
+  devolucoes_motivos?: any[];
+  devolucoes_registros?: any[];
 }
 
 const DEFAULT_UNIDADES: Unidade[] = [
@@ -646,6 +651,19 @@ const INITIAL_DATABASE: DatabaseSchema = {
   contas_a_receber: [],
   contas_a_pagar: [],
   abastecimentos: [],
+  devolucoes_clientes: [],
+  devolucoes_motoristas: [],
+  devolucoes_hierarquia: [],
+  devolucoes_motivos: [
+    { id: "Y40", codigo: "Y40", descricao: "PDV Fechado" },
+    { id: "Y16", codigo: "Y16", descricao: "Local de entrega inexistente" },
+    { id: "Y69", codigo: "Y69", descricao: "Endereço divergente" },
+    { id: "Y07", codigo: "Y07", descricao: "Cliente ausente" },
+    { id: "Y12", codigo: "Y12", descricao: "Recusa por preço divergente" },
+    { id: "Y15", codigo: "Y15", descricao: "Avaria no transporte" },
+    { id: "Y22", codigo: "Y22", descricao: "Falta de espaço físico" }
+  ],
+  devolucoes_registros: [],
 };
 
 export class FileDatabase {
@@ -935,6 +953,27 @@ export class FileDatabase {
       }
       if (!schema.abastecimentos) {
         schema.abastecimentos = [];
+        updated = true;
+      }
+ 
+      if (!schema.devolucoes_clientes) {
+        schema.devolucoes_clientes = [];
+        updated = true;
+      }
+      if (!schema.devolucoes_motoristas) {
+        schema.devolucoes_motoristas = [];
+        updated = true;
+      }
+      if (!schema.devolucoes_hierarquia) {
+        schema.devolucoes_hierarquia = [];
+        updated = true;
+      }
+      if (!schema.devolucoes_motivos || schema.devolucoes_motivos.length === 0) {
+        schema.devolucoes_motivos = INITIAL_DATABASE.devolucoes_motivos;
+        updated = true;
+      }
+      if (!schema.devolucoes_registros) {
+        schema.devolucoes_registros = [];
         updated = true;
       }
  

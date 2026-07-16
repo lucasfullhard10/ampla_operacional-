@@ -490,3 +490,84 @@ export interface MovimentacaoFinanceira {
   criadoEm: string;
 }
 
+export interface DevolucaoCliente {
+  id: string; // Codigo do cliente
+  codigo: string;
+  razaoSocial: string;
+  nomeFantasia: string;
+  cnpj: string;
+  cidade: string;
+  uf: string;
+  telefone: string;
+  canalVenda: string;
+  vendedor: string;
+  supervisor: string;
+  gerente: string;
+  areaResponsavel: string;
+  situacao: "Ativo" | "Inativo";
+  dataCadastro: string;
+  dataAtualizacao: string;
+  unidadeId: string;
+}
+
+export interface DevolucaoMotorista {
+  id: string; // Matricula
+  matricula: string;
+  nome: string;
+  telefone: string;
+  funcao: string;
+  unidadeId: string;
+  status: "Ativo" | "Inativo";
+  dataCadastro: string;
+}
+
+export interface DevolucaoHierarquia {
+  id: string; // Auto generated or linked
+  vendedor: string;
+  supervisor: string;
+  gerente: string;
+  area: string;
+  canal: string;
+  telefone: string;
+  email: string;
+  status: "Ativo" | "Inativo";
+  unidadeId: string;
+}
+
+export interface DevolucaoMotivo {
+  id: string; // Codigo like Y40
+  codigo: string;
+  descricao: string;
+}
+
+export interface DevolucaoRegistro {
+  id: string; // DEV-YYYY-NNNNNN
+  protocolo: string;
+  data: string;
+  motoristaMatricula: string;
+  motoristaNome: string;
+  motoristaTelefone: string;
+  clienteCodigo: string;
+  clienteRazaoSocial: string;
+  clienteNomeFantasia: string;
+  vendedor: string;
+  supervisor: string;
+  gerente: string;
+  areaResponsavel: string;
+  canal: string;
+  telefone: string;
+  endereco: string;
+  numeroNF: string;
+  valorNF: number;
+  motivoCodigo: string;
+  motivoDescricao: string;
+  observacao: string;
+  unidadeId: string;
+  status: "Pendente" | "Resolvida";
+  criadoPor: string;
+  criadoEm: string;
+  alteradoPor?: string;
+  alteradoEm?: string;
+  ip?: string;
+}
+

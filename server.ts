@@ -4795,7 +4795,18 @@ async function startServer() {
 
         // New financial inputs
         reentregaValor,
-        abastecimentoValor
+        abastecimentoValor,
+
+        // Validação Financeira de Reentregas
+        reentrega_validada,
+        status_validacao,
+        data_validacao,
+        responsavel_validacao,
+        observacoes_validacao,
+        documento_validacao_url,
+        documento_validacao_nome,
+        documento_validacao_tipo,
+        documento_validacao_data_upload
       } = req.body;
 
       if (!dt) {
@@ -4974,6 +4985,21 @@ async function startServer() {
         return anx; // Already processed or external URL
       });
 
+      let savedDocUrl = documento_validacao_url || "";
+      if (savedDocUrl && savedDocUrl.startsWith("data:")) {
+        const docAttachmentId = `doc-val-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+        FileDatabase.set(`anexo_conteudo_${docAttachmentId}` as any, {
+          id: docAttachmentId,
+          nome: documento_validacao_nome || "comprovante_validacao",
+          tipo: documento_validacao_tipo || "OUTROS",
+          base64: savedDocUrl,
+          dt: dt,
+          dataUpload: documento_validacao_data_upload || dateStr,
+          usuario: responsavel_validacao || user.email
+        } as any);
+        savedDocUrl = `/api/fechamentos_dt/anexo/${docAttachmentId}`;
+      }
+
       const closureData = {
         dataFechamento: dateStr,
         horaFechamento: timeStr,
@@ -5027,7 +5053,18 @@ async function startServer() {
         descargaResponsavel: req.body.descargaResponsavel || "",
         reentregaValor: req.body.reentregaValor !== undefined ? Number(req.body.reentregaValor) : 0,
         abastecimentoValor: req.body.abastecimentoValor !== undefined ? Number(req.body.abastecimentoValor) : 0,
-        anexos: processedAnexos
+        anexos: processedAnexos,
+
+        // Validação Financeira de Reentregas
+        reentrega_validada: reentrega_validada !== undefined ? Boolean(reentrega_validada) : false,
+        status_validacao: status_validacao || "PENDENTE DE VALIDAÇÃO",
+        data_validacao: data_validacao || "",
+        responsavel_validacao: responsavel_validacao || "",
+        observacoes_validacao: observacoes_validacao || "",
+        documento_validacao_url: savedDocUrl,
+        documento_validacao_nome: documento_validacao_nome || "",
+        documento_validacao_tipo: documento_validacao_tipo || "",
+        documento_validacao_data_upload: documento_validacao_data_upload || ""
       };
 
       let finalClosure: any;
@@ -5592,6 +5629,613 @@ async function startServer() {
       );
 
       res.json({ success: true, message: "Vale excluído com sucesso." });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ----------------------------------------------------
+  // DEVOLUÇÕES API ROUTES
+  // ----------------------------------------------------
+  // CLIENTES
+  app.get("/api/devolucoes/clientes", (req, res) => {
+    try {
+      const user = getRequestUser(req);
+      if (!user) return res.status(401).json({ error: "Não autorizado" });
+      const list = FileDatabase.get("devolucoes_clientes" as any) || [];
+      const activeUnit = getRequestUnitContext(req, user);
+      if (activeUnit === "Todas") return res.json(list);
+      return res.json(list.filter((c: any) => c.unidadeId === activeUnit));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/devolucoes/clientes", (req, res) => {
+    try {
+      const user = getRequestUser(req);
+      if (!user) return res.status(401).json({ error: "Não autorizado" });
+      const client = req.body;
+      if (!client.id) client.id = client.codigo;
+      client.dataCadastro = client.dataCadastro || new Date().toISOString().split("T")[0];
+      client.dataAtualizacao = new Date().toISOString().split("T")[0];
+      
+      const list = FileDatabase.get("devolucoes_clientes" as any) || [];
+      const idx = list.findIndex((c: any) => c.id === client.id);
+      if (idx !== -1) {
+        list[idx] = { ...list[idx], ...client };
+      } else {
+        list.push(client);
+      }
+      FileDatabase.set("devolucoes_clientes" as any, list);
+      return res.json({ success: true, client });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/devolucoes/clientes/bulk", (req, res) => {
+    try {
+      const user = getRequestUser(req);
+      if (!user) return res.status(401).json({ error: "Não autorizado" });
+      const clients = req.body;
+      if (!Array.isArray(clients)) return res.status(400).json({ error: "Body deve ser array" });
+
+      const list = FileDatabase.get("devolucoes_clientes" as any) || [];
+      let newCount = 0;
+      let updateCount = 0;
+
+      clients.forEach((c: any) => {
+        if (!c.id) c.id = c.codigo;
+        c.dataCadastro = c.dataCadastro || new Date().toISOString().split("T")[0];
+        c.dataAtualizacao = new Date().toISOString().split("T")[0];
+
+        const idx = list.findIndex((x: any) => x.id === c.id);
+        if (idx !== -1) {
+          list[idx] = { ...list[idx], ...c };
+          updateCount++;
+        } else {
+          list.push(c);
+          newCount++;
+        }
+      });
+
+      FileDatabase.set("devolucoes_clientes" as any, list);
+      return res.json({ success: true, newCount, updateCount, total: list.length });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.delete("/api/devolucoes/clientes/:id", (req, res) => {
+    try {
+      const user = getRequestUser(req);
+      if (!user) return res.status(401).json({ error: "Não autorizado" });
+      const list = FileDatabase.get("devolucoes_clientes" as any) || [];
+      const filtered = list.filter((c: any) => c.id !== req.params.id);
+      FileDatabase.set("devolucoes_clientes" as any, filtered);
+      return res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // MOTORISTAS
+  app.get("/api/devolucoes/motoristas", (req, res) => {
+    try {
+      const user = getRequestUser(req);
+      if (!user) return res.status(401).json({ error: "Não autorizado" });
+      const list = FileDatabase.get("devolucoes_motoristas" as any) || [];
+      const activeUnit = getRequestUnitContext(req, user);
+      if (activeUnit === "Todas") return res.json(list);
+      return res.json(list.filter((m: any) => m.unidadeId === activeUnit));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/devolucoes/motoristas", (req, res) => {
+    try {
+      const user = getRequestUser(req);
+      if (!user) return res.status(401).json({ error: "Não autorizado" });
+      const driver = req.body;
+      if (!driver.id) driver.id = driver.matricula;
+      driver.dataCadastro = driver.dataCadastro || new Date().toISOString().split("T")[0];
+
+      const list = FileDatabase.get("devolucoes_motoristas" as any) || [];
+      const idx = list.findIndex((m: any) => m.id === driver.id);
+      if (idx !== -1) {
+        list[idx] = { ...list[idx], ...driver };
+      } else {
+        list.push(driver);
+      }
+      FileDatabase.set("devolucoes_motoristas" as any, list);
+      return res.json({ success: true, driver });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/devolucoes/motoristas/bulk", (req, res) => {
+    try {
+      const user = getRequestUser(req);
+      if (!user) return res.status(401).json({ error: "Não autorizado" });
+      const drivers = req.body;
+      if (!Array.isArray(drivers)) return res.status(400).json({ error: "Body deve ser array" });
+
+      const list = FileDatabase.get("devolucoes_motoristas" as any) || [];
+      let newCount = 0;
+      let updateCount = 0;
+
+      drivers.forEach((d: any) => {
+        if (!d.id) d.id = d.matricula;
+        d.dataCadastro = d.dataCadastro || new Date().toISOString().split("T")[0];
+
+        const idx = list.findIndex((x: any) => x.id === d.id);
+        if (idx !== -1) {
+          list[idx] = { ...list[idx], ...d };
+          updateCount++;
+        } else {
+          list.push(d);
+          newCount++;
+        }
+      });
+
+      FileDatabase.set("devolucoes_motoristas" as any, list);
+      return res.json({ success: true, newCount, updateCount, total: list.length });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.delete("/api/devolucoes/motoristas/:id", (req, res) => {
+    try {
+      const user = getRequestUser(req);
+      if (!user) return res.status(401).json({ error: "Não autorizado" });
+      const list = FileDatabase.get("devolucoes_motoristas" as any) || [];
+      const filtered = list.filter((m: any) => m.id !== req.params.id);
+      FileDatabase.set("devolucoes_motoristas" as any, filtered);
+      return res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // HIERARQUIA COMERCIAL
+  app.get("/api/devolucoes/hierarquia", (req, res) => {
+    try {
+      const user = getRequestUser(req);
+      if (!user) return res.status(401).json({ error: "Não autorizado" });
+      const list = FileDatabase.get("devolucoes_hierarquia" as any) || [];
+      const activeUnit = getRequestUnitContext(req, user);
+      if (activeUnit === "Todas") return res.json(list);
+      return res.json(list.filter((h: any) => h.unidadeId === activeUnit));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/devolucoes/hierarquia", (req, res) => {
+    try {
+      const user = getRequestUser(req);
+      if (!user) return res.status(401).json({ error: "Não autorizado" });
+      const hierarchy = req.body;
+      if (!hierarchy.id) hierarchy.id = `hie-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+
+      const list = FileDatabase.get("devolucoes_hierarquia" as any) || [];
+      const idx = list.findIndex((h: any) => h.id === hierarchy.id || (h.vendedor === hierarchy.vendedor && h.unidadeId === hierarchy.unidadeId));
+      if (idx !== -1) {
+        list[idx] = { ...list[idx], ...hierarchy };
+      } else {
+        list.push(hierarchy);
+      }
+      FileDatabase.set("devolucoes_hierarquia" as any, list);
+      return res.json({ success: true, hierarchy });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/devolucoes/hierarquia/bulk", (req, res) => {
+    try {
+      const user = getRequestUser(req);
+      if (!user) return res.status(401).json({ error: "Não autorizado" });
+      const items = req.body;
+      if (!Array.isArray(items)) return res.status(400).json({ error: "Body deve ser array" });
+
+      const list = FileDatabase.get("devolucoes_hierarquia" as any) || [];
+      let newCount = 0;
+      let updateCount = 0;
+
+      items.forEach((item: any) => {
+        if (!item.id) item.id = `hie-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+
+        const idx = list.findIndex((x: any) => x.id === item.id || (x.vendedor === item.vendedor && x.unidadeId === item.unidadeId));
+        if (idx !== -1) {
+          list[idx] = { ...list[idx], ...item };
+          updateCount++;
+        } else {
+          list.push(item);
+          newCount++;
+        }
+      });
+
+      FileDatabase.set("devolucoes_hierarquia" as any, list);
+      return res.json({ success: true, newCount, updateCount, total: list.length });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.delete("/api/devolucoes/hierarquia/:id", (req, res) => {
+    try {
+      const user = getRequestUser(req);
+      if (!user) return res.status(401).json({ error: "Não autorizado" });
+      const list = FileDatabase.get("devolucoes_hierarquia" as any) || [];
+      const filtered = list.filter((h: any) => h.id !== req.params.id);
+      FileDatabase.set("devolucoes_hierarquia" as any, filtered);
+      return res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // MOTIVOS
+  app.get("/api/devolucoes/motivos", (req, res) => {
+    try {
+      const user = getRequestUser(req);
+      if (!user) return res.status(401).json({ error: "Não autorizado" });
+      const list = FileDatabase.get("devolucoes_motivos" as any) || [];
+      return res.json(list);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/devolucoes/motivos", (req, res) => {
+    try {
+      const user = getRequestUser(req);
+      if (!user) return res.status(401).json({ error: "Não autorizado" });
+      const reason = req.body;
+      if (!reason.id) reason.id = reason.codigo;
+
+      const list = FileDatabase.get("devolucoes_motivos" as any) || [];
+      const idx = list.findIndex((r: any) => r.id === reason.id);
+      if (idx !== -1) {
+        list[idx] = { ...list[idx], ...reason };
+      } else {
+        list.push(reason);
+      }
+      FileDatabase.set("devolucoes_motivos" as any, list);
+      return res.json({ success: true, reason });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.delete("/api/devolucoes/motivos/:id", (req, res) => {
+    try {
+      const user = getRequestUser(req);
+      if (!user) return res.status(401).json({ error: "Não autorizado" });
+      const list = FileDatabase.get("devolucoes_motivos" as any) || [];
+      const filtered = list.filter((r: any) => r.id !== req.params.id);
+      FileDatabase.set("devolucoes_motivos" as any, filtered);
+      return res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // REGISTROS (DEVOLUÇÕES)
+  app.get("/api/devolucoes/registros", (req, res) => {
+    try {
+      const user = getRequestUser(req);
+      if (!user) return res.status(401).json({ error: "Não autorizado" });
+      const list = FileDatabase.get("devolucoes_registros" as any) || [];
+      const activeUnit = getRequestUnitContext(req, user);
+      if (activeUnit === "Todas") return res.json(list);
+      return res.json(list.filter((r: any) => r.unidadeId === activeUnit));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/devolucoes/registros", (req, res) => {
+    try {
+      const user = getRequestUser(req);
+      if (!user) return res.status(401).json({ error: "Não autorizado" });
+      
+      const record = req.body;
+      
+      // Auto-generate protocol
+      if (!record.protocolo) {
+        const list = FileDatabase.get("devolucoes_registros" as any) || [];
+        const currentYear = new Date().getFullYear();
+        const yearRecords = list.filter((r: any) => r.protocolo && r.protocolo.startsWith(`DEV-${currentYear}`));
+        let nextSeq = 1;
+        if (yearRecords.length > 0) {
+          const seqs = yearRecords.map((r: any) => {
+            const parts = r.protocolo.split("-");
+            return parseInt(parts[parts.length - 1], 10);
+          }).filter((s: number) => !isNaN(s));
+          if (seqs.length > 0) {
+            nextSeq = Math.max(...seqs) + 1;
+          }
+        }
+        record.protocolo = `DEV-${currentYear}-${String(nextSeq).padStart(6, "0")}`;
+      }
+
+      if (!record.id) {
+        record.id = record.protocolo;
+      }
+      
+      record.criadoPor = user.nome;
+      record.criadoEm = new Date().toISOString();
+      record.ip = req.ip || req.headers["x-forwarded-for"] || "127.0.0.1";
+
+      const list = FileDatabase.get("devolucoes_registros" as any) || [];
+      list.push(record);
+      FileDatabase.set("devolucoes_registros" as any, list);
+
+      // Audit log entry
+      try {
+        const auditList = FileDatabase.get("auditoria") || [];
+        auditList.push({
+          id: `aud-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+          usuario: user.email,
+          data: new Date().toISOString().split("T")[0],
+          hora: new Date().toTimeString().split(" ")[0],
+          acao: "CREATE_DEVOLUCOES_REGISTRO",
+          detalhes: `Devolucao ${record.protocolo} criada para o cliente ${record.clienteNomeFantasia} (${record.clienteCodigo}) por ${user.nome}. IP: ${record.ip}.`
+        });
+        FileDatabase.set("auditoria", auditList);
+      } catch (ae) {}
+
+      return res.json({ success: true, record });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.put("/api/devolucoes/registros/:id", (req, res) => {
+    try {
+      const user = getRequestUser(req);
+      if (!user) return res.status(401).json({ error: "Não autorizado" });
+      
+      const recordId = req.params.id;
+      const updatedFields = req.body;
+      
+      const list = FileDatabase.get("devolucoes_registros" as any) || [];
+      const idx = list.findIndex((r: any) => r.id === recordId);
+      if (idx === -1) return res.status(404).json({ error: "Registro não encontrado" });
+      
+      const oldStatus = list[idx].status;
+      list[idx] = {
+        ...list[idx],
+        ...updatedFields,
+        alteradoPor: user.nome,
+        alteradoEm: new Date().toISOString()
+      };
+      
+      FileDatabase.set("devolucoes_registros" as any, list);
+
+      // Audit log entry
+      try {
+        const auditList = FileDatabase.get("auditoria") || [];
+        auditList.push({
+          id: `aud-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+          usuario: user.email,
+          data: new Date().toISOString().split("T")[0],
+          hora: new Date().toTimeString().split(" ")[0],
+          acao: "UPDATE_DEVOLUCOES_REGISTRO",
+          detalhes: `Devolucao ${list[idx].protocolo} atualizada por ${user.nome}. Status de '${oldStatus}' para '${list[idx].status}'.`
+        });
+        FileDatabase.set("auditoria", auditList);
+      } catch (ae) {}
+
+      return res.json({ success: true, record: list[idx] });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.delete("/api/devolucoes/registros/:id", (req, res) => {
+    try {
+      const user = getRequestUser(req);
+      if (!user) return res.status(401).json({ error: "Não autorizado" });
+      
+      const list = FileDatabase.get("devolucoes_registros" as any) || [];
+      const idx = list.findIndex((r: any) => r.id === req.params.id);
+      if (idx === -1) return res.status(404).json({ error: "Registro não encontrado" });
+
+      const removed = list.splice(idx, 1)[0];
+      FileDatabase.set("devolucoes_registros" as any, list);
+
+      // Audit log entry
+      try {
+        const auditList = FileDatabase.get("auditoria") || [];
+        auditList.push({
+          id: `aud-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+          usuario: user.email,
+          data: new Date().toISOString().split("T")[0],
+          hora: new Date().toTimeString().split(" ")[0],
+          acao: "DELETE_DEVOLUCOES_REGISTRO",
+          detalhes: `Devolucao ${removed.protocolo} excluida por ${user.nome}. Cliente: ${removed.clienteNomeFantasia}. NF: ${removed.numeroNF}. Valor: R$ ${removed.valorNF}.`
+        });
+        FileDatabase.set("auditoria", auditList);
+      } catch (ae) {}
+
+      return res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/devolucoes/import-sheet", (req, res) => {
+    try {
+      const user = getRequestUser(req);
+      if (!user) return res.status(401).json({ error: "Não autorizado" });
+      
+      const { data } = req.body;
+      if (!data) return res.status(400).json({ error: "Dados ausentes" });
+
+      const { clientes, motoristas, hierarquia, motivos, historico } = data;
+      
+      let clientResults = { success: 0, total: 0 };
+      let driverResults = { success: 0, total: 0 };
+      let hierarchyResults = { success: 0, total: 0 };
+      let reasonsResults = { success: 0, total: 0 };
+      let historyResults = { success: 0, total: 0 };
+
+      // Process clients
+      if (Array.isArray(clientes) && clientes.length > 0) {
+        const list = FileDatabase.get("devolucoes_clientes" as any) || [];
+        clientes.forEach((c: any) => {
+          if (!c.codigo) return;
+          const id = String(c.codigo);
+          c.id = id;
+          c.dataCadastro = c.dataCadastro || new Date().toISOString().split("T")[0];
+          c.dataAtualizacao = new Date().toISOString().split("T")[0];
+          
+          const idx = list.findIndex((x: any) => x.id === id);
+          if (idx !== -1) {
+            list[idx] = { ...list[idx], ...c };
+          } else {
+            list.push(c);
+          }
+          clientResults.success++;
+        });
+        clientResults.total = clientes.length;
+        FileDatabase.set("devolucoes_clientes" as any, list);
+      }
+
+      // Process motoristas
+      if (Array.isArray(motoristas) && motoristas.length > 0) {
+        const list = FileDatabase.get("devolucoes_motoristas" as any) || [];
+        motoristas.forEach((m: any) => {
+          if (!m.matricula) return;
+          const id = String(m.matricula);
+          m.id = id;
+          m.dataCadastro = m.dataCadastro || new Date().toISOString().split("T")[0];
+          
+          const idx = list.findIndex((x: any) => x.id === id);
+          if (idx !== -1) {
+            list[idx] = { ...list[idx], ...m };
+          } else {
+            list.push(m);
+          }
+          driverResults.success++;
+        });
+        driverResults.total = motoristas.length;
+        FileDatabase.set("devolucoes_motoristas" as any, list);
+      }
+
+      // Process hierarquia
+      if (Array.isArray(hierarquia) && hierarquia.length > 0) {
+        const list = FileDatabase.get("devolucoes_hierarquia" as any) || [];
+        hierarquia.forEach((h: any) => {
+          if (!h.vendedor) return;
+          h.id = h.id || `hie-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+          
+          const idx = list.findIndex((x: any) => x.id === h.id || (x.vendedor === h.vendedor && x.unidadeId === h.unidadeId));
+          if (idx !== -1) {
+            list[idx] = { ...list[idx], ...h };
+          } else {
+            list.push(h);
+          }
+          hierarchyResults.success++;
+        });
+        hierarchyResults.total = hierarquia.length;
+        FileDatabase.set("devolucoes_hierarquia" as any, list);
+      }
+
+      // Process motivos
+      if (Array.isArray(motivos) && motivos.length > 0) {
+        const list = FileDatabase.get("devolucoes_motivos" as any) || [];
+        motivos.forEach((r: any) => {
+          if (!r.codigo) return;
+          const id = String(r.codigo);
+          r.id = id;
+          
+          const idx = list.findIndex((x: any) => x.id === id);
+          if (idx !== -1) {
+            list[idx] = { ...list[idx], ...r };
+          } else {
+            list.push(r);
+          }
+          reasonsResults.success++;
+        });
+        reasonsResults.total = motivos.length;
+        FileDatabase.set("devolucoes_motivos" as any, list);
+      }
+
+      // Process historico
+      if (Array.isArray(historico) && historico.length > 0) {
+        const list = FileDatabase.get("devolucoes_registros" as any) || [];
+        const currentYear = new Date().getFullYear();
+        let nextSeq = 1;
+
+        const yearRecords = list.filter((r: any) => r.protocolo && r.protocolo.startsWith(`DEV-${currentYear}`));
+        if (yearRecords.length > 0) {
+          const seqs = yearRecords.map((r: any) => {
+            const parts = r.protocolo.split("-");
+            return parseInt(parts[parts.length - 1], 10);
+          }).filter((s: number) => !isNaN(s));
+          if (seqs.length > 0) {
+            nextSeq = Math.max(...seqs) + 1;
+          }
+        }
+
+        historico.forEach((rec: any) => {
+          if (!rec.numeroNF) return;
+          
+          if (!rec.protocolo) {
+            rec.protocolo = `DEV-${currentYear}-${String(nextSeq).padStart(6, "0")}`;
+            nextSeq++;
+          }
+          if (!rec.id) rec.id = rec.protocolo;
+          
+          rec.criadoPor = rec.criadoPor || user.nome;
+          rec.criadoEm = rec.criadoEm || new Date().toISOString();
+          rec.status = rec.status || "Pendente";
+          rec.ip = "127.0.0.1";
+
+          const idx = list.findIndex((x: any) => x.id === rec.id || (x.numeroNF === rec.numeroNF && x.unidadeId === rec.unidadeId));
+          if (idx !== -1) {
+            list[idx] = { ...list[idx], ...rec };
+          } else {
+            list.push(rec);
+          }
+          historyResults.success++;
+        });
+        historyResults.total = historico.length;
+        FileDatabase.set("devolucoes_registros" as any, list);
+      }
+
+      // Register in Audit logs
+      try {
+        const auditList = FileDatabase.get("auditoria") || [];
+        auditList.push({
+          id: `aud-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+          usuario: user.email,
+          data: new Date().toISOString().split("T")[0],
+          hora: new Date().toTimeString().split(" ")[0],
+          acao: "IMPORT_DEVOLUCOES_SHEET",
+          detalhes: `Importacao inteligente realizada por ${user.nome}. Clientes: ${clientResults.success}, Motoristas: ${driverResults.success}, Hierarquia: ${hierarchyResults.success}, Motivos: ${reasonsResults.success}, Devolucoes: ${historyResults.success}.`
+        });
+        FileDatabase.set("auditoria", auditList);
+      } catch (ae) {}
+
+      return res.json({
+        success: true,
+        summary: {
+          clientes: clientResults,
+          motoristas: driverResults,
+          hierarquia: hierarchyResults,
+          motivos: reasonsResults,
+          historico: historyResults
+        }
+      });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
