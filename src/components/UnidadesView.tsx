@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Plus, Trash, Globe, Shield, MapPin, Search, User, Mail, Phone, Lock, Edit, Check, Settings, ShieldCheck } from "lucide-react";
+import { Plus, Trash, Globe, Shield, MapPin, Search, User, Mail, Phone, Lock, Edit, Check, Settings, ShieldCheck, Building2, AlertTriangle, X } from "lucide-react";
 import { Unidade, Usuario } from "../types";
 import { NotificationModal, ConfirmModal, NotificationType, ConfirmType } from "./NotificationModal";
 
@@ -105,7 +105,7 @@ export default function UnidadesView({ unidades, onRefresh, userRole, userEmail 
         setEmail("");
         setTelefone("");
         
-        let successMessage = "✅ Registro salvo com sucesso.";
+        let successMessage = "Registro salvo com sucesso.";
         if (data.generatedUser) {
           successMessage += `\n\nUsuário de Unidade gerado: \nLogin: ${data.generatedUser.email} | Senha temporária: ${data.generatedUser.senha}`;
         }
@@ -120,13 +120,13 @@ export default function UnidadesView({ unidades, onRefresh, userRole, userEmail 
         const data = await res.json();
         setNotification({
           type: "error",
-          message: `❌ Não foi possível cadastrar a unidade. Motivo: ${data.error || "Operação rejeitada pelo servidor."}`
+          message: `Não foi possível cadastrar a unidade. Motivo: ${data.error || "Operação rejeitada pelo servidor."}`
         });
       }
     } catch (err) {
       setNotification({
         type: "error",
-        message: "❌ Não foi possível cadastrar a unidade. Motivo: Conexão indisponível."
+        message: "Não foi possível cadastrar a unidade. Motivo: Conexão indisponível."
       });
     } finally {
       setSubmitting(false);
@@ -154,20 +154,20 @@ export default function UnidadesView({ unidades, onRefresh, userRole, userEmail 
           if (res.ok) {
             setNotification({
               type: "success",
-              message: "✅ Registro excluído com sucesso."
+              message: "Registro excluído com sucesso."
             });
             onRefresh();
           } else {
             const err = await res.json();
             setNotification({
               type: "error",
-              message: `❌ Não foi possível excluir a unidade. Motivo: ${err.error || "Apenas Administradores MASTER podem excluir unidades."}`
+              message: `Não foi possível excluir a unidade. Motivo: ${err.error || "Apenas Administradores MASTER podem excluir unidades."}`
             });
           }
         } catch (e) {
           setNotification({
             type: "error",
-            message: "❌ Não foi possível excluir. Motivo: Erro operacional de conexão."
+            message: "Não foi possível excluir. Motivo: Erro operacional de conexão."
           });
         }
       }
@@ -180,7 +180,7 @@ export default function UnidadesView({ unidades, onRefresh, userRole, userEmail 
     if (!uEmail.trim() || !uNome.trim() || !uSenha.trim() || !uUnidadeId) {
       setNotification({
         type: "error",
-        message: "❌ E-mail, Nome, Senha e Unidade Sede são obrigatórios para registrar o usuário."
+        message: "E-mail, Nome, Senha e Unidade Sede são obrigatórios para registrar o usuário."
       });
       return;
     }
@@ -207,7 +207,7 @@ export default function UnidadesView({ unidades, onRefresh, userRole, userEmail 
       if (res.ok) {
         setNotification({
           type: "success",
-          message: `✅ Usuário "${uNome}" criado com sucesso! Sua senha de acesso padrão é: ${uSenha}`
+          message: `Usuário "${uNome}" criado com sucesso! Sua senha de acesso padrão é: ${uSenha}`
         });
         setUEmail("");
         setUNome("");
@@ -218,13 +218,13 @@ export default function UnidadesView({ unidades, onRefresh, userRole, userEmail 
         const data = await res.json();
         setNotification({
           type: "error",
-          message: `❌ Erro ao cadastrar usuário: ${data.error || "Rejeitado."}`
+          message: `Erro ao cadastrar usuário: ${data.error || "Rejeitado."}`
         });
       }
     } catch (err) {
       setNotification({
         type: "error",
-        message: "❌ Conexão indisponível com a API de usuários."
+        message: "Conexão indisponível com a API de usuários."
       });
     } finally {
       setUCreating(false);
@@ -244,20 +244,20 @@ export default function UnidadesView({ unidades, onRefresh, userRole, userEmail 
           if (res.ok) {
             setNotification({
               type: "success",
-              message: "✅ Usuário excluído com sucesso."
+              message: "Usuário excluído com sucesso."
             });
             fetchUsuarios();
           } else {
             const data = await res.json();
             setNotification({
               type: "error",
-              message: `❌ Erro ao excluir usuário: ${data.error || "Operação rejeitada."}`
+              message: `Erro ao excluir usuário: ${data.error || "Operação rejeitada."}`
             });
           }
         } catch (err) {
           setNotification({
             type: "error",
-            message: "❌ Falha ao tentar desvincular usuário."
+            message: "Falha ao tentar desvincular usuário."
           });
         }
       }
@@ -288,7 +288,7 @@ export default function UnidadesView({ unidades, onRefresh, userRole, userEmail 
       if (res.ok) {
         setNotification({
           type: "success",
-          message: `✅ Permissões e dados do usuário "${selectedUserForEdit.nome}" salvos com sucesso!`
+          message: `Permissões e dados do usuário "${selectedUserForEdit.nome}" salvos com sucesso!`
         });
         setSelectedUserForEdit(null);
         fetchUsuarios();
@@ -296,13 +296,13 @@ export default function UnidadesView({ unidades, onRefresh, userRole, userEmail 
         const data = await res.json();
         setNotification({
           type: "error",
-          message: `❌ Não foi possível salvar permissões: ${data.error || "Rejeitado."}`
+          message: `Não foi possível salvar permissões: ${data.error || "Rejeitado."}`
         });
       }
     } catch (err) {
       setNotification({
         type: "error",
-        message: "❌ Falha operacional ao tentar salvar as permissões."
+        message: "Falha operacional ao tentar salvar as permissões."
       });
     }
   };
@@ -328,24 +328,24 @@ export default function UnidadesView({ unidades, onRefresh, userRole, userEmail 
       <div className="flex border-b border-slate-800/80 gap-1 font-mono text-[11px] select-none">
         <button
           onClick={() => setActiveSubtab("unidades")}
-          className={`px-4 py-2 hover:text-slate-200 transition font-bold border-b-2 uppercase tracking-tight focus:outline-none ${
+          className={`px-4 py-2 hover:text-slate-200 transition font-bold border-b-2 uppercase tracking-tight focus:outline-none flex items-center gap-1.5 ${
             activeSubtab === "unidades"
               ? "border-sky-500 text-sky-400 font-bold"
               : "border-transparent text-slate-500"
           }`}
         >
-          ⚙️ Cadastro de Filiais
+          <Building2 className="w-4 h-4" /> Cadastro de Filiais
         </button>
         {isMaster && (
           <button
             onClick={() => setActiveSubtab("permissoes")}
-            className={`px-4 py-2 hover:text-slate-200 transition font-bold border-b-2 uppercase tracking-tight focus:outline-none ${
+            className={`px-4 py-2 hover:text-slate-200 transition font-bold border-b-2 uppercase tracking-tight focus:outline-none flex items-center gap-1.5 ${
               activeSubtab === "permissoes"
                 ? "border-sky-500 text-sky-400 font-bold"
                 : "border-transparent text-slate-500"
             }`}
           >
-            🔒 Gerenciar Acesso às Unidades
+            <Lock className="w-4 h-4" /> Gerenciar Acesso às Unidades
           </button>
         )}
       </div>
@@ -365,8 +365,9 @@ export default function UnidadesView({ unidades, onRefresh, userRole, userEmail 
             </div>
 
             {!isMaster ? (
-              <div className="p-3.5 bg-rose-500/10 border border-rose-500/20 rounded-lg text-[11px] text-rose-400 font-mono">
-                ⚠️ Bloqueado: Apenas Administradores Master têm privilégios para gerenciar ou excluir unidades.
+              <div className="p-3.5 bg-rose-500/10 border border-rose-500/20 rounded-lg text-[11px] text-rose-400 font-mono flex items-center gap-1.5">
+                <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
+                <span>Bloqueado: Apenas Administradores Master têm privilégios para gerenciar ou excluir unidades.</span>
               </div>
             ) : (
               <form onSubmit={handleCreate} className="space-y-3 font-sans text-xs">
@@ -795,9 +796,9 @@ export default function UnidadesView({ unidades, onRefresh, userRole, userEmail 
                   </div>
                   <button
                     onClick={() => setSelectedUserForEdit(null)}
-                    className="text-slate-500 hover:text-slate-300 font-bold"
+                    className="text-slate-500 hover:text-slate-300 font-bold flex items-center gap-1 text-xs"
                   >
-                    FECHAR ✕
+                    FECHAR <X className="w-4 h-4" />
                   </button>
                 </div>
 

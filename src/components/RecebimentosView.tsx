@@ -445,7 +445,7 @@ export default function RecebimentosView({ currentUser, unidades, onRefresh }: R
       return;
     }
 
-    if (!window.confirm(`⚠️ EXPURGO DE SEGURANÇA MÁXIMA\n\nTem certeza de que deseja expurgar permanentemente o título faturado #${item.id} do cliente ${item.cliente}?\nEsta ação registrará um log de auditoria permanente.`)) {
+    if (!window.confirm(`EXPURGO DE SEGURANÇA MÁXIMA\n\nTem certeza de que deseja expurgar permanentemente o título faturado #${item.id} do cliente ${item.cliente}?\nEsta ação registrará um log de auditoria permanente.`)) {
       return;
     }
 
@@ -632,7 +632,7 @@ export default function RecebimentosView({ currentUser, unidades, onRefresh }: R
       return;
     }
 
-    if (!window.confirm(`⚠️ EXPURGO DE SEGURANÇA MÁXIMA\n\nTem certeza de que deseja expurgar permanentemente o título a pagar #${item.id} do motorista ${item.motoristaNome}?\nEsta ação registrará um log de auditoria permanente.`)) {
+    if (!window.confirm(`EXPURGO DE SEGURANÇA MÁXIMA\n\nTem certeza de que deseja expurgar permanentemente o título a pagar #${item.id} do motorista ${item.motoristaNome}?\nEsta ação registrará um log de auditoria permanente.`)) {
       return;
     }
 
@@ -759,7 +759,7 @@ export default function RecebimentosView({ currentUser, unidades, onRefresh }: R
     let totalBilled = 0;
 
     const todayStr = new Date().toISOString().split("T")[0];
-    const currentMonth = "2026-06"; // default system baseline month
+    const currentMonth = new Date().toISOString().slice(0, 7); // dynamic system current month
 
     titles.forEach((t) => {
       if (t.status !== "Cancelado") {
@@ -1353,7 +1353,7 @@ export default function RecebimentosView({ currentUser, unidades, onRefresh }: R
                   <option value="Recebido">Recebido (Quitação)</option>
                   <option value="Parcial">Recebido Parcial</option>
                   <option value="Vencidos">Vencido (Prazo Excedido)</option>
-                  <option value="Critico30">Atrasos Críticos (&gt; 30 dias) ⚠️</option>
+                  <option value="Critico30">Atrasos Críticos (&gt; 30 dias)</option>
                   <option value="Em Contestação">Em Contestação</option>
                   <option value="Cancelado">Cancelado</option>
                 </select>

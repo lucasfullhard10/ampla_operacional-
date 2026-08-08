@@ -3,7 +3,7 @@ import {
   WalletCards, Search, Filter, ArrowUpRight, ArrowDownLeft, AlertCircle,
   TrendingUp, TrendingDown, DollarSign, ArrowLeft, Calendar, FileText,
   ShieldAlert, CheckCircle, RefreshCw, X, SlidersHorizontal, Lock, Unlock, Check,
-  Trash2, Eye, Printer, Download, CreditCard, Clock, MapPin, Shield
+  Trash2, Eye, Printer, Download, CreditCard, Clock, MapPin, Shield, Truck, History
 } from "lucide-react";
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend
@@ -514,7 +514,7 @@ export default function FinanceiroPessoasView({ currentUser, unidades, onRefresh
         const sortedMovs = [...activeMovs].sort((a, b) => a.data.localeCompare(b.data));
         suggestedStart = sortedMovs[0].data;
       } else {
-        suggestedStart = "2026-06-16";
+        suggestedStart = new Date().toISOString().split("T")[0];
       }
     }
     
@@ -920,7 +920,7 @@ export default function FinanceiroPessoasView({ currentUser, unidades, onRefresh
                     : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"
                 }`}
               >
-                🚛 Contas Ativas da Frota
+                <span className="flex items-center justify-center gap-1.5"><Truck className="w-4 h-4 shrink-0" /> Contas Ativas da Frota</span>
               </button>
               <button
                 onClick={() => setActiveTab("payments")}
@@ -930,7 +930,7 @@ export default function FinanceiroPessoasView({ currentUser, unidades, onRefresh
                     : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"
                 }`}
               >
-                💸 Fechamento / Pagamentos
+                <span className="flex items-center justify-center gap-1.5"><DollarSign className="w-4 h-4 shrink-0" /> Fechamento / Pagamentos</span>
               </button>
               <button
                 onClick={() => setActiveTab("history")}
@@ -940,7 +940,7 @@ export default function FinanceiroPessoasView({ currentUser, unidades, onRefresh
                     : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"
                 }`}
               >
-                📜 Histórico de Pagamentos Geral
+                <span className="flex items-center justify-center gap-1.5"><History className="w-4 h-4 shrink-0" /> Histórico de Pagamentos Geral</span>
               </button>
             </div>
 

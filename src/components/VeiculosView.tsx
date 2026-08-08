@@ -3,7 +3,9 @@ import {
   Plus, Trash, Edit, Check, AlertCircle, FileText, Search, User, 
   ShieldAlert, LayoutGrid, List, Calendar, Wrench, Percent, 
   Building, BarChart3, PieChart as PieChartIcon, Eye, Download, 
-  ChevronDown, CheckCircle2, AlertTriangle, FileUp, Info, ArrowLeftRight
+  ChevronDown, CheckCircle2, AlertTriangle, FileUp, Info, ArrowLeftRight,
+  Disc, Filter, Fuel, RotateCcw, UserMinus, Paperclip, Camera, Settings,
+  ShieldCheck, FileSearch, X, Folder, Truck, RefreshCw
 } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, PieChart, Pie, Cell } from "recharts";
 import { Veiculo, Motorista, Unidade } from "../types";
@@ -44,7 +46,7 @@ export default function VeiculosView({
   
   // Visual modes
   const [viewMode, setViewMode] = useState<"cards" | "list">("cards");
-  const [selectedDate, setSelectedDate] = useState("2026-06-12");
+  const [selectedDate, setSelectedDate] = useState(() => new Date().toISOString().split("T")[0]);
 
   // Filter conditions
   const [filterPrefixo, setFilterPrefixo] = useState("");
@@ -106,7 +108,7 @@ export default function VeiculosView({
   const [detailTab, setDetailTab] = useState<"geral" | "documentacao" | "manutencoes" | "abastecimentos" | "financeiro" | "rotas">("geral");
 
   // Fuel Form states inside details
-  const [refuelData, setRefuelData] = useState("2026-06-14");
+  const [refuelData, setRefuelData] = useState(() => new Date().toISOString().split("T")[0]);
   const [refuelLitros, setRefuelLitros] = useState<number | "">("");
   const [refuelValor, setRefuelValor] = useState<number | "">("");
   const [refuelPosto, setRefuelPosto] = useState("");
@@ -118,7 +120,7 @@ export default function VeiculosView({
 
   // Maint Form states inside details
   const [maintTipo, setMaintTipo] = useState<"Preventiva" | "Corretiva">("Preventiva");
-  const [maintData, setMaintData] = useState("2026-06-14");
+  const [maintData, setMaintData] = useState(() => new Date().toISOString().split("T")[0]);
   const [maintObservacao, setMaintObservacao] = useState("");
   const [maintProximaData, setMaintProximaData] = useState("");
   const [maintCategoria, setMaintCategoria] = useState("Revisão Periódica");
@@ -314,7 +316,7 @@ export default function VeiculosView({
         body: JSON.stringify(payload)
       });
       if (res.ok) {
-        setNotification({ type: "success", message: "✅ Manutenção gravada com sucesso!" });
+        setNotification({ type: "success", message: "Manutenção gravada com sucesso!" });
         setIsAddingMaint(false);
         setMaintObservacao("");
         setMaintProximaData("");
@@ -384,7 +386,7 @@ export default function VeiculosView({
         body: JSON.stringify(payload)
       });
       if (res.ok) {
-        setNotification({ type: "success", message: "✅ Abastecimento registrado com sucesso!" });
+        setNotification({ type: "success", message: "Abastecimento registrado com sucesso!" });
         setIsAddingRefuel(false);
         setRefuelLitros("");
         setRefuelValor("");
@@ -467,7 +469,7 @@ export default function VeiculosView({
       if (res.ok) {
         setNotification({
           type: "success",
-          message: "✅ Registro salvo com sucesso."
+          message: "Registro salvo com sucesso."
         });
         resetForm();
         onRefresh();
@@ -485,14 +487,14 @@ export default function VeiculosView({
         } else {
           setNotification({
             type: "error",
-            message: `❌ Erro no cadastro: ${error.message || error.error || "Operação recusada pelo banco de dados."}`
+            message: `Erro no cadastro: ${error.message || error.error || "Operação recusada pelo banco de dados."}`
           });
         }
       }
     } catch (err) {
       setNotification({
         type: "error",
-        message: `❌ Falha de rede: ${err instanceof Error ? err.message : String(err)}`
+        message: `Falha de rede: ${err instanceof Error ? err.message : String(err)}`
       });
     }
   };
@@ -510,7 +512,7 @@ export default function VeiculosView({
       if (res.ok) {
         setNotification({
           type: "success",
-          message: "❌ Motorista removido e liberado imediatamente com sucesso no banco de dados."
+          message: "Motorista removido e liberado imediatamente com sucesso no banco de dados."
         });
         if (veiculoId === editingId) {
           setMotoristaId("");
@@ -520,13 +522,13 @@ export default function VeiculosView({
         const error = await res.json();
         setNotification({
           type: "error",
-          message: `❌ Erro ao desvincular: ${error.message || "Operação recusada."}`
+          message: `Erro ao desvincular: ${error.message || "Operação recusada."}`
         });
       }
     } catch (err: any) {
       setNotification({
         type: "error",
-        message: `❌ Falha na comunicação: ${err.message}`
+        message: `Falha na comunicação: ${err.message}`
       });
     }
   };
@@ -544,14 +546,14 @@ export default function VeiculosView({
             }
           });
           if (res.ok) {
-            setNotification({ type: "success", message: "✅ Veículo removido com sucesso do banco." });
+            setNotification({ type: "success", message: "Veículo removido com sucesso do banco." });
             onRefresh();
           } else {
             const error = await res.json();
-            setNotification({ type: "error", message: `❌ Erro ao remover: ${error.message || "Remoção negada."}` });
+            setNotification({ type: "error", message: `Erro ao remover: ${error.message || "Remoção negada."}` });
           }
         } catch (e) {
-          setNotification({ type: "error", message: "❌ Erro ao excluir do banco." });
+          setNotification({ type: "error", message: "Erro ao excluir do banco." });
         }
       }
     });
@@ -662,7 +664,7 @@ export default function VeiculosView({
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center bg-slate-900/60 p-5 rounded-2xl border border-slate-800/80 gap-4">
         <div>
           <h2 className="text-xl font-bold tracking-tight text-white flex items-center gap-2">
-            <span className="p-1.5 bg-sky-600/20 text-sky-400 rounded-lg">🛞</span>
+            <span className="p-1.5 bg-sky-600/20 text-sky-400 rounded-lg"><Truck className="w-5 h-5" /></span>
             Módulo Gerencial de Frotas & Ativos
           </h2>
           <p className="text-xs text-slate-400 font-mono mt-1">
@@ -905,8 +907,9 @@ export default function VeiculosView({
           {/* LEFT COLUMN: FILTERS & MANAGEMENT */}
           <div className="lg:col-span-1 bg-slate-900 p-4 rounded-xl border border-slate-800 space-y-4 h-fit">
             <div className="flex justify-between items-center border-b border-slate-800 pb-2.5">
-              <h3 className="text-xs font-bold font-mono tracking-wider text-slate-400 uppercase">
-                🔍 Filtros Avançados
+              <h3 className="text-xs font-bold font-mono tracking-wider text-slate-400 uppercase flex items-center gap-1.5">
+                <Filter className="w-3.5 h-3.5 text-sky-400" />
+                Filtros Avançados
               </h3>
               <button
                 onClick={() => {
@@ -1203,11 +1206,11 @@ export default function VeiculosView({
                         }`}
                       >
                         {tab === "geral" && "Dados Gerais"}
-                        {tab === "documentacao" && "📄 Documentação"}
-                        {tab === "manutencoes" && "🔧 Manutenções"}
-                        {tab === "abastecimentos" && "⛽ Abastecimentos"}
-                        {tab === "financeiro" && "📊 Financeiro"}
-                        {tab === "rotas" && "🔄 Viagens"}
+                        {tab === "documentacao" && "Documentação"}
+                        {tab === "manutencoes" && "Manutenções"}
+                        {tab === "abastecimentos" && "Abastecimentos"}
+                        {tab === "financeiro" && "Financeiro"}
+                        {tab === "rotas" && "Viagens"}
                       </button>
                     ))}
                   </div>
@@ -1264,11 +1267,11 @@ export default function VeiculosView({
                           <div className="grid grid-cols-2 gap-y-2 gap-x-4">
                             <div>
                               <span className="text-slate-500 block font-mono text-[10px]">MOTORISTA HABITUAL</span>
-                              <strong className="text-white text-xs">{assignedDriverObj ? `👤 ${assignedDriverObj.nome}` : "Nenhum condutor fixo"}</strong>
+                              <strong className="text-white text-xs flex items-center gap-1">{assignedDriverObj ? <><User className="w-3.5 h-3.5 text-sky-400" /> {assignedDriverObj.nome}</> : "Nenhum condutor fixo"}</strong>
                             </div>
                             <div>
                               <span className="text-slate-500 block font-mono text-[10px]">FILIAL DE ALOCAÇÃO</span>
-                              <strong className="text-white text-xs">🏢 {associatedUnit ? associatedUnit.nome : `Filial ${v.unidadeId}`}</strong>
+                              <strong className="text-white text-xs flex items-center gap-1"><Building className="w-3.5 h-3.5 text-sky-400" /> {associatedUnit ? associatedUnit.nome : `Filial ${v.unidadeId}`}</strong>
                             </div>
                             <div>
                               <span className="text-slate-500 block font-mono text-[10px]">DATA DE ÚLTIMA REVISÃO</span>
@@ -1298,7 +1301,7 @@ export default function VeiculosView({
                               </div>
                               <div className="flex items-center gap-2">
                                 <span className={`px-2 py-0.5 rounded font-bold text-[9px] uppercase ${isCRLVExpired ? "bg-rose-500/10 text-rose-400" : "bg-emerald-500/10 text-emerald-400"}`}>
-                                  {isCRLVExpired ? "⚠️ Vencido" : "✓ Válido"}
+                                  {isCRLVExpired ? "Vencido" : "✓ Válido"}
                                 </span>
                                 <button
                                   onClick={() => setPreviewDoc({ title: "Comprovante CRLV", filename: v.documentoCRLVUrl || "CRLV_Atualizado_Assinado.pdf" })}
@@ -1317,7 +1320,7 @@ export default function VeiculosView({
                               </div>
                               <div className="flex items-center gap-2">
                                 <span className={`px-2 py-0.5 rounded font-bold text-[9px] uppercase ${isSegExpired ? "bg-rose-500/10 text-rose-400" : "bg-emerald-500/10 text-emerald-400"}`}>
-                                  {isSegExpired ? "⚠️ Vencido" : "✓ Ativo"}
+                                  {isSegExpired ? "Vencido" : "✓ Ativo"}
                                 </span>
                                 <button
                                   onClick={() => setPreviewDoc({ title: "Apólice de Seguro de Frota", filename: v.seguroUrl || "Apolice_Seguro_Completo.pdf" })}
@@ -1336,7 +1339,7 @@ export default function VeiculosView({
                               </div>
                               <div className="flex items-center gap-2">
                                 <span className={`px-2 py-0.5 rounded font-bold text-[9px] uppercase ${isAnttExpired ? "bg-rose-500/10 text-rose-400" : "bg-emerald-500/10 text-emerald-400"}`}>
-                                  {isAnttExpired ? "⚠️ Vencido" : "✓ Válido"}
+                                  {isAnttExpired ? "Vencido" : "✓ Válido"}
                                 </span>
                                 <button
                                   onClick={() => setPreviewDoc({ title: "Certificado ANTT do Veículo", filename: v.anttUrl || "antt_validacao.pdf" })}
@@ -1366,7 +1369,9 @@ export default function VeiculosView({
 
                           {v.documentacaoObservacoes && (
                             <div className="p-3 bg-slate-900 rounded-lg border border-slate-800/60 text-xs">
-                              <span className="text-slate-500 font-mono text-[9px] uppercase block">⚠️ Observações de Pendências:</span>
+                              <span className="text-slate-500 font-mono text-[9px] uppercase flex items-center gap-1">
+                                <AlertTriangle className="w-3 h-3 text-amber-400" /> Observações de Pendências:
+                              </span>
                               <p className="text-slate-300 italic mt-0.5">{v.documentacaoObservacoes}</p>
                             </div>
                           )}
@@ -1946,7 +1951,7 @@ export default function VeiculosView({
               <div className="bg-slate-900 p-5 rounded-2xl border border-slate-800/80 space-y-4 relative">
                 <div className="flex justify-between items-center border-b border-slate-800 pb-3">
                   <h3 className="text-sm font-semibold text-white tracking-tight flex items-center gap-2">
-                    <span className="p-1 bg-sky-600/10 text-sky-400 rounded">🛞</span>
+                    <span className="p-1 bg-sky-600/10 text-sky-400 rounded"><Truck className="w-4 h-4" /></span>
                     {editingId ? `Editar Veículo: ${placa}` : "Cadastrar Veículo na Frota"}
                   </h3>
                   <button 
@@ -2072,7 +2077,7 @@ export default function VeiculosView({
                             onClick={() => handleRemoveDriver(editingId)}
                             className="w-full py-1.5 px-3 rounded-lg bg-rose-950/40 hover:bg-rose-950/60 border border-rose-900/40 hover:border-rose-850/50 text-rose-300 hover:text-rose-200 text-[10px] font-bold tracking-wider uppercase transition flex items-center justify-center gap-1 cursor-pointer"
                           >
-                            ❌ Remover Motorista do Veículo
+                            <UserMinus className="w-3.5 h-3.5" /> Remover Motorista do Veículo
                           </button>
                         )}
                       </div>
@@ -2140,8 +2145,8 @@ export default function VeiculosView({
                         onChange={(e) => setDocumentacaoStatus(e.target.value as any)}
                         className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white"
                       >
-                        <option value="Completa">✅ Completa / Sem Pendência</option>
-                        <option value="Pendente">❌ Pendente / Faltam Cópias</option>
+                        <option value="Completa">Completa / Sem Pendência</option>
+                        <option value="Pendente">Pendente / Faltam Cópias</option>
                       </select>
                     </div>
                   </div>
@@ -2286,14 +2291,15 @@ export default function VeiculosView({
 
                   {/* SIMULADO DE DOCUMENTOS & ARQUIVOS */}
                   <div className="bg-slate-950 p-4 rounded-xl border border-slate-850 space-y-3">
-                    <span className="text-[10px] font-bold text-slate-500 tracking-wider font-mono uppercase block border-b border-slate-800 pb-1.5">
-                      📁 Anexar Documentos Digitais (CRLV, CRV, Seguro, Licenciamento, Fotos)
+                    <span className="text-[10px] font-bold text-slate-500 tracking-wider font-mono uppercase flex items-center gap-1.5 border-b border-slate-800 pb-1.5">
+                      <Folder className="w-3.5 h-3.5 text-sky-400" />
+                      Anexar Documentos Digitais (CRLV, CRV, Seguro, Licenciamento, Fotos)
                     </span>
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                       
                       {/* CRLV */}
                       <div className="space-y-1">
-                        <label className="text-slate-500 text-[10px] block font-mono">📎 CRLV (Digital ou Scan)</label>
+                        <label className="text-slate-500 text-[10px] block font-mono">CRLV (Digital ou Scan)</label>
                         <div className="flex gap-2">
                           <input
                             type="text"
@@ -2315,7 +2321,7 @@ export default function VeiculosView({
 
                       {/* CRV */}
                       <div className="space-y-1">
-                        <label className="text-slate-500 text-[10px] block font-mono">📎 CRV (Compra e Venda)</label>
+                        <label className="text-slate-500 text-[10px] block font-mono">CRV (Compra e Venda)</label>
                         <div className="flex gap-2">
                           <input
                             type="text"
@@ -2337,7 +2343,7 @@ export default function VeiculosView({
 
                       {/* Seguro */}
                       <div className="space-y-1">
-                        <label className="text-slate-500 text-[10px] block font-mono">📎 Apólice de Seguro</label>
+                        <label className="text-slate-500 text-[10px] block font-mono">Apólice de Seguro</label>
                         <div className="flex gap-2">
                           <input
                             type="text"
@@ -2359,7 +2365,7 @@ export default function VeiculosView({
 
                       {/* Licenciamento */}
                       <div className="space-y-1">
-                        <label className="text-slate-500 text-[10px] block font-mono">📎 Licenciamento Recente</label>
+                        <label className="text-slate-500 text-[10px] block font-mono">Licenciamento Recente</label>
                         <div className="flex gap-2">
                           <input
                             type="text"
@@ -2381,7 +2387,7 @@ export default function VeiculosView({
 
                       {/* ANTT Certificate Upload */}
                       <div className="space-y-1">
-                        <label className="text-slate-500 text-[10px] block font-mono">📎 Certificado ANTT</label>
+                        <label className="text-slate-500 text-[10px] block font-mono">Certificado ANTT</label>
                         <div className="flex gap-2">
                           <input
                             type="text"
@@ -2403,7 +2409,9 @@ export default function VeiculosView({
 
                       {/* Fotos do veículo */}
                       <div className="space-y-1 sm:col-span-2 lg:col-span-1">
-                        <label className="text-slate-500 text-[10px] block font-mono">📸 Fotos Visuais do Veículo</label>
+                        <label className="text-slate-500 text-[10px] block font-mono flex items-center gap-1">
+                          <Camera className="w-3 h-3 text-sky-400" /> Fotos Visuais do Veículo
+                        </label>
                         <div className="flex gap-2">
                           <input
                             type="text"
@@ -2447,8 +2455,8 @@ export default function VeiculosView({
 
             {/* RESULTS VIEW HEADER WITH VIEW MODE CONTROLS */}
             <div className="bg-slate-900/40 p-4 rounded-xl border border-slate-800 flex items-center justify-between gap-4">
-              <span className="text-[10px] font-bold text-slate-400 font-mono tracking-wider uppercase">
-                ⚙️ {filteredVeiculos.length} veículos localizados
+              <span className="text-[10px] font-bold text-slate-400 font-mono tracking-wider uppercase flex items-center gap-1.5">
+                <Settings className="w-3.5 h-3.5 text-sky-400" /> {filteredVeiculos.length} veículos localizados
               </span>
 
               <div className="flex items-center gap-2">
@@ -2567,8 +2575,8 @@ export default function VeiculosView({
                             <span className="text-slate-500 block text-[9px] uppercase font-mono">MOTORISTA ATUAL:</span>
                             {assignedDriverObj ? (
                               <div className="mt-0.5 space-y-1">
-                                <strong className="text-white font-semibold block truncate">
-                                  👤 {assignedDriverObj.nome}
+                                <strong className="text-white font-semibold block truncate flex items-center gap-1">
+                                  <User className="w-3.5 h-3.5 text-sky-400" /> {assignedDriverObj.nome}
                                 </strong>
                                 <button
                                   type="button"
@@ -2577,9 +2585,9 @@ export default function VeiculosView({
                                     e.stopPropagation();
                                     handleRemoveDriver(v.id);
                                   }}
-                                  className="text-[9px] text-rose-450 hover:text-rose-350 font-bold uppercase block tracking-wider hover:underline select-none cursor-pointer"
+                                  className="text-[9px] text-rose-450 hover:text-rose-350 font-bold uppercase tracking-wider hover:underline select-none cursor-pointer flex items-center gap-1"
                                 >
-                                  ❌ Remover Vínculo
+                                  <UserMinus className="w-3 h-3 text-rose-450" /> Remover Vínculo
                                 </button>
                               </div>
                             ) : (
@@ -2589,42 +2597,42 @@ export default function VeiculosView({
                           <div>
                             <span className="text-slate-500 block text-[9px] uppercase font-mono">UNIDADE FILIAL:</span>
                             <span className="text-slate-300 font-medium block truncate mt-0.5 flex items-center gap-1">
-                              🏢 {associatedUnit ? associatedUnit.nome : `Filial ${v.unidadeId}`}
+                              <Building className="w-3.5 h-3.5 text-sky-400" /> {associatedUnit ? associatedUnit.nome : `Filial ${v.unidadeId}`}
                             </span>
                           </div>
                         </div>
 
                         {/* CONFORMIDADES DO VEÍCULO SECTION */}
                         <div className="space-y-1.5 bg-slate-950/40 p-2.5 rounded-xl border border-slate-800/60 font-mono text-[10px]">
-                          <span className="text-slate-450 text-[9px] font-bold tracking-wider block border-b border-slate-850 pb-0.5 uppercase">
-                            🛡️ Conformidades do Veículo
+                          <span className="text-slate-450 text-[9px] font-bold tracking-wider block border-b border-slate-850 pb-0.5 uppercase flex items-center gap-1">
+                            <ShieldCheck className="w-3.5 h-3.5 text-sky-400" /> Conformidades do Veículo
                           </span>
                           <div className="grid grid-cols-2 gap-x-3 gap-y-1.5">
                             <span className="flex items-center justify-between text-slate-400">
                               <span>CRLV:</span>
                               <span className={flagCRLV === "Válido" ? "text-emerald-400 font-bold" : "text-rose-450 font-bold"}>
-                                {flagCRLV === "Válido" ? "✅ Válido" : "❌ Vencido"}
+                                {flagCRLV === "Válido" ? "Válido" : "Vencido"}
                               </span>
                             </span>
 
                             <span className="flex items-center justify-between text-slate-400">
                               <span>Seguro:</span>
                               <span className={flagSeguro === "Ativo" ? "text-emerald-400 font-bold" : "text-rose-450 font-bold"}>
-                                {flagSeguro === "Ativo" ? "✅ Ativo" : "❌ Vencido"}
+                                {flagSeguro === "Ativo" ? "Ativo" : "Vencido"}
                               </span>
                             </span>
 
                             <span className="flex items-center justify-between text-slate-400">
                               <span>Manutenção:</span>
                               <span className={flagManutencao === "Em dia" ? "text-emerald-400 font-bold" : flagManutencao === "Atrasada" ? "text-rose-450 font-bold" : "text-yellow-500 font-bold"}>
-                                {flagManutencao === "Em dia" ? "✅ Em dia" : flagManutencao === "Atrasada" ? "❌ Atrasada" : "⚠ Atenção"}
+                                {flagManutencao === "Em dia" ? "Em dia" : flagManutencao === "Atrasada" ? "Atrasada" : "Atenção"}
                               </span>
                             </span>
 
                             <span className="flex items-center justify-between text-slate-400">
                               <span>Documentos:</span>
                               <span className={flagDocumentos === "Completa" ? "text-emerald-400 font-bold" : "text-rose-450 font-bold"}>
-                                {flagDocumentos === "Completa" ? "✅ Completa" : "❌ Pendente"}
+                                {flagDocumentos === "Completa" ? "Completa" : "Pendente"}
                               </span>
                             </span>
                           </div>
@@ -2632,8 +2640,8 @@ export default function VeiculosView({
 
                         {/* HISTÓRICOS DE MANUTENÇÕES */}
                         <div className="bg-slate-950/20 p-2.5 rounded-xl border border-slate-850/80 font-mono text-[10px] space-y-1">
-                          <span className="text-slate-500 text-[9px] font-bold block uppercase tracking-wider">
-                            🔧 Datas de Manutenção
+                          <span className="text-slate-500 text-[9px] font-bold uppercase tracking-wider flex items-center gap-1">
+                            <Wrench className="w-3.5 h-3.5 text-sky-400" /> Datas de Manutenção
                           </span>
                           <div className="flex flex-col gap-1 text-slate-400">
                             <div className="flex justify-between">
@@ -2654,8 +2662,8 @@ export default function VeiculosView({
                         {/* SHOW BLOCK MOTIVE DETAILS IF NOT LIBERADO */}
                         {(parsedStatus === "BLOQUEADO" || parsedStatus === "PENDENTE") && (
                           <div className="p-2 bg-rose-500/5 rounded-lg border border-rose-550/10 space-y-1">
-                            <span className="block text-[9px] font-mono font-bold text-rose-450 uppercase">
-                              ⚠️ Motivo / Observação de Restrição:
+                            <span className="text-[9px] font-mono font-bold text-rose-450 uppercase flex items-center gap-1">
+                              <AlertTriangle className="w-3 h-3 text-rose-450" /> Motivo / Observação de Restrição:
                             </span>
                             <p className="text-[10px] text-slate-300 italic">
                               {v.motivoBloqueio || "Documentação com vencimento crítico expirado or pendente."}
@@ -2665,8 +2673,8 @@ export default function VeiculosView({
 
                         {/* ANEXOS & DOWNLOADS */}
                         <div className="pt-2 border-t border-slate-800/80 space-y-2">
-                          <span className="text-[9px] text-slate-500 font-mono font-bold uppercase tracking-wider block">
-                            📂 Documentos Digitais Anexos
+                          <span className="text-[9px] text-slate-500 font-mono font-bold uppercase tracking-wider flex items-center gap-1">
+                            <Folder className="w-3.5 h-3.5 text-sky-400" /> Documentos Digitais Anexos
                           </span>
                           <div className="flex flex-wrap gap-1.5">
                             {/* CRLV */}
@@ -2719,7 +2727,7 @@ export default function VeiculosView({
                         <div>
                           {isRoteirizado ? (
                             <span className="text-cyan-455 font-bold font-mono text-[10px] flex items-center gap-1">
-                              🔄 ROTEIRIZADO HOJE
+                              <RefreshCw className="w-3 h-3 text-cyan-400" /> ROTEIRIZADO HOJE
                             </span>
                           ) : (
                             <span className="text-slate-500 font-mono text-[10px] uppercase">
@@ -2808,7 +2816,9 @@ export default function VeiculosView({
                             <td className="py-3.5 px-4">
                               {assignedDriverObj ? (
                                 <div className="flex flex-col gap-0.5">
-                                  <div className="font-semibold text-white">👤 {assignedDriverObj.nome}</div>
+                                  <div className="font-semibold text-white flex items-center gap-1">
+                                    <User className="w-3.5 h-3.5 text-sky-400" /> {assignedDriverObj.nome}
+                                  </div>
                                   <button
                                     type="button"
                                     id={`tbl-unbind-${v.id}`}
@@ -2816,9 +2826,9 @@ export default function VeiculosView({
                                       e.stopPropagation();
                                       handleRemoveDriver(v.id);
                                     }}
-                                    className="text-[9px] text-rose-450 hover:text-rose-350 font-bold block text-left uppercase tracking-wider select-none cursor-pointer mt-0.5"
+                                    className="text-[9px] text-rose-450 hover:text-rose-350 font-bold flex items-center gap-1 text-left uppercase tracking-wider select-none cursor-pointer mt-0.5"
                                   >
-                                    ❌ Desvincular
+                                    <UserMinus className="w-3 h-3 text-rose-450" /> Desvincular
                                   </button>
                                 </div>
                               ) : (
@@ -2826,7 +2836,9 @@ export default function VeiculosView({
                               )}
                             </td>
                             <td className="py-3.5 px-4">
-                              <div className="text-slate-400 font-medium">🏢 {associatedUnit ? associatedUnit.nome : v.unidadeId}</div>
+                              <div className="text-slate-400 font-medium flex items-center gap-1">
+                                <Building className="w-3.5 h-3.5 text-sky-400" /> {associatedUnit ? associatedUnit.nome : v.unidadeId}
+                              </div>
                             </td>
                             <td className="py-3.5 px-4 font-mono">
                               {isRoteirizado ? (
@@ -2907,8 +2919,8 @@ export default function VeiculosView({
           <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-md overflow-hidden shadow-2xl">
             {/* Header */}
             <div className="bg-slate-950 px-5 py-4 border-b border-slate-850 flex justify-between items-center">
-              <h3 className="text-white text-xs font-bold font-mono tracking-wider uppercase flex items-center gap-1.5/2 justify-center">
-                📄 Visualização de Documento Anexo
+              <h3 className="text-white text-xs font-bold font-mono tracking-wider uppercase flex items-center gap-1.5">
+                <FileText className="w-4 h-4 text-sky-400" /> Visualização de Documento Anexo
               </h3>
               <button
                 onClick={() => setPreviewDoc(null)}
@@ -2924,8 +2936,8 @@ export default function VeiculosView({
               </div>
               <div className="space-y-1">
                 <h4 className="text-white text-sm font-bold tracking-tight">{previewDoc.title}</h4>
-                <p className="text-xs text-slate-500 font-mono mt-1 break-all bg-slate-955 p-2 rounded border border-slate-850">
-                  📎 {previewDoc.filename || "Anexo_Salvo_Banco.pdf"}
+                <p className="text-xs text-slate-500 font-mono mt-1 break-all bg-slate-955 p-2 rounded border border-slate-850 flex items-center justify-center gap-1">
+                  <Paperclip className="w-3.5 h-3.5 text-slate-400" /> {previewDoc.filename || "Anexo_Salvo_Banco.pdf"}
                 </p>
               </div>
               <p className="text-[11px] text-slate-400 leading-relaxed">
@@ -2939,7 +2951,7 @@ export default function VeiculosView({
                     e.preventDefault();
                     setNotification({
                       type: "success",
-                      message: `💾 Download iniciado para: ${previewDoc.filename}`
+                      message: `Download iniciado para: ${previewDoc.filename}`
                     });
                   }}
                   className="flex-1 py-2 bg-sky-600 hover:bg-sky-550 text-white font-semibold rounded-lg text-xs flex items-center justify-center gap-1 transition"

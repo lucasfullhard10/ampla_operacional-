@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Database, ShieldAlert, CheckCircle, RefreshCw, Copy, AlertTriangle, Cloud, Settings, Compass, Info } from "lucide-react";
+import { Database, ShieldAlert, CheckCircle, RefreshCw, Copy, AlertTriangle, Cloud, Settings, Compass, Info, X } from "lucide-react";
 
 interface DatabaseSettingsModalProps {
   isOpen: boolean;
@@ -108,7 +108,7 @@ CREATE POLICY "Permitir tudo para todos por simplicidade" ON ampla_database FOR 
             onClick={onClose}
             className="text-slate-400 hover:text-white transition-colors"
           >
-            ✕
+            <X className="w-5 h-5" />
           </button>
         </div>
 
@@ -123,8 +123,9 @@ CREATE POLICY "Permitir tudo para todos por simplicidade" ON ampla_database FOR 
               <p className="text-[11px] text-slate-300 leading-relaxed">
                 Este ambiente do AI Studio executa sobre contêineres de nuvem **efêmeros** (descartáveis). Qualquer informação inserida enquanto o sistema estiver usando o banco local (`database.json`) é deletada permanentemente quando o servidor reinicia por inatividade ou quando o código é recompilado.
               </p>
-              <p className="text-[11px] text-sky-400 font-semibold leading-relaxed mt-1">
-                ✔ Para evitar novas perdas de dados, integre o seu projeto com o seu próprio **Supabase**! O Supabase opera em nuvem persistente (permanente e segura).
+              <p className="text-[11px] text-sky-400 font-semibold leading-relaxed mt-1 flex items-center gap-1">
+                <CheckCircle className="w-3.5 h-3.5 text-sky-400 shrink-0 inline" />
+                <span>Para evitar novas perdas de dados, integre o seu projeto com o seu próprio **Supabase**! O Supabase opera em nuvem persistente (permanente e segura).</span>
               </p>
             </div>
           </div>
@@ -178,8 +179,9 @@ CREATE POLICY "Permitir tudo para todos por simplicidade" ON ampla_database FOR 
             {/* Error messaging */}
             {status && !status.configured && (
               <div className="p-3 rounded bg-slate-900 text-[11px] text-slate-400 leading-relaxed space-y-2 border border-slate-800">
-                <p>
-                  💡 Para configurar o **Supabase**, clique no menu de engrenagem / **Settings** no topo direito da tela do AI Studio e adicione duas novas chaves nos **Secrets/Environment Variables**:
+                <p className="flex items-center gap-1">
+                  <Info className="w-3.5 h-3.5 text-amber-400 shrink-0 inline" />
+                  <span>Para configurar o <strong>Supabase</strong>, clique no menu de engrenagem / <strong>Settings</strong> no topo direito da tela do AI Studio e adicione duas novas chaves nos <strong>Secrets/Environment Variables</strong>:</span>
                 </p>
                 <div className="space-y-1 pl-3 font-mono text-[10px] text-sky-400">
                   <div>• <span className="text-white font-bold select-all">SUPABASE_URL</span> = <span className="text-slate-500">Ex: https://xxxx.supabase.co</span></div>
@@ -191,7 +193,7 @@ CREATE POLICY "Permitir tudo para todos por simplicidade" ON ampla_database FOR 
             {/* If configured check fails */}
             {status && status.configured && !status.connected && (
               <div className="p-3 rounded bg-rose-950/10 text-rose-300 font-mono text-[10px] border border-rose-500/15 space-y-1">
-                <p className="font-bold">⚠️ Conexão Falhou:</p>
+                <p className="font-bold flex items-center gap-1"><AlertTriangle className="w-3.5 h-3.5 text-rose-400 inline" /> Conexão Falhou:</p>
                 <p>{status.error || "A tabela 'ampla_database' não foi encontrada no seu banco do Supabase. É necessário criá-la conforme as instruções abaixo."}</p>
               </div>
             )}

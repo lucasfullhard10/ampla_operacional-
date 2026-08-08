@@ -1,4 +1,5 @@
 import React from "react";
+import { Check, X } from "lucide-react";
 
 export interface NotificationType {
   type: "success" | "error";
@@ -25,12 +26,12 @@ export function NotificationModal({ notification, onClose }: NotificationModalPr
       <div className="bg-slate-900 border border-slate-800 p-6 rounded-xl max-w-sm w-full mx-4 shadow-2xl text-center space-y-4">
         <div className="flex justify-center">
           {notification.type === "success" ? (
-            <div className="w-12 h-12 bg-emerald-500/10 text-emerald-400 rounded-full flex items-center justify-center text-2xl border border-emerald-500/20">
-              ✓
+            <div className="w-12 h-12 bg-emerald-500/10 text-emerald-400 rounded-full flex items-center justify-center border border-emerald-500/20">
+              <Check className="w-6 h-6" />
             </div>
           ) : (
-            <div className="w-12 h-12 bg-rose-500/10 text-rose-500 rounded-full flex items-center justify-center text-2xl border border-rose-500/20">
-              ✗
+            <div className="w-12 h-12 bg-rose-500/10 text-rose-500 rounded-full flex items-center justify-center border border-rose-500/20">
+              <X className="w-6 h-6" />
             </div>
           )}
         </div>

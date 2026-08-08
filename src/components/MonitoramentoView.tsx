@@ -4,7 +4,9 @@ import {
   CheckCircle as LucideCheckCircle, Clock as LucideClock, AlertCircle as LucideAlertCircle, 
   MapPin as LucideMapPin, User as LucideUser, Truck as LucideTruck, DollarSign as LucideDollarSign, 
   X as LucideX, Layers as LucideLayers, RefreshCw as LucideRefreshCw, AlertTriangle as LucideAlertTriangle, 
-  Calendar as LucideCalendar, Save, History
+  Calendar as LucideCalendar, Phone as LucidePhone, RotateCcw as LucideRotateCcw, Share2 as LucideShare2,
+  Printer as LucidePrinter, Send as LucideSend, Copy as LucideCopy, Download as LucideDownload, Save, History,
+  BarChart2, Filter, Eye, MessageSquare, ShieldCheck, CheckSquare, XCircle, ArrowRight, Package, UserMinus, Building, AlertOctagon, CornerDownLeft, Sparkles, Folder, Wrench, ChevronDown, ChevronUp, TrendingUp
 } from "lucide-react";
 import { toPng } from "html-to-image";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, Cell } from "recharts";
@@ -53,10 +55,11 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
 
   // CREATE DT form states
   const [dt, setDt] = useState("");
-  const [data, setData] = useState("2026-06-14");
+  const [data, setData] = useState(() => new Date().toISOString().split("T")[0]);
   const [veiculoId, setVeiculoId] = useState("");
   const [motoristaId, setMotoristaId] = useState("");
   const [tipo, setTipo] = useState<"Entrega" | "Recarga" | "Reentrega" | "Entrega OFF">("Entrega");
+  const [reentregaValidadaState, setReentregaValidadaState] = useState<"Sim" | "Não">("Não");
   const [status, setStatus] = useState<"Aguardando carregamento" | "Em carregamento" | "Em rota" | "Em descarga" | "Finalizada">("Aguardando carregamento");
   const [statusViagem, setStatusViagem] = useState<string>("Aguardando Carregamento");
   const [totalEntregas, setTotalEntregas] = useState<number>(10);
@@ -102,6 +105,7 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
   const [editEntregues, setEditEntregues] = useState(0);
   const [editRecusadas, setEditRecusadas] = useState(0);
   const [editDevolucoes, setEditDevolucoes] = useState(0);
+  const [editReentregaValidadaState, setEditReentregaValidadaState] = useState<"Sim" | "Não">("Não");
 
   // Entrega OFF form states (Edit)
   const [editClienteCodigo, setEditClienteCodigo] = useState("");
@@ -134,7 +138,7 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
   const [occurrenceRouteId, setOccurrenceRouteId] = useState<string | null>(null);
   const [occTipo, setOccTipo] = useState("Atraso");
   const [occDescricao, setOccDescricao] = useState("");
-  const [occData, setOccData] = useState("2026-06-14");
+  const [occData, setOccData] = useState(() => new Date().toISOString().split("T")[0]);
   const [occHora, setOccHora] = useState("");
 
   // Deep search and filters
@@ -183,7 +187,7 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
         border: "border-l-red-500",
         bg: "bg-red-500/10",
         text: "text-red-400",
-        indicator: "🔴 Ocorrência",
+        indicator: "Ocorrência",
         hex: "#ef4444"
       };
     }
@@ -193,7 +197,7 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
         border: "border-l-emerald-500",
         bg: "bg-emerald-500/10",
         text: "text-emerald-400",
-        indicator: "🟢 Finalizada",
+        indicator: "Finalizada",
         hex: "#10b981"
       };
     }
@@ -202,7 +206,7 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
         border: "border-l-amber-500",
         bg: "bg-amber-500/10",
         text: "text-amber-400",
-        indicator: "🟡 Aguardando Descarga",
+        indicator: "Aguardando Descarga",
         hex: "#f59e0b"
       };
     }
@@ -211,7 +215,7 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
         border: "border-l-blue-500",
         bg: "bg-blue-500/10",
         text: "text-blue-400",
-        indicator: "🔵 Em Trânsito",
+        indicator: "Em Trânsito",
         hex: "#3b82f6"
       };
     }
@@ -220,7 +224,7 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
         border: "border-l-orange-500",
         bg: "bg-orange-500/10",
         text: "text-orange-400",
-        indicator: "🟠 Em Descarga",
+        indicator: "Em Descarga",
         hex: "#f97316"
       };
     }
@@ -229,33 +233,26 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
       border: "border-l-slate-550",
       bg: "bg-slate-500/10",
       text: "text-slate-400",
-      indicator: "⚫ Aguardando Carregamento",
+      indicator: "Aguardando Carregamento",
       hex: "#64748b"
     };
-  };
-
-  const getVehicleIcon = (perfil?: string) => {
-    const p = (perfil || "").toLowerCase();
-    if (p.includes("van")) return "🚐";
-    if (p.includes("carreta") || p.includes("bitrem")) return "🚛";
-    return "🚚"; // Default truck/toco/utilitario
   };
 
   const mapStatusToSpec = (statusStr: string) => {
     const s = (statusStr || "").trim().toLowerCase();
     if (s.includes("finalizada") || s.includes("concluido") || s.includes("concluída")) {
-      return { text: "Finalizada", emoji: "🟢", color: "text-emerald-400 bg-emerald-500/10 border-emerald-500/20" };
+      return { text: "Finalizada", emoji: "", color: "text-emerald-400 bg-emerald-500/10 border-emerald-500/20" };
     }
     if (s.includes("rota") || s.includes("trânsito") || s.includes("transito")) {
-      return { text: "Em rota", emoji: "🟣", color: "text-purple-400 bg-purple-500/10 border-purple-500/20" };
+      return { text: "Em rota", emoji: "", color: "text-purple-400 bg-purple-500/10 border-purple-500/20" };
     }
     if (s.includes("descarga")) {
-      return { text: "Aguarda descarga", emoji: "🟠", color: "text-amber-550 bg-amber-500/10 border-amber-500/20" };
+      return { text: "Aguarda descarga", emoji: "", color: "text-amber-550 bg-amber-500/10 border-amber-500/20" };
     }
     if (s.includes("carregando") || s.includes("carregamento") || s.includes("carga")) {
-      return { text: "Carregando", emoji: "🔵", color: "text-sky-400 bg-sky-500/10 border-sky-500/20" };
+      return { text: "Carregando", emoji: "", color: "text-sky-400 bg-sky-500/10 border-sky-500/20" };
     }
-    return { text: "Parada", emoji: "🔴", color: "text-rose-500 bg-rose-500/10 border-rose-500/20" };
+    return { text: "Parada", emoji: "", color: "text-rose-500 bg-rose-500/10 border-rose-500/20" };
   };
 
   const getTimelineSummary = (r: Rota) => {
@@ -286,69 +283,69 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
     if (norm === "aguardando carregamento" || norm === "ag. carregamento" || norm === "aguardando carga") {
       return (
         <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] uppercase font-bold font-mono bg-amber-500/10 text-amber-400 border border-amber-500/10 whitespace-nowrap">
-          🟡 Ag. Carregamento
+          Ag. Carregamento
         </span>
       );
     }
     if (norm === "em carregamento") {
       return (
         <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] uppercase font-bold font-mono bg-blue-500/10 text-blue-450 border border-blue-500/10 whitespace-nowrap">
-          🔵 Em Carregamento
+          Em Carregamento
         </span>
       );
     }
     if (norm === "em rota" || norm === "em rota (entregando)") {
       return (
         <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] uppercase font-bold font-mono bg-indigo-500/10 text-indigo-400 border border-indigo-500/10 whitespace-nowrap">
-          🟣 Em Rota
+          Em Rota
         </span>
       );
     }
     if (norm === "aguardando descarga" || norm === "ag. descarga" || norm === "ag.descarga") {
       return (
         <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] uppercase font-bold font-mono bg-amber-500/15 text-orange-400 border border-amber-500/20 whitespace-nowrap">
-          🟠 AG.DESCARGA
+          AG.DESCARGA
         </span>
       );
     }
     if (norm === "em descarga") {
       return (
         <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] uppercase font-bold font-mono bg-orange-500/10 text-orange-400 border border-orange-500/15 whitespace-nowrap">
-          🟠 Em Descarga
+          Em Descarga
         </span>
       );
     }
     if (norm === "cancelada") {
       return (
         <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] uppercase font-bold font-mono bg-red-500/15 text-rose-500 border border-red-500/20 whitespace-nowrap">
-          🔴 Cancelada
+          Cancelada
         </span>
       );
     }
     if (norm === "veículo quebrado" || norm === "veiculo quebrado") {
       return (
         <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] uppercase font-bold font-mono bg-slate-950 text-slate-400 border border-slate-800 whitespace-nowrap animate-pulse">
-          💥 V. Quebrado
+          V. Quebrado
         </span>
       );
     }
     if (norm === "retorno base" || norm === "retorno a base" || norm === "retorno_base") {
       return (
         <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] uppercase font-bold font-mono bg-sky-500/10 text-sky-400 border border-sky-500/10 whitespace-nowrap">
-          🔄 Retorno Base
+          Retorno Base
         </span>
       );
     }
     if (norm === "finalizada") {
       return (
         <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] uppercase font-bold font-mono bg-emerald-500/10 text-emerald-450 border border-emerald-500/10 whitespace-nowrap">
-          🟢 Finalizada
+          Finalizada
         </span>
       );
     }
     return (
       <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] uppercase font-bold font-mono bg-slate-850 text-slate-300 border border-slate-700 whitespace-nowrap">
-        📦 {statusStr}
+        {statusStr}
       </span>
     );
   };
@@ -357,10 +354,11 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
     setIsAdding(false);
     setErrorMess("");
     setDt("");
-    setData("2026-06-14");
+    setData(new Date().toISOString().split("T")[0]);
     setVeiculoId("");
     setMotoristaId("");
     setTipo("Entrega");
+    setReentregaValidadaState("Não");
     setStatus("Aguardando carregamento");
     setStatusViagem("Aguardando Carregamento");
     setTotalEntregas(10);
@@ -396,7 +394,8 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
       const res = await fetch(`/api/disponibilidade?date=${travelDate}`, {
         headers: { "x-user-email": userEmail }
       });
-      if (res.ok) {
+      const contentType = res.headers.get("content-type");
+      if (res.ok && contentType && contentType.includes("application/json")) {
         const disps = await res.json() as any[];
         setAllAvailabilities(disps);
 
@@ -491,7 +490,7 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
         <div className="flex justify-between items-center border-b border-slate-800 pb-2">
           <div className="flex items-center gap-1.5">
             <span className="text-teal-400 font-bold font-mono text-[11px] uppercase tracking-wider flex items-center gap-1">
-              ⚡ Formação de Equipe Inteligente
+              <Sparkles className="w-3.5 h-3.5 text-teal-400" /> Formação de Equipe Inteligente
             </span>
           </div>
           <button 
@@ -510,17 +509,17 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
 
         {suggestedType === "fixos" ? (
           <div className="bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 p-2 rounded text-[10px] flex flex-col gap-0.5 font-semibold leading-normal">
-            <span>💚 VÍNCULO DIRETO DETECTADO</span>
+            <span className="flex items-center gap-1"><ShieldCheck className="w-3.5 h-3.5" /> VÍNCULO DIRETO DETECTADO</span>
             <span className="text-[9px] text-slate-400 font-normal">Ajudantes fixos disponíveis selecionados automaticamente!</span>
           </div>
         ) : suggestedType === "gerais" ? (
           <div className="bg-blue-500/10 border border-blue-500/20 text-blue-400 p-2 rounded text-[10px] flex flex-col gap-0.5 font-semibold leading-normal">
-            <span>💙 AJUDANTES GERAIS DISPONÍVEIS</span>
+            <span className="flex items-center gap-1"><LucideUser className="w-3.5 h-3.5" /> AJUDANTES GERAIS DISPONÍVEIS</span>
             <span className="text-[9px] text-slate-400 font-normal">Nenhum ajudante fixo disponível. Mostrando ajudantes gerais aptos na filial.</span>
           </div>
         ) : (
           <div className="bg-rose-500/10 border border-rose-500/20 text-rose-400 p-2 rounded text-[10px] flex flex-col gap-0.5 font-semibold leading-normal">
-            <span>⚠️ NENHUM RECOMENDADO DISPONÍVEL</span>
+            <span className="flex items-center gap-1"><LucideAlertTriangle className="w-3.5 h-3.5" /> NENHUM RECOMENDADO DISPONÍVEL</span>
             <span className="text-[9px] text-slate-400 font-normal">Nenhum ajudante fixo ou geral cadastrado como disponível para este dia.</span>
           </div>
         )}
@@ -561,7 +560,7 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
 
         {otherAvailableHelpers.length > 0 && (
           <div className="space-y-1">
-            <span className="text-[10px] text-slate-400 font-mono block text-slate-300">➕ Selecionar outro ajudante manual:</span>
+            <span className="text-[10px] text-slate-400 font-mono block font-bold text-slate-300">Selecionar outro ajudante manual:</span>
             <select
               value=""
               onChange={(e) => {
@@ -602,8 +601,8 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
     if (selectedAjudantesIds.length === 0) return null;
     return (
       <div className="space-y-1.5 mt-2 bg-slate-950/30 p-2.5 rounded border border-slate-800/40 text-left font-sans">
-        <label className="text-[10px] text-slate-400 font-mono block uppercase tracking-wider font-semibold text-slate-300">
-          👥 Equipe de Ajudantes Selecionada
+        <label className="text-[10px] text-slate-400 font-mono block uppercase tracking-wider font-semibold text-slate-300 flex items-center gap-1">
+          <LucideUser className="w-3.5 h-3.5 text-sky-400" /> Equipe de Ajudantes Selecionada
         </label>
         <div className="flex flex-wrap gap-1.5">
           {selectedAjudantesIds.map(id => {
@@ -641,7 +640,9 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
     return (
       <div className="bg-slate-900 border border-amber-500/20 rounded-lg p-4 mt-3 space-y-4 animate-fadeIn text-left">
         <div className="flex items-center gap-2 border-b border-slate-800 pb-2">
-          <span className="text-amber-400 font-bold text-xs uppercase tracking-wider font-mono">📦 Painel Adicional — Entrega OFF</span>
+          <span className="text-amber-400 font-bold text-xs uppercase tracking-wider font-mono flex items-center gap-1.5">
+            <Package className="w-4 h-4 text-amber-400" /> Painel Adicional — Entrega OFF
+          </span>
         </div>
         
         {/* Informações do Cliente */}
@@ -825,7 +826,9 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
         {/* Evolução da Operação (Novo Painel Sempre Editável) */}
         {isEdit && (
           <div className="border-t border-slate-800 pt-3 space-y-3">
-            <h4 className="text-[11px] font-bold text-amber-400 font-mono uppercase tracking-wider">📈 Evolução da Operação</h4>
+            <h4 className="text-[11px] font-bold text-amber-400 font-mono uppercase tracking-wider flex items-center gap-1.5">
+              <BarChart2 className="w-3.5 h-3.5 text-amber-400" /> Evolução da Operação
+            </h4>
             
             <div className="grid grid-cols-2 gap-2 text-center font-mono">
               <div className="bg-slate-950 p-2 rounded border border-slate-850">
@@ -924,14 +927,29 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
       return;
     }
 
-    const chosenMotorista = motoristas.find(m => m.id === motoristaId);
-    if (chosenMotorista && chosenMotorista.statusFinal === "BLOQUEADO") {
+    const cleanDt = dt.trim();
+    const isReentrega = tipo.toLowerCase().includes("reentrega");
+    const existingRoute = rotas.find(r => r.dt && String(r.dt).trim().toLowerCase() === cleanDt.toLowerCase());
+    if (existingRoute && !isReentrega) {
       setNotification({
         type: "error",
-        message: `OPERAÇÃO BLOQUEADA\n\n❌ O motorista ${chosenMotorista.nome} está BLOQUEADO no motor de conformidade: ${chosenMotorista.motivoBloqueio || "Inconformidade cadastral"}`
+        message: `OPERAÇÃO BLOQUEADA\n\nDT EM DUPLICIDADE: A DT #${cleanDt} já possui cadastro no sistema (Status: ${existingRoute.status_viagem || existingRoute.status || "Ativa"}).`
       });
       return;
     }
+
+    const chosenMotorista = motoristas.find(m => m.id === motoristaId);
+    if (chosenMotorista && (chosenMotorista.statusFinal === "BLOQUEADO" || chosenMotorista.statusFinal === "PENDENTE")) {
+      setNotification({
+        type: "error",
+        message: chosenMotorista.statusFinal === "BLOQUEADO"
+          ? `OPERAÇÃO BLOQUEADA\n\nO motorista ${chosenMotorista.nome} está BLOQUEADO no motor de conformidade: ${chosenMotorista.motivoBloqueio || "Inconformidade cadastral"}`
+          : `OPERAÇÃO BLOQUEADA\n\nO motorista ${chosenMotorista.nome} está PENDENTE em processo de agregamento (documentação ou exames incompletos). Conclua o cadastro antes de escalá-lo.`
+      });
+      return;
+    }
+
+    const routeUnit = chosenMotorista?.unidadeId || filterUnidade || unidades[0]?.id || "un-go";
 
     setLoading(true);
     try {
@@ -940,9 +958,11 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
         headers: {
           "Content-Type": "application/json",
           "x-user-email": userEmail,
+          "x-selected-unit": routeUnit
         },
         body: JSON.stringify({
           dt: dt.trim(),
+          unidadeId: routeUnit,
           data,
           veiculoId,
           motoristaId,
@@ -957,6 +977,11 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
           devolucoes: Number(devolucoes),
           recusadas: 0,
           dataPrevista: data, // Defaults to departure date
+          
+          // Reentrega validation flags
+          reentrega_validada: tipo === "Reentrega" ? (reentregaValidadaState === "Sim") : false,
+          reentregaValidada: tipo === "Reentrega" ? (reentregaValidadaState === "Sim") : false,
+          status_validacao: tipo === "Reentrega" ? (reentregaValidadaState === "Sim" ? "VALIDADA" : "PENDENTE DE VALIDAÇÃO") : "N/A",
           
           // Entrega OFF fields
           clienteCodigo: tipo === "Entrega OFF" ? clienteCodigo : undefined,
@@ -985,7 +1010,7 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
       if (res.ok) {
         setNotification({
           type: "success",
-          message: "✅ Viagem / DT cadastrada e integrada com as vistorias."
+          message: "Viagem / DT cadastrada e integrada com as vistorias."
         });
         resetForm();
         onRefresh();
@@ -1015,7 +1040,7 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
       if (pendentesNum > 0 && (!r.observacoes_operacionais || r.observacoes_operacionais.trim().length === 0)) {
         setNotification({
           type: "error",
-          message: "❌ Para fechar definitivamente a DT com entregas pendentes, é obrigatório registrar uma justificativa nas observações operacionais. Ex: 'Cliente recusou recebimento.'"
+          message: "Para fechar definitivamente a DT com entregas pendentes, é obrigatório registrar uma justificativa nas observações operacionais. Ex: 'Cliente recusou recebimento.'"
         });
         return;
       }
@@ -1034,14 +1059,14 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
       if (res.ok) {
         setNotification({
           type: "success",
-          message: `✅ Status de viagem atualizado para: ${payload.status_viagem}`
+          message: `Status de viagem atualizado para: ${payload.status_viagem}`
         });
         onRefresh();
       } else {
         const error = await res.json();
         setNotification({
           type: "error",
-          message: `❌ Erro ao atualizar status: ${error.error || "Operação negada."}`
+          message: `Erro ao atualizar status: ${error.error || "Operação negada."}`
         });
       }
     } catch (err) {
@@ -1061,7 +1086,7 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
     if (currentEntregues > planejado) {
       setNotification({
         type: "error",
-        message: "❌ Quantidade superior ao planejado."
+        message: "Quantidade superior ao planejado."
       });
       return;
     }
@@ -1069,7 +1094,7 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
     if (currentEntregues + currentDevolucoes + currentRecusadas > planejado) {
       setNotification({
         type: "error",
-        message: `❌ A soma de entregues, devolvidas e recusadas não pode superar a quantidade planejada (${planejado}).`
+        message: `A soma de entregues, devolvidas e recusadas não pode superar a quantidade planejada (${planejado}).`
       });
       return;
     }
@@ -1102,13 +1127,13 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
         const err = await res.json();
         setNotification({
           type: "error",
-          message: `❌ Erro ao atualizar evolução: ${err.error || "Operação rejeitada."}`
+          message: `Erro ao atualizar evolução: ${err.error || "Operação rejeitada."}`
         });
       }
     } catch (err) {
       setNotification({
         type: "error",
-        message: "❌ Erro eletrônico ao atualizar evolução."
+        message: "Erro eletrônico ao atualizar evolução."
       });
     } finally {
       setLoading(false);
@@ -1130,20 +1155,20 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
           if (res.ok) {
             setNotification({
               type: "success",
-              message: "✅ Registro excluído com sucesso."
+              message: "Registro excluído com sucesso."
             });
             onRefresh();
           } else {
             const err = await res.json();
             setNotification({
               type: "error",
-              message: `❌ Não foi possível excluir a DT. Motivo: ${err.error || "Exclusão não autorizada."}`
+              message: `Não foi possível excluir a DT. Motivo: ${err.error || "Exclusão não autorizada."}`
             });
           }
         } catch (e) {
           setNotification({
             type: "error",
-            message: "❌ Erro de conexão ao excluir a DT."
+            message: "Erro de conexão ao excluir a DT."
           });
         }
       }
@@ -1163,6 +1188,7 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
     setEditEntregues(r.entregues);
     setEditRecusadas(r.recusadas || 0);
     setEditDevolucoes(r.devolucoes);
+    setEditReentregaValidadaState((r.reentrega_validada || r.reentregaValidada || r.status_validacao === "VALIDADA") ? "Sim" : "Não");
     setSelectedAjudantesIds(r.ajudantesIds || []);
 
     // Set Entrega OFF edit states
@@ -1192,7 +1218,7 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
     if (entreguesNum > planejado) {
       setNotification({
         type: "error",
-        message: "❌ Quantidade superior ao planejado."
+        message: "Quantidade superior ao planejado."
       });
       return;
     }
@@ -1200,7 +1226,7 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
     if (entreguesNum + devolucoesNum + recusadasNum > planejado) {
       setNotification({
         type: "error",
-        message: `❌ A soma de entregues, devolvidas e recusadas não pode superar a quantidade planejada (${planejado}).`
+        message: `A soma de entregues, devolvidas e recusadas não pode superar a quantidade planejada (${planejado}).`
       });
       return;
     }
@@ -1209,16 +1235,18 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
     if (editStatusViagem === "Finalizada" && pendentesNum > 0 && (!editObservacoes || editObservacoes.trim().length === 0)) {
       setNotification({
         type: "error",
-        message: "❌ Para fechar definitivamente a DT com entregas pendentes, é obrigatório registrar uma justificativa nas observações operacionais. Ex: 'Cliente recusou recebimento.'"
+        message: "Para fechar definitivamente a DT com entregas pendentes, é obrigatório registrar uma justificativa nas observações operacionais. Ex: 'Cliente recusou recebimento.'"
       });
       return;
     }
 
     const chosenMotorista = motoristas.find(m => m.id === editMotoristaId);
-    if (chosenMotorista && chosenMotorista.statusFinal === "BLOQUEADO") {
+    if (chosenMotorista && (chosenMotorista.statusFinal === "BLOQUEADO" || chosenMotorista.statusFinal === "PENDENTE")) {
       setNotification({
         type: "error",
-        message: `OPERAÇÃO BLOQUEADA\n\n❌ O motorista ${chosenMotorista.nome} está BLOQUEADO no motor de conformidade: ${chosenMotorista.motivoBloqueio || "Inconformidade cadastral"}`
+        message: chosenMotorista.statusFinal === "BLOQUEADO"
+          ? `OPERAÇÃO BLOQUEADA\n\nO motorista ${chosenMotorista.nome} está BLOQUEADO no motor de conformidade: ${chosenMotorista.motivoBloqueio || "Inconformidade cadastral"}`
+          : `OPERAÇÃO BLOQUEADA\n\nO motorista ${chosenMotorista.nome} está PENDENTE em processo de agregamento (documentação ou exames incompletos). Conclua o cadastro antes de escalá-lo.`
       });
       return;
     }
@@ -1246,6 +1274,11 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
           recusadas: Number(editRecusadas),
           devolucoes: Number(editDevolucoes),
 
+          // Reentrega validation flags
+          reentrega_validada: editingRoute.tipo === "Reentrega" ? (editReentregaValidadaState === "Sim") : undefined,
+          reentregaValidada: editingRoute.tipo === "Reentrega" ? (editReentregaValidadaState === "Sim") : undefined,
+          status_validacao: editingRoute.tipo === "Reentrega" ? (editReentregaValidadaState === "Sim" ? "VALIDADA" : "PENDENTE DE VALIDAÇÃO") : undefined,
+
           // Entrega OFF specific edit fields
           clienteCodigo: editingRoute.tipo === "Entrega OFF" ? editClienteCodigo : undefined,
           clienteNome: editingRoute.tipo === "Entrega OFF" ? editClienteNome : undefined,
@@ -1264,7 +1297,7 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
       if (res.ok) {
         setNotification({
           type: "success",
-          message: "✅ Alterações na DT gravadas com logs de auditoria automatizados."
+          message: "Alterações na DT gravadas com logs de auditoria automatizados."
         });
         setEditingRoute(null);
         onRefresh();
@@ -1272,13 +1305,13 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
         const err = await res.json();
         setNotification({
           type: "error",
-          message: `❌ Não foi possível gravar: ${err.error || "Operação rejeitada."}`
+          message: `Não foi possível gravar: ${err.error || "Operação rejeitada."}`
         });
       }
     } catch (err) {
       setNotification({
         type: "error",
-        message: "❌ Erro eletrônico ao comunicar salvar alterações."
+        message: "Erro eletrônico ao comunicar salvar alterações."
       });
     } finally {
       setLoading(false);
@@ -1324,7 +1357,7 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
       if (res.ok) {
         setNotification({
           type: "success",
-          message: `⚠️ Incidente [${occTipo}] registrado com sucesso e anexado ao log da DT.`
+          message: `Incidente [${occTipo}] registrado com sucesso e anexado ao log da DT.`
         });
         setOccurrenceRouteId(null);
         setOccDescricao("");
@@ -1333,13 +1366,13 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
         const err = await res.json();
         setNotification({
           type: "error",
-          message: `❌ Erro ao gravar ocorrência: ${err.error || "Rejeição."}`
+          message: `Erro ao gravar ocorrência: ${err.error || "Rejeição."}`
         });
       }
     } catch (err) {
       setNotification({
         type: "error",
-        message: "❌ Erro operacional. Sem conectividade."
+        message: "Erro operacional. Sem conectividade."
       });
     } finally {
       setLoading(false);
@@ -1522,10 +1555,13 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
       const matchUnidade = filterUnidade ? (r.unidadeId === filterUnidade) : true;
       const matchStatus = filterStatus ? ((r.status_viagem || r.status || "").toLowerCase() === filterStatus.toLowerCase()) : true;
 
-      // Executive Dashboard Period & Transportador overrides
-      const matchPeriod = dashPeriod && dashPeriod !== "todos"
-        ? isDateInPeriod(r.data, dashPeriod, dashStartDate, dashEndDate)
-        : (filterData ? (r.data === filterData) : true);
+      // Executive Dashboard Period & Transportador overrides (bypassed if specific DT number or search term is entered)
+      const hasSpecificDtSearch = Boolean(filterDt.trim() || (searchTerm.trim() && /^\d+$/.test(searchTerm.trim())));
+      const matchPeriod = hasSpecificDtSearch
+        ? true
+        : (dashPeriod && dashPeriod !== "todos"
+            ? isDateInPeriod(r.data, dashPeriod, dashStartDate, dashEndDate)
+            : (filterData ? (r.data === filterData) : true));
 
       const matchTransportador = dashTransportador
         ? (vObj?.tipo === dashTransportador)
@@ -1667,7 +1703,7 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-slate-800 pb-4">
           <div>
             <h3 className="text-md font-bold text-white flex items-center gap-2">
-              <span className="text-emerald-400 text-lg">📊</span> 
+              <BarChart2 className="w-5 h-5 text-emerald-400" />
               PAINEL EXECUTIVO OPERACIONAL DAS DTS
             </h3>
             <p className="text-xs text-slate-400 mt-0.5">
@@ -1782,7 +1818,9 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
           {/* CARD 1: Rotas Planejadas */}
           <div className="bg-slate-950/45 p-4 rounded-xl border border-slate-800 hover:border-slate-700 transition shadow-inner">
             <div className="flex items-center justify-between mb-2">
-              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest font-mono">🚛 Rotas Planejadas</span>
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest font-mono flex items-center gap-1.5">
+                <LucideTruck className="w-3.5 h-3.5 text-sky-400" /> Rotas Planejadas
+              </span>
               <span className="p-1 px-1.5 rounded-md bg-sky-500/10 text-sky-400 text-[10px] font-bold font-mono">DT</span>
             </div>
             <div className="text-2xl font-black text-white font-mono">{kpis.totalDts}</div>
@@ -1792,7 +1830,9 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
           {/* CARD 2: Rotas Em Andamento */}
           <div className="bg-slate-950/45 p-4 rounded-xl border border-slate-800 hover:border-slate-700 transition shadow-inner">
             <div className="flex items-center justify-between mb-2">
-              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest font-mono">🟦 Rotas Em Andamento</span>
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest font-mono flex items-center gap-1.5">
+                <LucideClock className="w-3.5 h-3.5 text-blue-400" /> Rotas Em Andamento
+              </span>
               <span className="w-2.5 h-2.5 rounded-full bg-blue-500 animate-pulse"></span>
             </div>
             <div className="text-2xl font-black text-sky-400 font-mono">{kpis.emAndamento}</div>
@@ -1802,7 +1842,7 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
           {/* CARD 3: Rotas Finalizadas */}
           <div className="bg-slate-950/45 p-4 rounded-xl border border-slate-800 hover:border-slate-700 transition shadow-inner">
             <div className="flex items-center justify-between mb-2">
-              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest font-mono">✅ Rotas Finalizadas</span>
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest font-mono">Rotas Finalizadas</span>
               <span className="p-1 rounded bg-emerald-500/10 text-emerald-400"><LucideCheckCircle className="w-3.5 h-3.5" /></span>
             </div>
             <div className="text-2xl font-black text-emerald-400 font-mono">{kpis.finalizadas}</div>
@@ -1812,7 +1852,7 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
           {/* CARD 4: Entregas Planejadas */}
           <div className="bg-slate-950/45 p-4 rounded-xl border border-slate-800 hover:border-slate-700 transition shadow-inner">
             <div className="flex items-center justify-between mb-2">
-              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest font-mono">📦 Entregas Planejadas</span>
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest font-mono">Entregas Planejadas</span>
               <span className="p-1 px-1.5 rounded bg-slate-900 text-slate-400 font-mono text-[9px] font-bold">TOTAL</span>
             </div>
             <div className="text-2xl font-black text-white font-mono">{kpis.totalEntregasPlanejadas}</div>
@@ -1822,7 +1862,7 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
           {/* CARD 5: Entregas Concluídas */}
           <div className="bg-slate-950/45 p-4 rounded-xl border border-slate-800 hover:border-slate-700 transition shadow-inner">
             <div className="flex items-center justify-between mb-2">
-              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest font-mono">🟢 Entregas Concluídas</span>
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest font-mono">Entregas Concluídas</span>
               <span className="p-1 rounded bg-green-500/10 text-green-400"><LucideCheckCircle className="w-3.5 h-3.5" /></span>
             </div>
             <div className="text-2xl font-black text-green-450 font-mono">{kpis.totalEntregasConcluidas}</div>
@@ -1832,7 +1872,7 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
           {/* CARD 6: Entregas Pendentes */}
           <div className="bg-slate-950/45 p-4 rounded-xl border border-slate-800 hover:border-slate-700 transition shadow-inner">
             <div className="flex items-center justify-between mb-2">
-              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest font-mono">🟡 Entregas Pendentes</span>
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest font-mono">Entregas Pendentes</span>
               <span className="p-1 rounded bg-amber-500/10 text-amber-400"><LucideClock className="w-3.5 h-3.5" /></span>
             </div>
             <div className="text-2xl font-black text-amber-400 font-mono">{kpis.totalEntregasPendentes}</div>
@@ -1842,7 +1882,7 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
           {/* CARD 7: Devoluções do Dia */}
           <div className="bg-slate-950/45 p-4 rounded-xl border border-slate-800 hover:border-slate-700 transition shadow-inner">
             <div className="flex items-center justify-between mb-2">
-              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest font-mono">🔄 Devoluções do Dia</span>
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest font-mono">Devoluções do Dia</span>
               <span className="p-1 px-1.5 rounded bg-rose-500/10 text-rose-450 font-mono text-[9px] font-bold">DEV</span>
             </div>
             <div className="text-2xl font-black text-rose-400 font-mono">{kpis.totalDevolucoes}</div>
@@ -1852,7 +1892,7 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
           {/* CARD 8: DTs com Ocorrências */}
           <div className="bg-slate-950/45 p-4 rounded-xl border border-slate-800 hover:border-slate-700 transition shadow-inner" title="Avaria, No Show, Falta, Vale, Divergências...">
             <div className="flex items-center justify-between mb-2">
-              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest font-mono">⚠️ DTs c/ Ocorrências</span>
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest font-mono">DTs c/ Ocorrências</span>
               <span className="p-1 rounded bg-red-500/10 text-red-500"><LucideAlertTriangle className="w-3.5 h-3.5 animate-pulse" /></span>
             </div>
             <div className="text-2xl font-black text-rose-500 font-mono">{kpis.dtsComOcorrencias}</div>
@@ -1867,7 +1907,9 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
           {/* Progresso Operacional */}
           <div className="lg:col-span-5 bg-slate-950/50 border border-slate-800/80 rounded-xl p-5 flex flex-col justify-between">
             <div className="space-y-3">
-              <h4 className="text-xs font-bold text-slate-300 uppercase tracking-wider font-mono">📈 Progresso Operacional</h4>
+              <h4 className="text-xs font-bold text-slate-300 uppercase tracking-wider font-mono flex items-center gap-1.5">
+                <BarChart2 className="w-3.5 h-3.5 text-sky-400" /> Progresso Operacional
+              </h4>
               <p className="text-[11px] text-slate-400 leading-normal">
                 Taxa de conciliação e entregues da operação. Atualiza instantaneamente p/ cada alteração no Supabase.
               </p>
@@ -1899,7 +1941,9 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
 
           {/* Gráfico Operacional */}
           <div className="lg:col-span-7 bg-slate-950/50 border border-slate-800/80 rounded-xl p-5 flex flex-col justify-between h-[380px]">
-            <h4 className="text-xs font-bold text-slate-300 uppercase tracking-wider font-mono mb-2">📊 Visão Analítica de Entregas</h4>
+            <h4 className="text-xs font-bold text-slate-300 uppercase tracking-wider font-mono mb-2 flex items-center gap-1.5">
+              <BarChart2 className="w-3.5 h-3.5 text-emerald-400" /> Visão Analítica de Entregas
+            </h4>
             
             <div className="flex-1 w-full min-h-[300px] relative">
               {kpis.totalEntregasPlanejadas === 0 ? (
@@ -2020,11 +2064,11 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
                     <option 
                       key={m.id} 
                       value={m.id}
-                      disabled={m.statusFinal === "BLOQUEADO" && m.id !== motoristaId}
-                      title={m.statusFinal === "BLOQUEADO" ? m.motivoBloqueio : undefined}
-                      className={m.statusFinal === "BLOQUEADO" ? "text-rose-550 line-through" : "text-white"}
+                      disabled={(m.statusFinal === "BLOQUEADO" || m.statusFinal === "PENDENTE") && m.id !== motoristaId}
+                      title={m.statusFinal === "BLOQUEADO" ? m.motivoBloqueio : m.statusFinal === "PENDENTE" ? "Pendente em agregamento" : undefined}
+                      className={m.statusFinal === "BLOQUEADO" ? "text-rose-550 line-through" : m.statusFinal === "PENDENTE" ? "text-amber-500 font-semibold" : "text-white"}
                     >
-                      {m.nome} {m.statusFinal === "BLOQUEADO" ? `(🔴 BLOQUEADO - ${m.motivoBloqueio || "Vencido"})` : ""}
+                      {m.nome} {m.statusFinal === "BLOQUEADO" ? `(BLOQUEADO - ${m.motivoBloqueio || "Vencido"})` : m.statusFinal === "PENDENTE" ? `(PENDENTE - Agregamento)` : ""}
                     </option>
                   ))}
                 </select>
@@ -2040,15 +2084,15 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
                   className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1.5 text-white focus:outline-none focus:border-slate-700 font-bold"
                   required
                 >
-                  <option value="Aguardando Carregamento">🟡 Aguardando Carregamento</option>
-                  <option value="Em Carregamento">🔵 Em Carregamento</option>
-                  <option value="Em Rota">🟣 Em Rota</option>
-                  <option value="Em Descarga">🟠 Em Descarga</option>
-                  <option value="AG.DESCARGA">🟠 AG.DESCARGA</option>
-                  <option value="Finalizada">🟢 Finalizada</option>
-                  <option value="Cancelada">🔴 Cancelada</option>
-                  <option value="Veículo Quebrado">⚫ Veículo Quebrado</option>
-                  <option value="Retorno Base">🔄 Retorno Base</option>
+                  <option value="Aguardando Carregamento">Aguardando Carregamento</option>
+                  <option value="Em Carregamento">Em Carregamento</option>
+                  <option value="Em Rota">Em Rota</option>
+                  <option value="Em Descarga">Em Descarga</option>
+                  <option value="AG.DESCARGA">AG.DESCARGA</option>
+                  <option value="Finalizada">Finalizada</option>
+                  <option value="Cancelada">Cancelada</option>
+                  <option value="Veículo Quebrado">Veículo Quebrado</option>
+                  <option value="Retorno Base">Retorno Base</option>
                 </select>
               </div>
 
@@ -2063,7 +2107,7 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
                     <option value="Entrega">Entrega</option>
                     <option value="Recarga">Recarga</option>
                     <option value="Reentrega">Reentrega</option>
-                    <option value="Entrega OFF">📦 Entrega OFF</option>
+                    <option value="Entrega OFF">Entrega OFF</option>
                   </select>
                 </div>
 
@@ -2080,6 +2124,53 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
                   </div>
                 )}
               </div>
+
+                {tipo === "Reentrega" && (
+                  <div className="col-span-2 p-3 bg-amber-950/40 border-2 border-amber-500/60 rounded-xl space-y-2 animate-fadeIn shadow-lg shadow-amber-950/20">
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs font-bold text-amber-300 font-mono flex items-center gap-1.5">
+                        <LucideAlertTriangle className="w-4 h-4 text-amber-400 animate-pulse" />
+                        <span>VALIDAÇÃO DA REENTREGA</span>
+                      </label>
+                      <span className="text-[10px] bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded font-mono font-bold">
+                        Requisito Obrigatório
+                      </span>
+                    </div>
+                    <p className="text-xs text-amber-200/90 font-medium leading-tight">
+                      A reentrega já foi devidamente validada pelo setor responsável?
+                    </p>
+                    <div className="grid grid-cols-2 gap-2 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => setReentregaValidadaState("Sim")}
+                        className={`py-2 px-3 rounded-lg text-xs font-bold font-mono transition flex items-center justify-center gap-1.5 cursor-pointer ${
+                          reentregaValidadaState === "Sim"
+                            ? "bg-emerald-600 text-white ring-2 ring-emerald-400 shadow-lg shadow-emerald-900/50"
+                            : "bg-slate-900 text-slate-400 border border-slate-800 hover:bg-slate-800"
+                        }`}
+                      >
+                        <LucideCheckCircle className="w-3.5 h-3.5" /> SIM (Validada)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setReentregaValidadaState("Não")}
+                        className={`py-2 px-3 rounded-lg text-xs font-bold font-mono transition flex items-center justify-center gap-1.5 cursor-pointer ${
+                          reentregaValidadaState === "Não"
+                            ? "bg-rose-600 text-white ring-2 ring-rose-400 shadow-lg shadow-rose-900/50"
+                            : "bg-slate-900 text-slate-400 border border-slate-800 hover:bg-slate-800"
+                        }`}
+                      >
+                        <LucideX className="w-3.5 h-3.5" /> NÃO (Pendente / Alerta)
+                      </button>
+                    </div>
+                    {reentregaValidadaState === "Não" && (
+                      <div className="p-2 bg-rose-950/60 border border-rose-500/40 rounded-lg text-[11px] text-rose-300 font-mono flex items-start gap-1.5 leading-snug">
+                        <LucideAlertTriangle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                        <span><b>ALERTA MÁXIMO:</b> Ao selecionar "Não", um alerta de prioridade máxima será exibido na Dashboard do sistema até que a validação seja concluída.</span>
+                      </div>
+                    )}
+                  </div>
+                )}
 
               {tipo !== "Entrega OFF" ? (
                 <>
@@ -2207,11 +2298,11 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
                     <option 
                       key={m.id} 
                       value={m.id}
-                      disabled={m.statusFinal === "BLOQUEADO" && m.id !== editMotoristaId}
-                      title={m.statusFinal === "BLOQUEADO" ? m.motivoBloqueio : undefined}
-                      className={m.statusFinal === "BLOQUEADO" ? "text-rose-550 line-through" : "text-white"}
+                      disabled={(m.statusFinal === "BLOQUEADO" || m.statusFinal === "PENDENTE") && m.id !== editMotoristaId}
+                      title={m.statusFinal === "BLOQUEADO" ? m.motivoBloqueio : m.statusFinal === "PENDENTE" ? "Pendente em agregamento" : undefined}
+                      className={m.statusFinal === "BLOQUEADO" ? "text-rose-550 line-through" : m.statusFinal === "PENDENTE" ? "text-amber-500 font-semibold" : "text-white"}
                     >
-                      {m.nome} {m.statusFinal === "BLOQUEADO" ? `(🔴 BLOQUEADO - ${m.motivoBloqueio || "Vencido"})` : ""}
+                      {m.nome} {m.statusFinal === "BLOQUEADO" ? `(BLOQUEADO - ${m.motivoBloqueio || "Vencido"})` : m.statusFinal === "PENDENTE" ? `(PENDENTE - Agregamento)` : ""}
                     </option>
                   ))}
                 </select>
@@ -2227,17 +2318,58 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
                   className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1 text-white focus:outline-none font-bold"
                   required
                 >
-                  <option value="Aguardando Carregamento">🟡 Aguardando Carregamento</option>
-                  <option value="Em Carregamento">🔵 Em Carregamento</option>
-                  <option value="Em Rota">🟣 Em Rota</option>
-                  <option value="Em Descarga">🟠 Em Descarga</option>
-                  <option value="AG.DESCARGA">🟠 AG.DESCARGA</option>
-                  <option value="Finalizada">🟢 Finalizada</option>
-                  <option value="Cancelada">🔴 Cancelada</option>
-                  <option value="Veículo Quebrado">⚫ Veículo Quebrado</option>
-                  <option value="Retorno Base">🔄 Retorno Base</option>
+                  <option value="Aguardando Carregamento">Aguardando Carregamento</option>
+                  <option value="Em Carregamento">Em Carregamento</option>
+                  <option value="Em Rota">Em Rota</option>
+                  <option value="Em Descarga">Em Descarga</option>
+                  <option value="AG.DESCARGA">AG.DESCARGA</option>
+                  <option value="Finalizada">Finalizada</option>
+                  <option value="Cancelada">Cancelada</option>
+                  <option value="Veículo Quebrado">Veículo Quebrado</option>
+                  <option value="Retorno Base">Retorno Base</option>
                 </select>
               </div>
+
+              {editingRoute.tipo && String(editingRoute.tipo).toLowerCase().includes("reentrega") && (
+                <div className="p-3 bg-amber-950/40 border-2 border-amber-500/60 rounded-xl space-y-2 animate-fadeIn shadow-lg shadow-amber-950/20">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-bold text-amber-300 font-mono flex items-center gap-1.5">
+                      <LucideAlertTriangle className="w-4 h-4 text-amber-400 animate-pulse" />
+                      <span>VALIDAÇÃO DA REENTREGA (FECHAMENTO)</span>
+                    </label>
+                    <span className="text-[10px] bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded font-mono font-bold">
+                      Edição de Status
+                    </span>
+                  </div>
+                  <p className="text-xs text-amber-200/90 font-medium leading-tight">
+                    A reentrega já foi devidamente validada pelo setor responsável?
+                  </p>
+                  <div className="grid grid-cols-2 gap-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => setEditReentregaValidadaState("Sim")}
+                      className={`py-2 px-3 rounded-lg text-xs font-bold font-mono transition flex items-center justify-center gap-1.5 cursor-pointer ${
+                        editReentregaValidadaState === "Sim"
+                          ? "bg-emerald-600 text-white ring-2 ring-emerald-400 shadow-lg shadow-emerald-900/50"
+                          : "bg-slate-900 text-slate-400 border border-slate-800 hover:bg-slate-800"
+                      }`}
+                    >
+                      <LucideCheckCircle className="w-3.5 h-3.5" /> SIM (Validada)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setEditReentregaValidadaState("Não")}
+                      className={`py-2 px-3 rounded-lg text-xs font-bold font-mono transition flex items-center justify-center gap-1.5 cursor-pointer ${
+                        editReentregaValidadaState === "Não"
+                          ? "bg-rose-600 text-white ring-2 ring-rose-400 shadow-lg shadow-rose-900/50"
+                          : "bg-slate-900 text-slate-400 border border-slate-800 hover:bg-slate-800"
+                      }`}
+                    >
+                      <LucideX className="w-3.5 h-3.5" /> NÃO (Pendente / Alerta)
+                    </button>
+                  </div>
+                </div>
+              )}
 
               {/* CONTROLE DE ENTREGAS REAL TIME */}
               {editingRoute.tipo !== "Entrega OFF" ? (
@@ -2350,7 +2482,9 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
                   <LucideX className="w-4 h-4 text-rose-500 hover:scale-110 cursor-pointer" onClick={() => setOccurrenceRouteId(null)} />
                   <span className="text-xs font-mono text-slate-400 ml-1.5">DT: {rotas.find(x => x.id === occurrenceRouteId)?.dt}</span>
                 </div>
-                <h4 className="text-white text-xs font-mono font-bold uppercase tracking-wider">⚠️ Nova Ocorrência</h4>
+                <h4 className="text-white text-xs font-mono font-bold uppercase tracking-wider flex items-center gap-1.5">
+                  <LucideAlertTriangle className="w-4 h-4 text-amber-400" /> Nova Ocorrência
+                </h4>
               </div>
 
               <form onSubmit={handleSaveOccurrence} className="space-y-3 text-xs leading-relaxed">
@@ -2362,13 +2496,13 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
                     className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1.5 text-white font-semibold text-xs"
                     required
                   >
-                    <option value="Atraso">⏳ Atraso de Viagem</option>
-                    <option value="Trânsito">🚗 Trânsito Intenso / Congestionamento</option>
-                    <option value="Acidente">🚨 Acidente Rodoviário (Sinistro)</option>
-                    <option value="Cliente Ausente">👤 Cliente Ausente / Estabelecimento Fechado</option>
-                    <option value="Recusa">❌ Recusa Parcial/Total da Carga</option>
-                    <option value="Falta de Mercadoria">📦 Falta de Mercadoria / Sobra de Carga</option>
-                    <option value="Problema Mecânico">🔧 Problema Mecânico / Quebra do Veículo</option>
+                    <option value="Atraso">Atraso de Viagem</option>
+                    <option value="Trânsito">Trânsito Intenso / Congestionamento</option>
+                    <option value="Acidente">Acidente Rodoviário (Sinistro)</option>
+                    <option value="Cliente Ausente">Cliente Ausente / Estabelecimento Fechado</option>
+                    <option value="Recusa">Recusa Parcial/Total da Carga</option>
+                    <option value="Falta de Mercadoria">Falta de Mercadoria / Sobra de Carga</option>
+                    <option value="Problema Mecânico">Problema Mecânico / Quebra do Veículo</option>
                   </select>
                 </div>
 
@@ -2458,7 +2592,7 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
                         : "text-slate-500 hover:text-slate-350"
                     }`}
                   >
-                    🎴 Cards
+                    <LucideLayers className="w-3.5 h-3.5" /> Cards
                   </button>
                   <button
                     type="button"
@@ -2469,7 +2603,7 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
                         : "text-slate-500 hover:text-slate-350"
                     }`}
                   >
-                    📋 Tabela
+                    <LucideFileText className="w-3.5 h-3.5" /> Tabela
                   </button>
                 </div>
 
@@ -2562,15 +2696,15 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
                     className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1 text-white focus:outline-none focus:border-slate-700 font-bold"
                   >
                     <option value="">Todos</option>
-                    <option value="Aguardando Carregamento">🟡 Ag. Carregamento</option>
-                    <option value="Em Carregamento">🔵 Em Carregamento</option>
-                    <option value="Em Rota">🟣 Em Rota</option>
-                    <option value="Em Descarga">🟠 Em Descarga</option>
-                    <option value="AG.DESCARGA">🟠 AG.DESCARGA</option>
-                    <option value="Finalizada">🟢 Finalizada</option>
-                    <option value="Cancelada">🔴 Cancelada</option>
-                    <option value="Veículo Quebrado">⚫ V. Quebrado</option>
-                    <option value="Retorno Base">🔄 Retorno Base</option>
+                    <option value="Aguardando Carregamento">Ag. Carregamento</option>
+                    <option value="Em Carregamento">Em Carregamento</option>
+                    <option value="Em Rota">Em Rota</option>
+                    <option value="Em Descarga">Em Descarga</option>
+                    <option value="AG.DESCARGA">AG.DESCARGA</option>
+                    <option value="Finalizada">Finalizada</option>
+                    <option value="Cancelada">Cancelada</option>
+                    <option value="Veículo Quebrado">V. Quebrado</option>
+                    <option value="Retorno Base">Retorno Base</option>
                   </select>
                 </div>
               </div>
@@ -2630,13 +2764,27 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
                               <span className="text-white font-bold block font-mono text-xs">DT #{r.dt}</span>
                               <span className="text-[10px] text-slate-400 font-mono block">Saída: {r.data} • {r.tipo}</span>
                               
+                              {r.tipo && String(r.tipo).toLowerCase().includes("reentrega") && (
+                                <div className="mt-1">
+                                  <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold font-mono border ${
+                                    (r.reentrega_validada || r.reentregaValidada || r.status_validacao === "VALIDADA")
+                                      ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30"
+                                      : "bg-rose-500/10 text-rose-400 border-rose-500/30 animate-pulse"
+                                  }`}>
+                                    {(r.reentrega_validada || r.reentregaValidada || r.status_validacao === "VALIDADA")
+                                      ? <><LucideCheckCircle className="w-3 h-3 text-emerald-400" /> Validada</>
+                                      : <><LucideAlertTriangle className="w-3 h-3 text-rose-400" /> NÃO Validada</>}
+                                  </span>
+                                </div>
+                              )}
+                              
                               {linkedNoShow && (
                                 <div className="mt-1.5 space-y-1">
                                   <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold bg-rose-505/10 text-rose-400 border border-rose-505/15 animate-pulse select-none">
-                                    🚨 Entrega com No Show ({linkedNoShow.statusNoShow})
+                                    <LucideAlertTriangle className="w-3 h-3 text-rose-400" /> Entrega com No Show ({linkedNoShow.statusNoShow})
                                   </span>
                                   <div className="text-[9px] bg-slate-950/65 border border-slate-800 rounded p-1.5 text-slate-400 font-sans max-w-[200px] leading-tight space-y-0.5">
-                                    <p className="font-semibold text-rose-400">⚡ Esta DT possui registro de No Show.</p>
+                                    <p className="font-semibold text-rose-400 flex items-center gap-1"><Sparkles className="w-3 h-3" /> Esta DT possui registro de No Show.</p>
                                     <p className="font-mono text-[8px] text-slate-500">Status: {linkedNoShow.statusNoShow}</p>
                                     {linkedNoShow.statusNoShow === "Resolvido" && (
                                       <p className="leading-normal">
@@ -2682,8 +2830,8 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
                                   const h = motoristas.find(m => m.id === hId);
                                   if (!h) return null;
                                   return (
-                                    <span key={hId} className="inline-block bg-teal-950/20 text-teal-400 border border-teal-900 px-1 py-0.5 rounded text-[8px] font-mono leading-none font-bold whitespace-nowrap" title={h.nome}>
-                                      👥 {h.nome.split(" ")[0]}
+                                    <span key={hId} className="inline-flex items-center gap-1 bg-teal-950/20 text-teal-400 border border-teal-900 px-1 py-0.5 rounded text-[8px] font-mono leading-none font-bold whitespace-nowrap" title={h.nome}>
+                                      <LucideUser className="w-2.5 h-2.5" /> {h.nome.split(" ")[0]}
                                     </span>
                                   );
                                 })}
@@ -2712,15 +2860,15 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
                                 onChange={(e) => handleUpdateStatus(r.id, { status_viagem: e.target.value })}
                                 className="bg-slate-950 border border-slate-800 rounded px-1.5 py-0.5 text-slate-300 text-[9px] font-mono focus:outline-none cursor-pointer focus:border-slate-700 hover:bg-slate-900 transition"
                               >
-                                <option value="Aguardando Carregamento">🟡 Ag. Carregamento</option>
-                                <option value="Em Carregamento">🔵 Em Carregamento</option>
-                                <option value="Em Rota">🟣 Em Rota</option>
-                                <option value="Em Descarga">🟠 Em Descarga</option>
-                                <option value="AG.DESCARGA">🟠 AG.DESCARGA</option>
-                                <option value="Finalizada">🟢 Finalizada</option>
-                                <option value="Cancelada">🔴 Cancelada</option>
-                                <option value="Veículo Quebrado">⚫ V. Quebrado</option>
-                                <option value="Retorno Base">🔄 Retorno Base</option>
+                                <option value="Aguardando Carregamento">Ag. Carregamento</option>
+                                <option value="Em Carregamento">Em Carregamento</option>
+                                <option value="Em Rota">Em Rota</option>
+                                <option value="Em Descarga">Em Descarga</option>
+                                <option value="AG.DESCARGA">AG.DESCARGA</option>
+                                <option value="Finalizada">Finalizada</option>
+                                <option value="Cancelada">Cancelada</option>
+                                <option value="Veículo Quebrado">V. Quebrado</option>
+                                <option value="Retorno Base">Retorno Base</option>
                               </select>
                             </div>
                           </td>
@@ -2742,17 +2890,17 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
                               {/* New Occurrence button */}
                               <button
                                 onClick={() => openOccurrenceModal(r.id)}
-                                className="px-1.5 py-0.5 text-[9px] font-mono bg-amber-600/10 text-amber-400 hover:bg-amber-600/30 border border-amber-650/20 hover:text-white rounded flex items-center gap-0.5 select-none transition"
+                                className="px-1.5 py-0.5 text-[9px] font-mono bg-amber-600/10 text-amber-400 hover:bg-amber-600/30 border border-amber-650/20 hover:text-white rounded flex items-center gap-1 select-none transition"
                                 title="Registrar Nova Ocorrência"
                               >
-                                ⚠️ +Ocorrência
+                                <LucideAlertTriangle className="w-3 h-3 text-amber-400" /> Ocorrência
                               </button>
 
                               {/* Edit DT button */}
                               <button
                                 onClick={() => startEditing(r)}
                                 className="p-1 bg-slate-950 hover:bg-slate-850 border border-slate-800 rounded text-slate-400 hover:text-white"
-                                title="✏️ Editar DT"
+                                title="Editar DT"
                               >
                                 <LucideEdit className="w-3 h-3 text-sky-400" />
                               </button>
@@ -2888,9 +3036,9 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
                                       
                                       <button
                                         onClick={() => openOccurrenceModal(r.id)}
-                                        className="px-2.5 py-1 bg-amber-600 hover:bg-amber-500 text-white rounded text-[10px] font-semibold font-mono flex items-center gap-1 transition-all"
+                                        className="px-2.5 py-1 bg-amber-600 hover:bg-amber-500 text-white rounded text-[10px] font-semibold font-mono flex items-center gap-1.5 transition-all cursor-pointer"
                                       >
-                                        ⚠️ Registrar Ocorrência
+                                        <LucideAlertTriangle className="w-3.5 h-3.5 text-amber-200" /> Registrar Ocorrência
                                       </button>
                                     </div>
 
@@ -2900,8 +3048,8 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
                                           <div key={occ.id} className="bg-slate-900/60 p-3 rounded-lg border border-slate-850 flex flex-col sm:flex-row sm:items-start justify-between gap-3 text-xs leading-relaxed transition hover:border-slate-800">
                                             <div className="space-y-1">
                                               <div className="flex items-center gap-2">
-                                                <span className="px-1.5 py-0.5 rounded text-[9px] font-mono font-bold bg-amber-500/15 text-amber-400 border border-amber-500/10 uppercase tracking-wider">
-                                                  ⚠️ {occ.tipo}
+                                                <span className="px-1.5 py-0.5 rounded text-[9px] font-mono font-bold bg-amber-500/15 text-amber-400 border border-amber-500/10 uppercase tracking-wider flex items-center gap-1">
+                                                  <LucideAlertTriangle className="w-3 h-3 text-amber-400" /> {occ.tipo}
                                                 </span>
                                                 <span className="text-slate-500 text-[10px]">de</span>
                                                 <span className="text-slate-350 font-semibold text-[10px] font-mono uppercase bg-slate-950 px-1 py-0.5 rounded border border-slate-850">{occ.usuario}</span>
@@ -2974,12 +3122,13 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
                             {r.tipo}
                           </span>
                         </div>
-                        <span className="text-[10px] text-slate-500 font-mono mt-1 block">📅 Saída: {r.data}</span>
+                        <span className="text-[10px] text-slate-500 font-mono mt-1 flex items-center gap-1">
+                          <LucideCalendar className="w-3 h-3 text-slate-500" /> Saída: {r.data}
+                        </span>
                       </div>
 
                       <div className="flex flex-col items-end">
                         <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold font-mono border whitespace-nowrap ${specStatus.color}`}>
-                          <span>{specStatus.emoji}</span>
                           <span>{specStatus.text}</span>
                         </span>
                       </div>
@@ -3015,7 +3164,7 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
                             />
                           ) : (
                             <div className="w-8 h-8 rounded-full bg-slate-900 border border-slate-800 flex items-center justify-center text-[10px] font-bold text-sky-400 font-mono flex-shrink-0">
-                              {mObj ? mObj.nome.split(" ").slice(0, 2).map(n => n[0]).join("").toUpperCase() : "👤"}
+                              {mObj ? mObj.nome.split(" ").slice(0, 2).map(n => n[0]).join("").toUpperCase() : <LucideUser className="w-3.5 h-3.5" />}
                             </div>
                           )}
                           <div className="min-w-0">
@@ -3024,12 +3173,12 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
                               {mObj ? mObj.nome : "Não escalado"}
                             </span>
                             {mObj && (
-                              <span className="text-slate-450 text-[9px] block font-mono mt-0.5">
-                                📞 {mObj.telefone || "Sem fone"}
+                              <span className="text-slate-450 text-[9px] flex items-center gap-1 font-mono mt-0.5">
+                                <LucidePhone className="w-2.5 h-2.5 text-slate-500" /> {mObj.telefone || "Sem fone"}
                               </span>
                             )}
-                            <span className="text-slate-550 text-[8px] block mt-0.5 truncate">
-                              🏢 {unidades.find(u => u.id === r.unidadeId || u.id === mObj?.unidadeId)?.nome || "Não informado"}
+                            <span className="text-slate-550 text-[8px] flex items-center gap-1 mt-0.5 truncate">
+                              <LucideMapPin className="w-2.5 h-2.5 text-slate-500" /> {unidades.find(u => u.id === r.unidadeId || u.id === mObj?.unidadeId)?.nome || "Não informado"}
                             </span>
                           </div>
                         </div>
@@ -3041,7 +3190,9 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
                           <div className="space-y-3 bg-amber-500/5 p-3 rounded-xl border border-amber-500/10">
                             {/* Cliente Header */}
                             <div className="border-b border-slate-800/60 pb-1.5">
-                              <span className="text-amber-400 font-mono text-[9px] font-bold block uppercase tracking-wider">🏢 Informações do Cliente</span>
+                              <span className="text-amber-400 font-mono text-[9px] font-bold uppercase tracking-wider flex items-center gap-1.5">
+                                <LucideUser className="w-3 h-3 text-amber-400" /> Informações do Cliente
+                              </span>
                               <div className="mt-1 space-y-1">
                                 <p className="text-white font-extrabold font-sans">
                                   <span className="text-slate-500 font-mono text-[10px] mr-1">[{r.clienteCodigo}]</span>
@@ -3056,7 +3207,9 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
 
                             {/* Entrega Header */}
                             <div>
-                              <span className="text-amber-400 font-mono text-[9px] font-bold block uppercase tracking-wider">📦 Informações da Entrega OFF</span>
+                              <span className="text-amber-400 font-mono text-[9px] font-bold uppercase tracking-wider flex items-center gap-1.5">
+                                <Package className="w-3 h-3 text-amber-400" /> Informações da Entrega OFF
+                              </span>
                               <div className="mt-1.5 grid grid-cols-3 gap-2 text-center font-mono text-[10px]">
                                 <div className="bg-slate-950 p-1.5 rounded border border-slate-850">
                                   <span className="text-slate-550 block text-[8px] uppercase font-mono">Qtd NF</span>
@@ -3094,7 +3247,9 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
 
                           {/* Evolução da Operação (Novo Painel Sempre Editável) */}
                           <div className="bg-slate-950/40 p-3 rounded-xl border border-slate-800/80 space-y-3 text-left">
-                            <span className="text-sky-400 font-mono text-[10px] font-bold block uppercase tracking-wider">📈 Evolução da Operação</span>
+                            <span className="text-sky-400 font-mono text-[10px] font-bold uppercase tracking-wider flex items-center gap-1.5">
+                              <TrendingUp className="w-3.5 h-3.5 text-sky-400" /> Evolução da Operação
+                            </span>
                             
                             <div className="grid grid-cols-2 gap-2 text-center font-mono">
                               <div className="bg-slate-900/80 p-2 rounded border border-slate-800/60">
@@ -3112,8 +3267,8 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
                             <div className="divide-y divide-slate-850/60 space-y-2.5 pt-1.5">
                               {/* Entregues */}
                               <div className="flex items-center justify-between text-xs pt-2.5 first:pt-0">
-                                <span className="text-emerald-450 font-medium flex items-center gap-1">
-                                  <span>🟢</span> Entregues
+                                <span className="text-emerald-450 font-medium flex items-center gap-1.5">
+                                  <LucideCheckCircle className="w-3.5 h-3.5 text-emerald-400" /> Entregues
                                 </span>
                                 <div className="flex items-center gap-1">
                                   <button 
@@ -3141,8 +3296,8 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
 
                               {/* Devolvidas */}
                               <div className="flex items-center justify-between text-xs pt-2.5">
-                                <span className="text-amber-500 font-medium flex items-center gap-1">
-                                  <span>🟡</span> Devolvidas
+                                <span className="text-amber-500 font-medium flex items-center gap-1.5">
+                                  <LucideRotateCcw className="w-3.5 h-3.5 text-amber-400" /> Devolvidas
                                 </span>
                                 <div className="flex items-center gap-1">
                                   <button 
@@ -3170,8 +3325,8 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
 
                               {/* Recusadas */}
                               <div className="flex items-center justify-between text-xs pt-2.5">
-                                <span className="text-rose-450 font-medium flex items-center gap-1">
-                                  <span>🔴</span> Recusadas
+                                <span className="text-rose-450 font-medium flex items-center gap-1.5">
+                                  <LucideX className="w-3.5 h-3.5 text-rose-400" /> Recusadas
                                 </span>
                                 <div className="flex items-center gap-1">
                                   <button 
@@ -3205,7 +3360,9 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
                       {!isOff && (
                         <div className="bg-slate-950/20 p-3 rounded-xl border border-slate-850/80 space-y-2.5 text-left">
                           <div className="flex justify-between items-center">
-                            <span className="text-sky-400 font-mono text-[10px] font-bold uppercase tracking-wider">📊 Resumo da Operação</span>
+                            <span className="text-sky-400 font-mono text-[10px] font-bold uppercase tracking-wider flex items-center gap-1.5">
+                              <BarChart2 className="w-3.5 h-3.5 text-sky-400" /> Resumo da Operação
+                            </span>
                             <span className="text-[11px] font-mono font-bold text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded">
                               Conclusão: {percentConcluido}%
                             </span>
@@ -3244,7 +3401,9 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
                         const times = getTimelineSummary(r);
                         return (
                           <div className="bg-slate-950/20 p-3 rounded-xl border border-slate-850/80 space-y-2 text-left">
-                            <span className="text-purple-400 font-mono text-[10px] font-bold block uppercase tracking-wider">🕒 Linha do Tempo da DT</span>
+                            <span className="text-purple-400 font-mono text-[10px] font-bold uppercase tracking-wider flex items-center gap-1.5">
+                              <LucideClock className="w-3.5 h-3.5 text-purple-400" /> Linha do Tempo da DT
+                            </span>
                             <div className="grid grid-cols-4 gap-2 pt-1 relative">
                               {/* Decorative connecting lines */}
                               <div className="absolute top-4 left-[12%] right-[12%] h-[1px] bg-slate-850/40 z-0"></div>
@@ -3288,22 +3447,22 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
                       {/* Bloco 5: Indicadores rápidos */}
                       <div className="flex flex-wrap gap-1.5 pt-1 border-t border-slate-800/40">
                         <span className="inline-flex items-center gap-1 bg-slate-950/60 text-slate-350 px-2 py-1 rounded-lg border border-slate-850/80 text-[10px] font-mono">
-                          📦 {total} entregas
+                          <Package className="w-3 h-3 text-slate-400" /> {total} entregas
                         </span>
                         <span className="inline-flex items-center gap-1 bg-slate-950/60 text-slate-350 px-2 py-1 rounded-lg border border-slate-850/80 text-[10px] font-mono">
-                          📍 {unidades.find(u => u.id === r.unidadeId || u.id === mObj?.unidadeId)?.cidade || "Goiânia"}
+                          <LucideMapPin className="w-3 h-3 text-slate-400" /> {unidades.find(u => u.id === r.unidadeId || u.id === mObj?.unidadeId)?.cidade || "Goiânia"}
                         </span>
                         <span className="inline-flex items-center gap-1 bg-slate-950/60 text-slate-350 px-2 py-1 rounded-lg border border-slate-850/80 text-[10px] font-mono">
-                          💰 {vObj?.tipo === "Frota Própria" ? "Frota Própria" : "Terceirizado"}
+                          <LucideDollarSign className="w-3 h-3 text-slate-400" /> {vObj?.tipo === "Frota Própria" ? "Frota Própria" : "Terceirizado"}
                         </span>
                         {r.ocorrencias && r.ocorrencias.length > 0 && (
                           <span className="inline-flex items-center gap-1 bg-red-950/40 text-rose-450 px-2 py-1 rounded-lg border border-red-900/35 text-[10px] font-mono font-semibold">
-                            ⚠ Ocorrência ({r.ocorrencias.length})
+                            <LucideAlertTriangle className="w-3 h-3 text-rose-400" /> Ocorrência ({r.ocorrencias.length})
                           </span>
                         )}
                         {isOff && (
                           <span className="inline-flex items-center gap-1 bg-amber-950/40 text-amber-400 px-2 py-1 rounded-lg border border-amber-900/35 text-[10px] font-mono font-semibold">
-                            📝 Entrega OFF
+                            <LucideFileText className="w-3 h-3 text-amber-400" /> Entrega OFF
                           </span>
                         )}
                         {vObj?.perfil && (
@@ -3340,10 +3499,10 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
                           onClick={() => {
                             setSharingRoute(r);
                           }}
-                          className="px-2.5 bg-slate-900 border border-slate-800 text-amber-400 hover:text-amber-300 rounded-lg py-1.5 text-[11px] font-mono transition flex items-center justify-center gap-1 cursor-pointer"
+                          className="px-2.5 bg-slate-900 border border-slate-800 text-amber-400 hover:text-amber-300 rounded-lg py-1.5 text-[11px] font-mono transition flex items-center justify-center gap-1.5 cursor-pointer"
                           title="Gerar Card para Compartilhamento"
                         >
-                          📤 Compartilhar
+                          <LucideShare2 className="w-3.5 h-3.5 text-amber-400" /> Compartilhar
                         </button>
                       </div>
 
@@ -3352,9 +3511,9 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
                         onClick={() => {
                           startEditing(r);
                         }}
-                        className="bg-slate-900 border border-slate-800 hover:border-slate-700 text-slate-300 hover:text-white rounded-lg py-1.5 text-[11px] font-mono transition flex items-center justify-center gap-1 cursor-pointer"
+                        className="bg-slate-900 border border-slate-800 hover:border-slate-700 text-slate-300 hover:text-white rounded-lg py-1.5 text-[11px] font-mono transition flex items-center justify-center gap-1.5 cursor-pointer"
                       >
-                        ✏️ Editar
+                        <LucideEdit className="w-3.5 h-3.5 text-sky-400" /> Editar
                       </button>
 
                       <button
@@ -3362,9 +3521,9 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
                         onClick={() => {
                           startEditing(r);
                         }}
-                        className="bg-sky-600 hover:bg-sky-500 text-white rounded-lg py-1.5 text-[11px] font-semibold transition flex items-center justify-center gap-1 cursor-pointer"
+                        className="bg-sky-600 hover:bg-sky-500 text-white rounded-lg py-1.5 text-[11px] font-semibold transition flex items-center justify-center gap-1.5 cursor-pointer"
                       >
-                        ⚡ Atualizar Status
+                        <Sparkles className="w-3.5 h-3.5 text-white" /> Atualizar Status
                       </button>
                     </div>
 
@@ -3461,9 +3620,9 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
                             <div className="flex justify-between items-center bg-slate-900 p-2 rounded border border-slate-850">
                               <button
                                 onClick={() => openOccurrenceModal(r.id)}
-                                className="px-2 py-1 bg-amber-600 hover:bg-amber-500 text-white rounded text-[9px] font-semibold font-mono flex items-center gap-1 transition-all"
+                                className="px-2 py-1 bg-amber-600 hover:bg-amber-500 text-white rounded text-[9px] font-semibold font-mono flex items-center gap-1.5 transition-all cursor-pointer"
                               >
-                                ⚠️ Registrar Ocorrência
+                                <LucideAlertTriangle className="w-3 h-3 text-amber-200" /> Registrar Ocorrência
                               </button>
                             </div>
                             <div className="space-y-1.5">
@@ -3471,7 +3630,9 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
                                 r.ocorrencias.map((occ) => (
                                   <div key={occ.id} className="bg-slate-900/40 p-2 rounded border border-slate-850 text-[10px] leading-relaxed">
                                     <div className="flex justify-between items-start gap-2">
-                                      <span className="px-1 py-0.5 rounded text-[8px] font-mono font-bold bg-amber-500/10 text-amber-400 border border-amber-500/10 uppercase tracking-wider">⚠️ {occ.tipo}</span>
+                                      <span className="px-1 py-0.5 rounded text-[8px] font-mono font-bold bg-amber-500/10 text-amber-400 border border-amber-500/10 uppercase tracking-wider flex items-center gap-1">
+                                        <LucideAlertTriangle className="w-2.5 h-2.5 text-amber-400" /> {occ.tipo}
+                                      </span>
                                       <span className="text-[8px] text-slate-550 font-mono">{occ.data} • {occ.hora}</span>
                                     </div>
                                     <p className="text-slate-300 font-medium mt-1">{occ.descricao}</p>
@@ -3559,8 +3720,9 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
 
             {/* Add Invoice Form */}
             <form onSubmit={handleAddNote} className="space-y-2 border-t border-slate-800 pt-3 text-xs leading-none">
-              <span className="text-slate-400 block font-mono text-[9px] font-bold uppercase mb-2">
-                {editingNoteId ? "🔄 Alterar Detalhamento" : "📥 Anexar Nova NF"}
+              <span className="text-slate-400 font-mono text-[9px] font-bold uppercase mb-2 flex items-center gap-1.5">
+                {editingNoteId ? <LucideRefreshCw className="w-3 h-3 text-sky-400" /> : <LucidePlus className="w-3 h-3 text-emerald-400" />}
+                {editingNoteId ? "Alterar Detalhamento" : "Anexar Nova NF"}
               </span>
               
               <div className="grid grid-cols-2 gap-2 text-xs">
@@ -3622,7 +3784,7 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
               {/* Float command bar at top - hidden during paper print */}
               <div className="w-full max-w-2xl bg-slate-900 border border-slate-800 text-white rounded-xl p-3.5 mb-6 flex justify-between items-center shadow-lg print:hidden shrink-0">
                 <div className="flex items-center gap-2">
-                  <span className="text-amber-400">🖨️</span>
+                  <LucidePrinter className="w-4 h-4 text-amber-400" />
                   <span className="font-mono text-xs font-bold uppercase tracking-wider">Modo de Impressão de Alta Qualidade</span>
                 </div>
                 <div className="flex gap-2">
@@ -3658,7 +3820,9 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
                 {/* Driver & Vehicle */}
                 <div className="grid grid-cols-2 gap-4 text-xs">
                   <div className="border-2 border-black p-3 rounded-lg bg-gray-50">
-                    <span className="text-gray-650 block text-[9px] font-black font-mono uppercase tracking-wider">🚚 VEÍCULO / PLACA</span>
+                    <span className="text-gray-650 block text-[9px] font-black font-mono uppercase tracking-wider flex items-center gap-1">
+                      <LucideTruck className="w-3 h-3 text-gray-700" /> VEÍCULO / PLACA
+                    </span>
                     <span className="font-black font-mono text-sm block mt-0.5">
                       {veiculos.find((v) => v.id === sharingRoute.veiculoId)
                         ? `${veiculos.find((v) => v.id === sharingRoute.veiculoId)?.placa} (${veiculos.find((v) => v.id === sharingRoute.veiculoId)?.modelo})`
@@ -3666,7 +3830,9 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
                     </span>
                   </div>
                   <div className="border-2 border-black p-3 rounded-lg bg-gray-50">
-                    <span className="text-gray-650 block text-[9px] font-black font-mono uppercase tracking-wider">👤 CONDUTOR</span>
+                    <span className="text-gray-650 block text-[9px] font-black font-mono uppercase tracking-wider flex items-center gap-1">
+                      <LucideUser className="w-3 h-3 text-gray-700" /> CONDUTOR
+                    </span>
                     <span className="font-black text-sm block mt-0.5">
                       {motoristas.find((m) => m.id === sharingRoute.motoristaId)?.nome || "Não escalado"}
                     </span>
@@ -3677,7 +3843,9 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
                 {sharingRoute.tipo === "Entrega OFF" ? (
                   <div className="border-2 border-black p-4 rounded-lg bg-white space-y-3 text-xs">
                     <div className="border-b-2 border-gray-250 pb-2.5">
-                      <span className="font-black font-mono text-[9px] uppercase tracking-wider text-amber-600">🏢 INFORMAÇÕES DO CLIENTE</span>
+                      <span className="font-black font-mono text-[9px] uppercase tracking-wider text-amber-600 flex items-center gap-1">
+                        <LucideUser className="w-3 h-3 text-amber-600" /> INFORMAÇÕES DO CLIENTE
+                      </span>
                       <p className="font-black text-base mt-1">
                         <span className="font-mono text-xs mr-1 text-gray-600">[{sharingRoute.clienteCodigo}]</span>
                         {sharingRoute.clienteNome}
@@ -3689,7 +3857,9 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
                     </div>
 
                     <div>
-                      <span className="font-black font-mono text-[9px] uppercase tracking-wider text-amber-600">📦 DETALHES DA CARGA OFF</span>
+                      <span className="font-black font-mono text-[9px] uppercase tracking-wider text-amber-600 flex items-center gap-1">
+                        <Package className="w-3 h-3 text-amber-600" /> DETALHES DA CARGA OFF
+                      </span>
                       <div className="mt-2 grid grid-cols-3 gap-3 text-center font-mono text-xs">
                         <div className="border-2 border-black p-2 rounded bg-gray-50">
                           <span className="text-gray-550 block text-[8px] uppercase font-black">QTD NF</span>
@@ -3717,7 +3887,9 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
                   </div>
                 ) : (
                   <div className="border-2 border-black p-4 rounded-lg bg-white space-y-3.5 text-xs">
-                    <span className="font-black font-mono text-[9px] uppercase tracking-wider text-sky-650">📊 RESUMO DE ITINERÁRIO</span>
+                    <span className="font-black font-mono text-[9px] uppercase tracking-wider text-sky-650 flex items-center gap-1">
+                      <BarChart2 className="w-3 h-3 text-sky-650" /> RESUMO DE ITINERÁRIO
+                    </span>
                     <div className="grid grid-cols-4 gap-2 text-center font-mono">
                       <div className="border-2 border-black p-2.5 rounded bg-gray-50">
                         <span className="text-gray-550 block text-[8px] uppercase font-black">PLANEJ</span>
@@ -3754,7 +3926,7 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
               {/* Header */}
               <div className="p-4 bg-slate-950 border-b border-slate-850 flex justify-between items-center">
                 <div className="flex items-center gap-2">
-                  <span className="text-amber-400 text-lg">📤</span>
+                  <LucideShare2 className="w-4 h-4 text-amber-400" />
                   <h3 className="text-xs font-mono font-bold uppercase tracking-wider text-slate-300">Compartilhamento de DT</h3>
                 </div>
                 <button
@@ -3786,7 +3958,9 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
                   {/* Driver & Vehicle */}
                   <div className="grid grid-cols-2 gap-3 text-xs">
                     <div className="bg-slate-950/50 p-2.5 rounded border border-slate-850">
-                      <span className="text-slate-500 block text-[9px] font-mono uppercase">🚚 Veículo / Placa</span>
+                      <span className="text-slate-500 block text-[9px] font-mono uppercase flex items-center gap-1">
+                        <LucideTruck className="w-3 h-3 text-slate-500" /> Veículo / Placa
+                      </span>
                       <span className="text-slate-200 font-bold font-mono block mt-0.5">
                         {veiculos.find((v) => v.id === sharingRoute.veiculoId)
                           ? `${veiculos.find((v) => v.id === sharingRoute.veiculoId)?.placa} (${veiculos.find((v) => v.id === sharingRoute.veiculoId)?.modelo})`
@@ -3794,7 +3968,9 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
                       </span>
                     </div>
                     <div className="bg-slate-950/50 p-2.5 rounded border border-slate-850">
-                      <span className="text-slate-500 block text-[9px] font-mono uppercase">👤 Condutor</span>
+                      <span className="text-slate-500 block text-[9px] font-mono uppercase flex items-center gap-1">
+                        <LucideUser className="w-3 h-3 text-slate-500" /> Condutor
+                      </span>
                       <span className="text-slate-200 font-bold block mt-0.5">
                         {motoristas.find((m) => m.id === sharingRoute.motoristaId)?.nome || "Não escalado"}
                       </span>
@@ -3805,7 +3981,9 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
                   {sharingRoute.tipo === "Entrega OFF" ? (
                     <div className="space-y-3 bg-amber-500/5 p-3 rounded-xl border border-amber-500/10 text-xs">
                       <div className="border-b border-slate-800 pb-2">
-                        <span className="text-amber-400 font-mono text-[9px] font-bold block uppercase tracking-wider">🏢 Informações do Cliente</span>
+                        <span className="text-amber-400 font-mono text-[9px] font-bold block uppercase tracking-wider flex items-center gap-1">
+                          <LucideUser className="w-3 h-3 text-amber-400" /> Informações do Cliente
+                        </span>
                         <p className="text-white font-extrabold font-sans mt-1">
                           <span className="text-slate-500 font-mono text-[10px] mr-1">[{sharingRoute.clienteCodigo}]</span>
                           {sharingRoute.clienteNome}
@@ -3816,7 +3994,9 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
                       </div>
 
                       <div>
-                        <span className="text-amber-400 font-mono text-[9px] font-bold block uppercase tracking-wider">📦 Informações da Entrega OFF</span>
+                        <span className="text-amber-400 font-mono text-[9px] font-bold block uppercase tracking-wider flex items-center gap-1">
+                          <Package className="w-3 h-3 text-amber-400" /> Informações da Entrega OFF
+                        </span>
                         <div className="mt-1.5 grid grid-cols-3 gap-2 text-center font-mono text-[10px]">
                           <div className="bg-slate-950 p-1.5 rounded border border-slate-850">
                             <span className="text-slate-550 block text-[8px] uppercase">Qtd NF</span>
@@ -3845,7 +4025,9 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
                     </div>
                   ) : (
                     <div className="space-y-2.5 bg-slate-950/50 p-3.5 rounded-xl border border-slate-850 text-xs">
-                      <span className="text-sky-400 font-mono text-[9px] font-bold block uppercase tracking-wider">📊 Resumo do Itinerário</span>
+                      <span className="text-sky-400 font-mono text-[9px] font-bold uppercase tracking-wider flex items-center gap-1">
+                        <BarChart2 className="w-3 h-3 text-sky-400" /> Resumo do Itinerário
+                      </span>
                       <div className="grid grid-cols-4 gap-1.5 text-center font-mono">
                         <div className="bg-slate-950 p-1.5 rounded border border-slate-850">
                           <span className="text-slate-500 block text-[8px] uppercase">Planej</span>
@@ -3891,7 +4073,7 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
                     }}
                     className="bg-emerald-600 hover:bg-emerald-500 text-white py-2 rounded-xl text-xs font-semibold transition cursor-pointer flex items-center justify-center gap-1.5"
                   >
-                    💬 WhatsApp
+                    <LucideSend className="w-3.5 h-3.5 text-emerald-200" /> WhatsApp
                   </button>
 
                   {/* Copy Report */}
@@ -3910,7 +4092,7 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
                     }}
                     className="bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white py-2 rounded-xl text-xs font-mono transition cursor-pointer flex items-center justify-center gap-1.5 border border-slate-700"
                   >
-                    📋 Copiar Resumo
+                    <LucideCopy className="w-3.5 h-3.5 text-slate-300" /> Copiar Resumo
                   </button>
 
                   {/* Generate Print Layout Mode */}
@@ -3921,7 +4103,7 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
                     }}
                     className="bg-slate-800 hover:bg-slate-700 text-amber-400 hover:text-amber-300 py-2 rounded-xl text-xs font-mono transition cursor-pointer flex items-center justify-center gap-1.5 border border-slate-700"
                   >
-                    🖨️ Gerar Print
+                    <LucidePrinter className="w-3.5 h-3.5 text-amber-400" /> Gerar Print
                   </button>
 
                   {/* Download PNG natively with html-to-image */}
@@ -3953,7 +4135,7 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
                     }}
                     className="bg-sky-600 hover:bg-sky-500 text-white py-2 rounded-xl text-xs font-semibold transition cursor-pointer flex items-center justify-center gap-1.5"
                   >
-                    📥 Baixar PNG
+                    <LucideDownload className="w-3.5 h-3.5 text-white" /> Baixar PNG
                   </button>
                 </div>
 
@@ -3977,7 +4159,7 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
             {/* Header */}
             <div className="p-4 bg-slate-950 border-b border-slate-850 flex justify-between items-center shrink-0">
               <div className="flex items-center gap-2">
-                <span className="text-purple-400">🕒</span>
+                <LucideClock className="w-4 h-4 text-purple-400" />
                 <h3 className="text-xs font-mono font-bold uppercase tracking-wider text-slate-350">
                   Histórico Operacional — DT #{historyModalRoute.dt}
                 </h3>
@@ -3995,7 +4177,7 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
               {/* Incident occurrences if any */}
               <div>
                 <h4 className="text-xs font-mono font-bold uppercase tracking-wider text-rose-400 mb-3 flex items-center gap-1.5">
-                  <span>⚠</span> Registro de Incidentes / Ocorrências
+                  <LucideAlertTriangle className="w-4 h-4 text-rose-400" /> Registro de Incidentes / Ocorrências
                 </h4>
                 {historyModalRoute.ocorrencias && historyModalRoute.ocorrencias.length > 0 ? (
                   <div className="space-y-3">
@@ -4028,7 +4210,7 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
               {/* Status transition log */}
               <div className="space-y-3">
                 <h4 className="text-xs font-mono font-bold uppercase tracking-wider text-sky-400 mb-4 flex items-center gap-1.5">
-                  <span>📊</span> Auditoria de Transições de Status
+                  <BarChart2 className="w-4 h-4 text-sky-400" /> Auditoria de Transições de Status
                 </h4>
                 
                 {historyModalRoute.historico_status && historyModalRoute.historico_status.length > 0 ? (
@@ -4058,8 +4240,8 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
                             <div className="flex justify-between items-center text-[9px] font-mono text-slate-500 pt-1 border-t border-slate-850">
                               <span>Operador: {log.usuario || "Sistema AMPLA"}</span>
                               {log.geolocalizacao && (
-                                <span className="text-sky-500">
-                                  📍 Coordenadas registradas
+                                <span className="text-sky-500 flex items-center gap-1">
+                                  <LucideMapPin className="w-3 h-3 text-sky-500" /> Coordenadas registradas
                                 </span>
                               )}
                             </div>

@@ -15,23 +15,23 @@ interface ModuleDef {
 }
 
 const MODULES: ModuleDef[] = [
-  { key: "dashboard", name: "📋 Painel Executivo / Dashboard", desc: "Acesso às telemetrias de conformidade e consolidados." },
-  { key: "processos", name: "💼 Central de Processos", desc: "Visualização e acompanhamento de processos operacionais." },
-  { key: "veiculos", name: "🚛 Frotas / Veículos", desc: "Controle de chassis, modelos, rastreadores e documentações." },
-  { key: "motoristas", name: "👥 Cadastro Condutores", desc: "Listagem de condutores habilitados, exames e logs de vencimento." },
-  { key: "central-documentos", name: "📁 Central de Documentos", desc: "Gerenciamento de uploads e documentos de condutores." },
-  { key: "disponibilidade", name: "📅 Agenda Disponibilidade", desc: "Quadro de escalas preventivas e saídas programadas." },
-  { key: "monitoramento", name: "🔎 Vistoria & DTs", desc: "Inspeções obrigatórias de segurança no escoamento de cargas." },
-  { key: "fechamento-dt", name: "🛡️ Fechamento de DT", desc: "Controle de fechamento de viagens e emissão de vales." },
-  { key: "noshow", name: "⚠️ Controle de No Show", desc: "Registro de faltas e justificativas operacionais." },
-  { key: "devolucoes", name: "🔄 Gestão Devoluções", desc: "Controle de devoluções, motivos e acertos de notas fiscais." },
-  { key: "descargas", name: "💸 Taxas Descarga / Chapa", desc: "Lançamento de custos operantes e chapas auxiliares." },
-  { key: "financeiro-pessoas", name: "💳 Financeiro de Pessoas", desc: "Controle de faturamentos e pagamentos de colaboradores." },
-  { key: "recebimentos", name: "💵 Contas a Receber", desc: "Gestão de contas, faturas e recebimentos operacionais." },
-  { key: "manutencao", name: "🔧 Ficha Manutenção", desc: "Controle de ordens e histórico de manutenção da frota." },
-  { key: "epi", name: "📦 Estoque de EPIs", desc: "Movimentação de botas, cones de sinalização e óculos de proteção." },
-  { key: "alertas", name: "⚠️ Central de Conformidades", desc: "Alertas automáticos de documentos e exames vencidos." },
-  { key: "auditoria", name: "🔒 Logs de Auditoria", desc: "Acesso aos logs transacionais e de segurança de auditoria." }
+  { key: "dashboard", name: "Painel Executivo / Dashboard", desc: "Acesso às telemetrias de conformidade e consolidados." },
+  { key: "processos", name: "Central de Processos", desc: "Visualização e acompanhamento de processos operacionais." },
+  { key: "veiculos", name: "Frotas / Veículos", desc: "Controle de chassis, modelos, rastreadores e documentações." },
+  { key: "motoristas", name: "Cadastro Condutores", desc: "Listagem de condutores habilitados, exames e logs de vencimento." },
+  { key: "central-documentos", name: "Central de Documentos", desc: "Gerenciamento de uploads e documentos de condutores." },
+  { key: "disponibilidade", name: "Agenda Disponibilidade", desc: "Quadro de escalas preventivas e saídas programadas." },
+  { key: "monitoramento", name: "Vistoria & DTs", desc: "Inspeções obrigatórias de segurança no escoamento de cargas." },
+  { key: "fechamento-dt", name: "Fechamento de DT", desc: "Controle de fechamento de viagens e emissão de vales." },
+  { key: "noshow", name: "Controle de No Show", desc: "Registro de faltas e justificativas operacionais." },
+  { key: "devolucoes", name: "Gestão Devoluções", desc: "Controle de devoluções, motivos e acertos de notas fiscais." },
+  { key: "descargas", name: "Taxas Descarga / Chapa", desc: "Lançamento de custos operantes e chapas auxiliares." },
+  { key: "financeiro-pessoas", name: "Financeiro de Pessoas", desc: "Controle de faturamentos e pagamentos de colaboradores." },
+  { key: "recebimentos", name: "Contas a Receber", desc: "Gestão de contas, faturas e recebimentos operacionais." },
+  { key: "manutencao", name: "Ficha Manutenção", desc: "Controle de ordens e histórico de manutenção da frota." },
+  { key: "epi", name: "Estoque de EPIs", desc: "Movimentação de botas, cones de sinalização e óculos de proteção." },
+  { key: "alertas", name: "Central de Conformidades", desc: "Alertas automáticos de documentos e exames vencidos." },
+  { key: "auditoria", name: "Logs de Auditoria", desc: "Acesso aos logs transacionais e de segurança de auditoria." }
 ];
 
 export default function MasterPermissoesView({ unidades, userEmail }: MasterPermissoesProps) {
@@ -140,20 +140,20 @@ export default function MasterPermissoesView({ unidades, userEmail }: MasterPerm
       if (res.ok) {
         setNotification({
           type: "success",
-          message: `✅ Permissões de acesso de "${selectedUser.nome}" atualizadas com sucesso!`
+          message: `Permissões de acesso de "${selectedUser.nome}" atualizadas com sucesso!`
         });
         fetchUsuarios();
       } else {
         const errData = await res.json();
         setNotification({
           type: "error",
-          message: `🚫 Falha ao salvar as permissões: ${errData.error || "Operação rejeitada"}`
+          message: `Falha ao salvar as permissões: ${errData.error || "Operação rejeitada"}`
         });
       }
     } catch (e) {
       setNotification({
         type: "error",
-        message: "❌ Erro ao tentar se conectar com a API."
+        message: "Erro ao tentar se conectar com a API."
       });
     }
   };
@@ -319,7 +319,7 @@ export default function MasterPermissoesView({ unidades, userEmail }: MasterPerm
               </div>
 
               <div className="p-4 bg-slate-950 rounded border border-slate-850 text-[10px] text-slate-500 leading-relaxed font-mono">
-                💡 <b>REVISÃO DE SEGURANÇA OPERACIONAL:</b> As permissões parametrizadas acima controlam tanto a exibição dos respectivos botões de ação e abas na interface do usuário (Client-side) quanto a validação transacional e de segurança conduzida em todas as requisições enviadas ao servidor (Backend-side).
+                <b>REVISÃO DE SEGURANÇA OPERACIONAL:</b> As permissões parametrizadas acima controlam tanto a exibição dos respectivos botões de ação e abas na interface do usuário (Client-side) quanto a validação transacional e de segurança conduzida em todas as requisições enviadas ao servidor (Backend-side).
               </div>
             </div>
           )}

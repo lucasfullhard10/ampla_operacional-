@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { 
   Search, Filter, Calendar, FileText, CheckCircle, AlertTriangle, 
   Clock, RefreshCw, Eye, Download, History, X, Check, ArrowRight,
@@ -230,6 +230,20 @@ export default function CentralDocumentosView({ motoristas, unidades, onRefresh,
     setCurrentPage(1);
   }, [searchTerm, selectedUnidade, selectedTipoPessoa, selectedTipoDoc, selectedStatusDoc, selectedDiasVencer]);
 
+  // Reference for file input to support click-to-upload on the dropzone
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const processFile = (file: File) => {
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const base64Url = event.target?.result as string;
+      if (base64Url) {
+        setNovoArquivoUrl(base64Url);
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
   // Handle Drag & Drop UX
   const handleDrag = (e: React.DragEvent) => {
     e.preventDefault();
@@ -247,10 +261,41 @@ export default function CentralDocumentosView({ motoristas, unidades, onRefresh,
     setDragActive(false);
 
     if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      const file = e.dataTransfer.files[0];
-      // Simulate file upload by generating local mock path
-      const simulatedUrl = `https://ampla-files.s3.amazonaws.com/uploads/${Date.now()}_${file.name}`;
-      setNovoArquivoUrl(simulatedUrl);
+      processFile(e.dataTransfer.files[0]);
+    }
+  };
+
+  const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      processFile(e.target.files[0]);
+    }
+  };
+
+  const handleViewFile = (url?: string, filename?: string) => {
+    if (!url) return;
+    
+    if (url.startsWith("data:")) {
+      try {
+        const parts = url.split(";base64,");
+        const contentType = parts[0].split(":")[1];
+        const raw = window.atob(parts[1]);
+        const rawLength = raw.length;
+        const uInt8Array = new Uint8Array(rawLength);
+        for (let i = 0; i < rawLength; ++i) {
+          uInt8Array[i] = raw.charCodeAt(i);
+        }
+        const blob = new Blob([uInt8Array], { type: contentType });
+        const blobUrl = URL.createObjectURL(blob);
+        window.open(blobUrl, "_blank");
+      } catch (e) {
+        console.error("Blob conversion failed, falling back to writing to a new window", e);
+        const w = window.open();
+        if (w) {
+          w.document.write(`<iframe src="${url}" style="border:none; width:100%; height:100%;" title="${filename || 'Documento'}"></iframe>`);
+        }
+      }
+    } else {
+      window.open(url, "_blank");
     }
   };
 
@@ -630,15 +675,14 @@ export default function CentralDocumentosView({ motoristas, unidades, onRefresh,
                     <td className="p-3 text-right space-x-1.5">
                       {/* View document */}
                       {doc.arquivoUrl ? (
-                        <a 
-                          href={doc.arquivoUrl} 
-                          target="_blank" 
-                          rel="noreferrer"
-                          className="inline-flex items-center justify-center p-1.5 bg-slate-800 hover:bg-slate-700 rounded text-sky-400 transition"
+                        <button 
+                          type="button"
+                          onClick={() => handleViewFile(doc.arquivoUrl, `${doc.pessoaNome}_${doc.documentoTipo}`)}
+                          className="inline-flex items-center justify-center p-1.5 bg-slate-800 hover:bg-slate-700 rounded text-sky-400 transition cursor-pointer"
                           title="Visualizar Documento"
                         >
                           <Eye className="w-3.5 h-3.5" />
-                        </a>
+                        </button>
                       ) : (
                         <button 
                           disabled 
@@ -773,16 +817,30 @@ export default function CentralDocumentosView({ motoristas, unidades, onRefresh,
                   onDragOver={handleDrag}
                   onDragLeave={handleDrag}
                   onDrop={handleDrop}
-                  className={`border border-dashed rounded-xl p-5 text-center transition flex flex-col items-center justify-center gap-2 bg-slate-950/30 ${dragActive ? "border-sky-500 bg-sky-500/5" : "border-slate-800 hover:border-slate-700"}`}
+                  onClick={() => fileInputRef.current?.click()}
+                  className={`border border-dashed rounded-xl p-5 text-center transition flex flex-col items-center justify-center gap-2 bg-slate-950/30 cursor-pointer ${dragActive ? "border-sky-500 bg-sky-500/5" : "border-slate-800 hover:border-slate-700"}`}
                 >
+                  <input
+                    type="file"
+                    ref={fileInputRef}
+                    onChange={handleFileInputChange}
+                    accept="image/*,application/pdf"
+                    className="hidden"
+                  />
                   <FileText className="w-8 h-8 text-slate-500" />
-                  <div className="text-xs text-slate-300">
-                    Arraste o novo PDF/imagem aqui ou use o link abaixo
+                  <div className="text-xs text-slate-300 font-sans">
+                    Clique para selecionar ou arraste o novo PDF/imagem aqui
                   </div>
                   <span className="text-[10px] text-slate-500 font-mono">
                     Formatos aceitos: PDF, JPEG, PNG (Max 5MB)
                   </span>
                 </div>
+
+                {novoArquivoUrl && (
+                  <div className="text-[10px] text-emerald-400 font-mono flex items-center gap-1 mt-1">
+                    <Check className="w-3.5 h-3.5" /> Arquivo carregado com sucesso ({novoArquivoUrl.startsWith("data:") ? "Arquivo Base64" : novoArquivoUrl})
+                  </div>
+                )}
 
                 <input
                   type="text"

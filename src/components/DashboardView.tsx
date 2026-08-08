@@ -2,7 +2,9 @@ import React, { useState, useEffect, useMemo } from "react";
 import { 
   TrendingUp, CheckCircle, Clock, RotateCcw, Truck, UserCheck, 
   MapPin, Calendar, Award, RefreshCcw, BatteryCharging, AlertTriangle,
-  Layers, BarChart2, ShieldAlert, Zap, Landmark
+  Layers, BarChart2, ShieldAlert, Zap, Landmark, ArrowRight,
+  Crown, Save, Target, Scale, X, AlertOctagon, FolderOpen, Lock,
+  DollarSign, Building2, Trophy, ClipboardList, CheckCircle2
 } from "lucide-react";
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
@@ -23,6 +25,39 @@ interface DashboardProps {
   setActiveTab: (tab: string) => void;
 }
 
+// Dynamic date helper utilities for system dashboard
+const getTodayStr = () => new Date().toISOString().split("T")[0];
+const getCurrentMonthStr = () => String(new Date().getMonth() + 1).padStart(2, "0");
+const getCurrentYearStr = () => String(new Date().getFullYear());
+
+const getWeekRange = (baseDate = new Date()) => {
+  const d = new Date(baseDate);
+  const day = d.getDay();
+  const diffToMon = d.getDate() - day + (day === 0 ? -6 : 1);
+  const mon = new Date(d.setDate(diffToMon));
+  const sun = new Date(mon);
+  sun.setDate(mon.getDate() + 6);
+  return {
+    start: mon.toISOString().split("T")[0],
+    end: sun.toISOString().split("T")[0]
+  };
+};
+
+const get30DaysAgoStr = () => {
+  const d = new Date();
+  d.setDate(d.getDate() - 30);
+  return d.toISOString().split("T")[0];
+};
+
+const getWeekPresetForDate = (baseDate = new Date()) => {
+  const day = baseDate.getDate();
+  if (day <= 7) return "w1";
+  if (day <= 14) return "w2";
+  if (day <= 21) return "w3";
+  if (day <= 28) return "w4";
+  return "w5";
+};
+
 export default function DashboardView({ 
   unidades, 
   selectedUnit, 
@@ -39,13 +74,13 @@ export default function DashboardView({
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState<any>(null);
 
-  // Advanced sub-filter states
-  const [selectedDate, setSelectedDate] = useState<string>("2026-06-12");
-  const [startDate, setStartDate] = useState<string>("2026-06-08");
-  const [endDate, setEndDate] = useState<string>("2026-06-14");
-  const [selectedMonth, setSelectedMonth] = useState<string>("06");
-  const [selectedYear, setSelectedYear] = useState<string>("2026");
-  const [weekSelector, setWeekSelector] = useState<string>("w2"); // default to Semana 2 of June (08/06 to 14/06)
+  // Advanced sub-filter states dynamically initialized to current date/time
+  const [selectedDate, setSelectedDate] = useState<string>(() => getTodayStr());
+  const [startDate, setStartDate] = useState<string>(() => getWeekRange().start);
+  const [endDate, setEndDate] = useState<string>(() => getWeekRange().end);
+  const [selectedMonth, setSelectedMonth] = useState<string>(() => getCurrentMonthStr());
+  const [selectedYear, setSelectedYear] = useState<string>(() => getCurrentYearStr());
+  const [weekSelector, setWeekSelector] = useState<string>(() => getWeekPresetForDate());
   
   // Save / Load filters state
   const [savedFilters, setSavedFilters] = useState<Array<{ name: string; period: any; selectedDate?: string; startDate?: string; endDate?: string; month?: string; year?: string }>>(() => {
@@ -54,9 +89,9 @@ export default function DashboardView({
       if (saved) return JSON.parse(saved);
     } catch (e) {}
     return [
-      { name: "Fechamento Mensal (Junho)", period: "Mês", month: "06", year: "2026" },
-      { name: "Semana de Campanha Ope", period: "Semana", startDate: "2026-06-08", endDate: "2026-06-14" },
-      { name: "Últimos 30 Dias", period: "Personalizado", startDate: "2026-05-15", endDate: "2026-06-14" }
+      { name: "Fechamento Mensal (Mês Atual)", period: "Mês", month: getCurrentMonthStr(), year: getCurrentYearStr() },
+      { name: "Semana Atual", period: "Semana", startDate: getWeekRange().start, endDate: getWeekRange().end },
+      { name: "Últimos 30 Dias", period: "Personalizado", startDate: get30DaysAgoStr(), endDate: getTodayStr() }
     ];
   });
   
@@ -181,6 +216,52 @@ export default function DashboardView({
   }, [period, selectedUnit, selectedDate, startDate, endDate, selectedMonth, selectedYear]);
 
   // Sincronização Inteligente de DTs Pendentes e Alertas (Requisito 8)
+  const [validatingId, setValidatingId] = useState<string | null>(null);
+  const [validationSuccessMsg, setValidationSuccessMsg] = useState<string | null>(null);
+
+  // Filter Reentregas that require validation
+  const pendingReentregas = useMemo(() => {
+    let list = rotas || [];
+    if (selectedUnit && selectedUnit !== "Todas") {
+      list = list.filter(r => r.unidadeId === selectedUnit);
+    }
+    return list.filter(r => {
+      const isReentrega = r.tipo && String(r.tipo).toLowerCase().includes("reentrega");
+      if (!isReentrega) return false;
+      const isValidated = r.reentrega_validada === true || r.reentregaValidada === true || r.status_validacao === "VALIDADA";
+      return !isValidated;
+    });
+  }, [rotas, selectedUnit]);
+
+  const handleValidateReentregaDirect = async (r: Rota) => {
+    setValidatingId(r.id);
+    setValidationSuccessMsg(null);
+    try {
+      const res = await fetch(`/api/rotas/${r.id}`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          "x-user-email": userEmail,
+        },
+        body: JSON.stringify({
+          reentrega_validada: true,
+          reentregaValidada: true,
+          status_validacao: "VALIDADA",
+        }),
+      });
+      if (res.ok) {
+        setValidationSuccessMsg(`Reentrega da DT #${r.dt} validada com sucesso!`);
+        fetchDashboardData();
+        setTimeout(() => setValidationSuccessMsg(null), 5000);
+      } else {
+        alert("Erro ao validar reentrega.");
+      }
+    } catch (e) {
+      alert("Erro de conexão ao validar reentrega.");
+    } finally {
+      setValidatingId(null);
+    }
+  };
   const dashboardPendingDts = useMemo(() => {
     let list = rotas || [];
     if (selectedUnit && selectedUnit !== "Todas") {
@@ -330,23 +411,25 @@ export default function DashboardView({
             <div className="flex bg-slate-950 p-1 rounded-lg border border-slate-800 text-xs font-mono">
               <button
                 onClick={() => setActiveTab("desempenho")}
-                className={`px-3 py-1.5 rounded transition ${
+                className={`px-3 py-1.5 rounded transition flex items-center gap-1.5 ${
                   activeTab === "desempenho"
                     ? "bg-sky-500 text-white font-bold"
                     : "text-slate-400 hover:text-white"
                 }`}
               >
-                📊 Desempenho Geral
+                <BarChart2 className="w-3.5 h-3.5" />
+                Desempenho Geral
               </button>
               <button
                 onClick={() => setActiveTab("executivo")}
-                className={`px-3 py-1.5 rounded transition ${
+                className={`px-3 py-1.5 rounded transition flex items-center gap-1.5 ${
                   activeTab === "executivo"
                     ? "bg-sky-500 text-white font-bold"
                     : "text-slate-400 hover:text-white"
                 }`}
               >
-                👑 Executivo (SLA)
+                <Crown className="w-3.5 h-3.5 text-amber-400" />
+                Executivo (SLA)
               </button>
             </div>
 
@@ -404,7 +487,7 @@ export default function DashboardView({
           <div className="flex flex-wrap items-center gap-3 bg-slate-950/40 p-3 rounded-lg border border-slate-800/80 animate-fadeIn text-xs">
             <div className="flex items-center gap-2">
               <Calendar className="w-4 h-4 text-sky-450" />
-              <span className="text-slate-300 font-medium font-mono">📅 Selecionar Data:</span>
+              <span className="text-slate-300 font-medium font-mono">Selecionar Data:</span>
               <input 
                 type="date" 
                 value={selectedDate} 
@@ -492,7 +575,7 @@ export default function DashboardView({
           <div className="flex flex-wrap items-center gap-3 bg-slate-950/40 p-3 rounded-lg border border-slate-800/80 animate-fadeIn text-xs">
             <div className="flex items-center gap-2">
               <Calendar className="w-4 h-4 text-sky-450" />
-              <span className="text-slate-300 font-medium font-mono">📅 Selecionar Competência Mensal:</span>
+              <span className="text-slate-300 font-medium font-mono">Selecionar Competência Mensal:</span>
               <select 
                 value={selectedMonth} 
                 onChange={(e) => setSelectedMonth(e.target.value)}
@@ -527,7 +610,7 @@ export default function DashboardView({
           <div className="flex flex-wrap items-center gap-3 bg-slate-950/40 p-3 rounded-lg border border-slate-800/80 animate-fadeIn text-xs">
             <div className="flex items-center gap-2">
               <Calendar className="w-4 h-4 text-sky-450" />
-              <span className="text-slate-300 font-medium font-mono">📅 Selecionar Exercício Anual:</span>
+              <span className="text-slate-300 font-medium font-mono">Selecionar Exercício Anual:</span>
               <select 
                 value={selectedYear} 
                 onChange={(e) => setSelectedYear(e.target.value)}
@@ -566,12 +649,15 @@ export default function DashboardView({
         {/* SAVED FILTERS & TELEMETRY TOGGLE BAR */}
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 pt-2 border-t border-slate-800/50 mt-1">
           <div className="flex flex-wrap items-center gap-2 text-xs">
-            <span className="text-[10px] text-slate-400 font-mono uppercase font-bold tracking-wider">💾 Filtros Gravados:</span>
+            <span className="text-[10px] text-slate-400 font-mono uppercase font-bold tracking-wider flex items-center gap-1">
+              <Save className="w-3 h-3 text-sky-400" />
+              Filtros Gravados:
+            </span>
             <div className="flex flex-wrap gap-1.5 items-center">
               {savedFilters.map((f, idx) => (
                 <div key={idx} className="inline-flex items-center bg-slate-950/50 hover:bg-slate-950 border border-slate-800 rounded-md px-2 py-1 text-[11px] font-mono text-slate-300 transition gap-1.5">
                   <button type="button" onClick={() => applySavedFilter(f)} className="hover:text-white font-medium flex items-center gap-1">
-                    🎯 {f.name}
+                    <Target className="w-3 h-3 text-sky-400" /> {f.name}
                   </button>
                   <button type="button" onClick={() => deleteFilter(idx)} className="text-slate-500 hover:text-rose-400 font-sans font-bold leading-none scale-110 pl-0.5" title="Excluir filtro">
                     ×
@@ -621,7 +707,8 @@ export default function DashboardView({
               className="rounded border-slate-800 text-sky-500 bg-slate-950 focus:ring-0 cursor-pointer"
             />
             <span className="flex items-center gap-1">
-              ⚖️ comparar com período anterior <span className="text-[10px] text-slate-500 font-normal">(telemetria de variação %)</span>
+              <Scale className="w-3.5 h-3.5 text-sky-400" />
+              comparar com período anterior <span className="text-[10px] text-slate-500 font-normal">(telemetria de variação %)</span>
             </span>
           </label>
         </div>
@@ -636,6 +723,72 @@ export default function DashboardView({
             <span className="text-white font-bold">{data.rangeAnalyzed.label}</span>
           </div>
           <span className="text-[10px] text-slate-500 hidden sm:inline">Atualizado automaticamente em tempo de execução</span>
+        </div>
+      )}
+
+      {/* FEEDBACK NOTIFICATION MSG */}
+      {validationSuccessMsg && (
+        <div className="bg-emerald-950/80 border border-emerald-500 p-3 rounded-xl text-emerald-300 font-mono text-xs flex items-center justify-between animate-fadeIn">
+          <span>{validationSuccessMsg}</span>
+          <button onClick={() => setValidationSuccessMsg(null)} className="text-slate-400 hover:text-white font-bold"><X className="w-4 h-4" /></button>
+        </div>
+      )}
+
+      {/* BANNER DE ALERTA MÁXIMO: REENTREGAS PENDENTES DE VALIDAÇÃO */}
+      {pendingReentregas.length > 0 && (
+        <div className="bg-gradient-to-r from-rose-950/90 via-red-900/80 to-amber-950/90 border-2 border-rose-500 rounded-2xl p-5 shadow-2xl shadow-rose-950/50 space-y-4 animate-fadeIn">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 border-b border-rose-500/30 pb-3">
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 bg-rose-600 text-white rounded-xl shadow-lg animate-bounce">
+                <AlertTriangle className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="text-base font-extrabold text-white uppercase tracking-wider flex items-center gap-2">
+                  <span className="flex items-center gap-1.5"><AlertOctagon className="w-5 h-5 text-rose-300 animate-pulse" /> ALERTA MÁXIMO DE OPERAÇÃO:</span>
+                  <span className="bg-rose-500 text-white px-2 py-0.5 rounded text-xs font-mono font-bold">
+                    {pendingReentregas.length} {pendingReentregas.length === 1 ? "REENTREGA PENDENTE" : "REENTREGAS PENDENTES"}
+                  </span>
+                </h3>
+                <p className="text-xs text-rose-200 font-medium">
+                  Existem viagens do tipo <b>REENTREGA</b> no sistema que ainda <b>NÃO FORAM VALIDADAS</b>. Validação obrigatória antes do encerramento.
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setActiveTab("dt_registro")}
+              className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold rounded-lg transition shadow-md flex items-center gap-1.5 self-start md:self-auto cursor-pointer"
+            >
+              <span>Gerenciar no Registro de DTs</span>
+              <ArrowRight className="w-4 h-4" />
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+            {pendingReentregas.map((r) => (
+              <div key={r.id} className="bg-slate-950/90 border border-rose-500/40 p-3 rounded-xl flex items-center justify-between gap-2 text-xs">
+                <div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="font-bold text-white font-mono">DT #{r.dt}</span>
+                    <span className="text-[10px] bg-rose-500/20 text-rose-300 border border-rose-500/30 px-1.5 py-0.2 rounded font-mono">
+                      Data: {r.data}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-300 font-sans mt-0.5">
+                    Status: <span className="text-amber-400 font-semibold">{r.status_viagem || r.status}</span>
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  disabled={validatingId === r.id}
+                  onClick={() => handleValidateReentregaDirect(r)}
+                  className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold rounded-lg transition shadow flex items-center gap-1 whitespace-nowrap cursor-pointer disabled:opacity-50"
+                >
+                  {validatingId === r.id ? "Validando..." : "Validar Agora"}
+                </button>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
@@ -765,7 +918,8 @@ export default function DashboardView({
                   <div>
                     <h3 className="text-sm font-semibold text-white tracking-tight flex items-center gap-2">
                       <span className="w-1.5 h-3.5 rounded bg-rose-500 inline-block"></span>
-                      ⚠️ Alertas de Criticidade: DTs Pendentes de Fechamento
+                      <AlertTriangle className="w-4 h-4 text-rose-400" />
+                      Alertas de Criticidade: DTs Pendentes de Fechamento
                     </h3>
                     <p className="text-xs text-slate-450">
                       Viagens finalizadas ou em trânsito sem auditoria/encerramento financeiro consolidado
@@ -786,7 +940,9 @@ export default function DashboardView({
                     className="p-4 bg-slate-950 hover:bg-slate-900 border border-slate-850 hover:border-slate-750 rounded-xl transition cursor-pointer flex flex-col justify-between"
                   >
                     <div>
-                      <span className="text-[10px] text-slate-400 uppercase font-mono font-bold block">📂 DTs em Aberto</span>
+                      <span className="text-[10px] text-slate-400 uppercase font-mono font-bold flex items-center gap-1.5">
+                        <FolderOpen className="w-3.5 h-3.5 text-sky-400" /> DTs em Aberto
+                      </span>
                       <strong className="text-2xl font-black text-rose-400 tracking-tight block mt-1 font-mono">
                         {dashboardPendingStats.totalOpen}
                       </strong>
@@ -800,7 +956,9 @@ export default function DashboardView({
                     className="p-4 bg-slate-950 hover:bg-slate-900 border border-slate-850 hover:border-slate-750 rounded-xl transition cursor-pointer flex flex-col justify-between"
                   >
                     <div>
-                      <span className="text-[10px] text-slate-400 uppercase font-mono font-bold block">🚨 DTs Críticas (&gt; 10 dias)</span>
+                      <span className="text-[10px] text-slate-400 uppercase font-mono font-bold flex items-center gap-1.5">
+                        <ShieldAlert className="w-3.5 h-3.5 text-rose-500" /> DTs Críticas (&gt; 10 dias)
+                      </span>
                       <strong className={`text-2xl font-black tracking-tight block mt-1 font-mono ${dashboardPendingStats.critical > 0 ? "text-rose-500 animate-pulse" : "text-slate-400"}`}>
                         {dashboardPendingStats.critical}
                       </strong>
@@ -814,7 +972,9 @@ export default function DashboardView({
                     className="p-4 bg-slate-950 hover:bg-slate-900 border border-slate-850 hover:border-slate-750 rounded-xl transition cursor-pointer flex flex-col justify-between"
                   >
                     <div>
-                      <span className="text-[10px] text-slate-400 uppercase font-mono font-bold block">⏳ Acima de 5 dias</span>
+                      <span className="text-[10px] text-slate-400 uppercase font-mono font-bold flex items-center gap-1.5">
+                        <Clock className="w-3.5 h-3.5 text-amber-400" /> Acima de 5 dias
+                      </span>
                       <strong className={`text-2xl font-black tracking-tight block mt-1 font-mono ${dashboardPendingStats.above5 > 0 ? "text-amber-400" : "text-slate-400"}`}>
                         {dashboardPendingStats.above5}
                       </strong>
@@ -828,7 +988,9 @@ export default function DashboardView({
                     className="p-4 bg-slate-950 hover:bg-slate-900 border border-slate-850 hover:border-slate-750 rounded-xl transition cursor-pointer flex flex-col justify-between"
                   >
                     <div>
-                      <span className="text-[10px] text-slate-400 uppercase font-mono font-bold block font-bold">📅 DT mais Antiga</span>
+                      <span className="text-[10px] text-slate-400 uppercase font-mono flex items-center gap-1.5 font-bold">
+                        <Calendar className="w-3.5 h-3.5 text-sky-400" /> DT mais Antiga
+                      </span>
                       <strong className="text-sm font-bold text-sky-400 tracking-tight block mt-2.5 truncate font-mono">
                         {dashboardPendingStats.oldestDt}
                       </strong>
@@ -1193,7 +1355,15 @@ export default function DashboardView({
                           ranking.slice(0, 5).map((d: any, idx: number) => (
                             <tr key={idx} className="hover:bg-slate-800/40 transition">
                               <td className="py-3 px-3 font-mono font-bold text-slate-300">
-                                {idx === 0 ? "🏆" : idx === 1 ? "🥈" : idx === 2 ? "🥉" : `${idx + 1}º`}
+                                {idx === 0 ? (
+                                  <span className="inline-flex items-center gap-1 text-amber-400"><Trophy className="w-3.5 h-3.5" /> 1º</span>
+                                ) : idx === 1 ? (
+                                  <span className="inline-flex items-center gap-1 text-slate-300">2º</span>
+                                ) : idx === 2 ? (
+                                  <span className="inline-flex items-center gap-1 text-amber-600">3º</span>
+                                ) : (
+                                  `${idx + 1}º`
+                                )}
                               </td>
                               <td className="py-3 px-3 font-medium text-white">{d.nome}</td>
                               <td className="py-3 px-3 text-center font-mono text-slate-300">{d.rotas}</td>
@@ -1426,8 +1596,9 @@ export default function DashboardView({
               <div className="space-y-4 pt-6 border-t border-slate-800">
                 <div className="text-left">
                   <h2 className="text-white font-black text-sm uppercase tracking-wider flex items-center gap-2">
-                    <span className="w-2.5 h-2.5 bg-rose-505 rounded-full animate-pulse" />
-                    📋 Controle de Vales, Faltas & Inconformidades Corporativas
+                    <span className="w-2.5 h-2.5 bg-rose-500 rounded-full animate-pulse" />
+                    <ClipboardList className="w-4 h-4 text-sky-400" />
+                    Controle de Vales, Faltas & Inconformidades Corporativas
                   </h2>
                   <p className="text-[11px] text-slate-500 font-mono">
                     Sincronismo de quebras financeiras e multas de cargas registradas via encerramento no Sistema Ampla.
@@ -1439,7 +1610,9 @@ export default function DashboardView({
                   {/* Card 1: DTs Fechadas */}
                   <div className="p-4 bg-slate-900 border border-slate-800 rounded-xl relative overflow-hidden flex flex-col justify-between">
                     <div>
-                      <span className="text-[10px] text-slate-400 uppercase font-mono font-bold block">🔒 DTs Fechadas (Total)</span>
+                      <span className="text-[10px] text-slate-400 uppercase font-mono font-bold flex items-center gap-1.5">
+                        <Lock className="w-3.5 h-3.5 text-sky-400" /> DTs Fechadas (Total)
+                      </span>
                       <strong className="text-2xl font-black text-sky-400 tracking-tight block mt-1 font-mono">
                         {data?.valesKpis?.totalDtsFechadas ?? 0}
                       </strong>
@@ -1450,7 +1623,9 @@ export default function DashboardView({
                   {/* Card 2: DTs Fechadas Sem Vale */}
                   <div className="p-4 bg-slate-900 border border-slate-800 rounded-xl relative overflow-hidden flex flex-col justify-between">
                     <div>
-                      <span className="text-[10px] text-slate-400 uppercase font-mono font-bold block">🟢 Fechadas Sem Vale</span>
+                      <span className="text-[10px] text-slate-400 uppercase font-mono font-bold flex items-center gap-1.5">
+                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" /> Fechadas Sem Vale
+                      </span>
                       <strong className="text-2xl font-black text-emerald-400 tracking-tight block mt-1 font-mono">
                         {data?.valesKpis?.totalDtsFechadasSemVale ?? 0}
                       </strong>
@@ -1461,7 +1636,9 @@ export default function DashboardView({
                   {/* Card 3: DTs Fechadas Com Vale */}
                   <div className="p-4 bg-slate-900 border border-slate-800 rounded-xl relative overflow-hidden flex flex-col justify-between">
                     <div>
-                      <span className="text-[10px] text-slate-400 uppercase font-mono font-bold block">🔴 Fechadas Com Vale</span>
+                      <span className="text-[10px] text-slate-400 uppercase font-mono font-bold flex items-center gap-1.5">
+                        <AlertTriangle className="w-3.5 h-3.5 text-rose-500" /> Fechadas Com Vale
+                      </span>
                       <strong className="text-2xl font-black text-rose-500 tracking-tight block mt-1 font-mono">
                         {data?.valesKpis?.totalDtsFechadasComVale ?? 0}
                       </strong>
@@ -1472,7 +1649,9 @@ export default function DashboardView({
                   {/* Card 4: DTs Com Devolução */}
                   <div className="p-4 bg-slate-900 border border-slate-800 rounded-xl relative overflow-hidden flex flex-col justify-between">
                     <div>
-                      <span className="text-[10px] text-slate-400 uppercase font-mono font-bold block">🟡 Com Devolução</span>
+                      <span className="text-[10px] text-slate-400 uppercase font-mono font-bold flex items-center gap-1.5">
+                        <RotateCcw className="w-3.5 h-3.5 text-amber-400" /> Com Devolução
+                      </span>
                       <strong className="text-2xl font-black text-yellow-500 tracking-tight block mt-1 font-mono">
                         {data?.valesKpis?.totalDtsComDevolucao ?? 0}
                       </strong>
@@ -1483,7 +1662,9 @@ export default function DashboardView({
                   {/* Card 5: Valor Total de Vales */}
                   <div className="p-4 bg-slate-900 border border-slate-800 rounded-xl relative overflow-hidden flex flex-col justify-between col-span-1 sm:col-span-2 lg:col-span-1">
                     <div>
-                      <span className="text-[10px] text-slate-400 uppercase font-mono font-bold block">💰 Valor Total de Vales</span>
+                      <span className="text-[10px] text-slate-400 uppercase font-mono font-bold flex items-center gap-1.5">
+                        <DollarSign className="w-3.5 h-3.5 text-rose-400" /> Valor Total de Vales
+                      </span>
                       <strong className="text-lg font-black text-rose-400 tracking-tight block mt-1.5 font-mono">
                         R$ {Number(data?.valesKpis?.totalValorVales || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </strong>
@@ -1498,7 +1679,9 @@ export default function DashboardView({
                   {/* Chart: Evolução Mensal */}
                   <div className="bg-slate-900 p-5 rounded-xl border border-slate-800 lg:col-span-2">
                     <div className="flex items-center justify-between mb-4">
-                      <h3 className="text-xs font-bold text-white uppercase font-mono tracking-wider">📊 Evolução Mensal de Vales</h3>
+                      <h3 className="text-xs font-bold text-white uppercase font-mono tracking-wider flex items-center gap-1.5">
+                        <BarChart2 className="w-3.5 h-3.5 text-sky-400" /> Evolução Mensal de Vales
+                      </h3>
                       <span className="text-[9px] bg-slate-850 text-sky-400 px-2 py-0.5 rounded font-mono font-semibold">Consolidado Financeiro</span>
                     </div>
                     <div className="h-[300px] min-h-[300px]">
@@ -1521,7 +1704,7 @@ export default function DashboardView({
                     <div className="space-y-2">
                       <h4 className="text-xs font-bold text-slate-305 font-mono flex items-center gap-1">
                         <Truck className="w-3.5 h-3.5 text-rose-400" />
-                        🚛 Motoristas com mais Vales
+                        Motoristas com mais Vales
                       </h4>
                       {(!data?.valesKpis?.topMotoristasVales || data.valesKpis.topMotoristasVales.length === 0) ? (
                         <p className="text-[10px] text-slate-500 italic font-mono p-2 bg-slate-950/20 rounded">Sem registros no período.</p>
@@ -1540,8 +1723,8 @@ export default function DashboardView({
                     {/* Top 3 Unidades */}
                     <div className="space-y-2">
                       <h4 className="text-xs font-bold text-slate-305 font-mono flex items-center gap-1">
-                        <MapPin className="w-3.5 h-3.5 text-sky-400" />
-                        🏢 Unidades com mais Vales
+                        <Building2 className="w-3.5 h-3.5 text-sky-400" />
+                        Unidades com mais Vales
                       </h4>
                       {(!data?.valesKpis?.topUnidadesVales || data.valesKpis.topUnidadesVales.length === 0) ? (
                         <p className="text-[10px] text-slate-500 italic font-mono p-2 bg-slate-950/20 rounded">Sem registros no período.</p>

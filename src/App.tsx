@@ -54,8 +54,7 @@ const TAB_TITLES: Record<string, string> = {
   processos: "Painel de Processos",
   noshow: "Vistoria No-Show",
   devolucoes: "Gestão Integrada de Devoluções"
-}; // <--- Chave de fechamento adicionada aqui!
-
+};
 
 interface ErrorBoundaryProps {
   children: React.ReactNode;
@@ -540,8 +539,9 @@ export default function App() {
             )}
 
             {loginError && (
-              <div className="p-2.5 bg-rose-500/15 border border-rose-500/20 rounded-md font-mono text-[10px] text-rose-400 leading-tight">
-                ⚠️ {loginError}
+              <div className="p-2.5 bg-rose-500/15 border border-rose-500/20 rounded-md font-mono text-[10px] text-rose-400 leading-tight flex items-center gap-1.5">
+                <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                <span>{loginError}</span>
               </div>
             )}
 
@@ -733,7 +733,7 @@ export default function App() {
               id="btn-toggle-sidebar"
               onClick={toggleSidebar}
               className={`p-1.5 hover:bg-slate-800 text-slate-400 hover:text-white rounded transition-colors cursor-pointer ${sidebarCollapsed ? "absolute mt-14 bg-slate-950 border border-slate-800 rounded-full shadow p-1.5 hover:bg-slate-900 text-sky-400 z-20" : ""}`}
-              title={sidebarCollapsed ? "Expandir Menu (☰)" : "Recolher Menu (◀)"}
+              title={sidebarCollapsed ? "Expandir Menu" : "Recolher Menu"}
             >
               {sidebarCollapsed ? (
                 <Menu className="w-4 h-4" />
@@ -820,8 +820,8 @@ export default function App() {
             {isMaster && (
               <div className="mt-4 pt-3 border-t border-slate-800/60 space-y-1">
                 {!sidebarCollapsed ? (
-                  <span className="px-3 text-[9px] font-bold text-sky-400 block tracking-widest uppercase mb-2 font-mono">
-                    🛡️ ADMINISTRAÇÃO MASTER
+                  <span className="px-3 text-[9px] font-bold text-sky-400 flex items-center gap-1 block tracking-widest uppercase mb-2 font-mono">
+                    <Shield className="w-3 h-3 text-sky-400 shrink-0" /> ADMINISTRAÇÃO MASTER
                   </span>
                 ) : (
                   <div className="border-t border-slate-850 my-2 mx-1"></div>
@@ -954,7 +954,7 @@ export default function App() {
                   className="bg-slate-950 text-sky-400 border border-slate-800 rounded px-2 py-0.5 font-bold focus:outline-none focus:border-sky-500 transition-colors uppercase cursor-pointer"
                 >
                   {currentUser.perfil === "admin_master" && (
-                    <option value="Todas">★ VISÃO CONSOLIDADA (MASTER)</option>
+                    <option value="Todas">VISÃO CONSOLIDADA (MASTER)</option>
                   )}
                   {unidades
                     .filter(u => {

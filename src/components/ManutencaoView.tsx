@@ -28,7 +28,7 @@ export default function ManutencaoView({ manutencoes, veiculos, onRefresh, curre
   const [placa, setPlaca] = useState("");
   const [tipo, setTipo] = useState<"Preventiva" | "Corretiva">("Preventiva");
   const [categoria, setCategoria] = useState("Mecânica");
-  const [data, setData] = useState("2026-06-12");
+  const [data, setData] = useState(() => new Date().toISOString().split("T")[0]);
   const [proximaManutencao, setProximaManutencao] = useState("2026-09-12");
   const [quilometragemAtual, setQuilometragemAtual] = useState<number>(0);
   const [proximaQuilometragem, setProximaQuilometragem] = useState<number>(0);

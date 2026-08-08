@@ -18,7 +18,8 @@ import {
   Filter,
   Truck,
   FileText,
-  User
+  User,
+  Eye
 } from "lucide-react";
 import { Motorista, Unidade, Veiculo } from "../types";
 import { NotificationModal, ConfirmModal, NotificationType, ConfirmType } from "./NotificationModal";
@@ -61,6 +62,48 @@ function validarCPF(cpf: string): boolean {
 
 export default function MotoristasView({ motoristas, unidades, veiculos, onRefresh, userEmail }: MotoristasProps) {
   const formatarDataBr = (val: string) => val ? val.split("-").reverse().join("/") : "";
+
+  const handleFileRead = (e: React.ChangeEvent<HTMLInputElement>, setter: (val: string) => void) => {
+    if (e.target.files && e.target.files[0]) {
+      const file = e.target.files[0];
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const base64Url = event.target?.result as string;
+        if (base64Url) {
+          setter(base64Url);
+        }
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const handleViewFile = (url?: string, filename?: string) => {
+    if (!url) return;
+    
+    if (url.startsWith("data:")) {
+      try {
+        const parts = url.split(";base64,");
+        const contentType = parts[0].split(":")[1];
+        const raw = window.atob(parts[1]);
+        const rawLength = raw.length;
+        const uInt8Array = new Uint8Array(rawLength);
+        for (let i = 0; i < rawLength; ++i) {
+          uInt8Array[i] = raw.charCodeAt(i);
+        }
+        const blob = new Blob([uInt8Array], { type: contentType });
+        const blobUrl = URL.createObjectURL(blob);
+        window.open(blobUrl, "_blank");
+      } catch (e) {
+        console.error("Blob conversion failed, falling back to writing to a new window", e);
+        const w = window.open();
+        if (w) {
+          w.document.write(`<iframe src="${url}" style="border:none; width:100%; height:100%;" title="${filename || 'Documento'}"></iframe>`);
+        }
+      }
+    } else {
+      window.open(url, "_blank");
+    }
+  };
 
   const getBloqueioMotivo = (m: Motorista) => {
     if (m.statusFinal !== "BLOQUEADO") return null;
@@ -249,7 +292,7 @@ export default function MotoristasView({ motoristas, unidades, veiculos, onRefre
       if (res.ok) {
         setNotification({
           type: "success",
-          message: editingId ? "✅ Alterações salvas com sucesso." : "✅ Registro salvo com sucesso."
+          message: editingId ? "Alterações salvas com sucesso." : "Registro salvo com sucesso."
         });
         resetForm();
         onRefresh();
@@ -262,9 +305,9 @@ export default function MotoristasView({ motoristas, unidades, veiculos, onRefre
         }
         console.error("[BROWSER ERROR LOG] Erro na gravação do motorista:", d);
         
-        let detailedMsg = `❌ Não foi possível ${editingId ? "editar" : "cadastrar"} o motorista.`;
+        let detailedMsg = `Não foi possível ${editingId ? "editar" : "cadastrar"} o motorista.`;
         if (d.details) {
-          detailedMsg += `\n\n🔎 Detalhes do Erro do Banco:\n• Tabela: ${d.details.tableName}\n• Operação: ${d.details.operation}\n• Campo: ${d.details.errorField}\n• Mensagem: ${d.details.dbMessage}`;
+          detailedMsg += `\n\nDetalhes do Erro do Banco:\n• Tabela: ${d.details.tableName}\n• Operação: ${d.details.operation}\n• Campo: ${d.details.errorField}\n• Mensagem: ${d.details.dbMessage}`;
         } else {
           detailedMsg += `\nMotivo: ${d.error || d.message || "Operação rejeitada do servidor."}`;
         }
@@ -278,7 +321,7 @@ export default function MotoristasView({ motoristas, unidades, veiculos, onRefre
       console.error("[BROWSER ERROR LOG] Falha imprevista na operação do motorista:", err);
       setNotification({
         type: "error",
-        message: `❌ Não foi possível realizar a operação. Causa real: ${err instanceof Error ? err.message : String(err)}`
+        message: `Não foi possível realizar a operação. Causa real: ${err instanceof Error ? err.message : String(err)}`
       });
     }
   };
@@ -305,7 +348,7 @@ export default function MotoristasView({ motoristas, unidades, veiculos, onRefre
           if (res.ok) {
             setNotification({
               type: "success",
-              message: "✅ Registro excluído com sucesso."
+              message: "Registro excluído com sucesso."
             });
             onRefresh();
           } else {
@@ -317,9 +360,9 @@ export default function MotoristasView({ motoristas, unidades, veiculos, onRefre
             }
             console.error("[BROWSER ERROR LOG] Erro ao excluir de motorista:", d);
             
-            let detailedMsg = `❌ Não foi possível excluir o motorista.`;
+            let detailedMsg = `Não foi possível excluir o motorista.`;
             if (d.details) {
-              detailedMsg += `\n\n🔎 Detalhes do Erro do Banco:\n• Tabela: ${d.details.tableName}\n• Operação: ${d.details.operation}\n• Campo: ${d.details.errorField}\n• Mensagem: ${d.details.dbMessage}`;
+              detailedMsg += `\n\nDetalhes do Erro do Banco:\n• Tabela: ${d.details.tableName}\n• Operação: ${d.details.operation}\n• Campo: ${d.details.errorField}\n• Mensagem: ${d.details.dbMessage}`;
             } else {
               detailedMsg += `\nMotivo: ${d.error || d.message || "Ação rejeitada pelo banco."}`;
             }
@@ -333,7 +376,7 @@ export default function MotoristasView({ motoristas, unidades, veiculos, onRefre
           console.error("[BROWSER ERROR LOG] Falha de conexão ao excluir motorista:", err);
           setNotification({
             type: "error",
-            message: `❌ Não foi possível excluir. Causa real: ${err instanceof Error ? err.message : String(err)}`
+            message: `Não foi possível excluir. Causa real: ${err instanceof Error ? err.message : String(err)}`
           });
         }
       }
@@ -342,9 +385,9 @@ export default function MotoristasView({ motoristas, unidades, veiculos, onRefre
 
   // Compliance calculations for general list (all loaded motoristas)
   const totalCount = motoristas.length;
-  const aptasCount = motoristas.filter(m => m.statusConformidade === "APTO" || (!m.statusConformidade && m.statusFinal === "LIBERADO")).length;
-  const atencaoCount = motoristas.filter(m => m.statusConformidade === "ATENÇÃO" || (!m.statusConformidade && m.statusFinal === "PENDENTE" && m.statusConformidade !== "CRÍTICO")).length;
-  const criticasCount = motoristas.filter(m => m.statusConformidade === "CRÍTICO").length;
+  const aptasCount = motoristas.filter(m => m.statusFinal === "LIBERADO" && m.statusConformidade === "APTO").length;
+  const atencaoCount = motoristas.filter(m => (m.statusFinal === "PENDENTE" || m.statusConformidade === "ATENÇÃO") && m.statusFinal !== "BLOQUEADO").length;
+  const criticasCount = motoristas.filter(m => m.statusConformidade === "CRÍTICO" && m.statusFinal !== "BLOQUEADO").length;
   const bloqueadasCount = motoristas.filter(m => m.statusConformidade === "BLOQUEADO" || m.statusFinal === "BLOQUEADO").length;
   const compliancePercent = totalCount > 0 ? Math.round((aptasCount / totalCount) * 100) : 100;
 
@@ -567,9 +610,9 @@ export default function MotoristasView({ motoristas, unidades, veiculos, onRefre
               className="w-full bg-slate-950 border border-slate-850 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-slate-700"
             >
               <option value="Todos">Todos Status</option>
-              <option value="LIBERADO">🟢 LIBERADO</option>
-              <option value="PENDENTE">🟡 PENDENTE</option>
-              <option value="BLOQUEADO">🔴 BLOQUEADO</option>
+              <option value="LIBERADO">LIBERADO</option>
+              <option value="PENDENTE">PENDENTE</option>
+              <option value="BLOQUEADO">BLOQUEADO</option>
             </select>
           </div>
 
@@ -758,7 +801,7 @@ export default function MotoristasView({ motoristas, unidades, veiculos, onRefre
                       {/* Simple search box for motoristas */}
                       <input
                         type="text"
-                        placeholder="🔎 Filtrar motoristas por nome..."
+                        placeholder="Filtrar motoristas por nome..."
                         className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1 text-white text-xs font-sans placeholder-slate-600 focus:outline-none focus:border-slate-700"
                         value={driverSearchTerm}
                         onChange={(e) => setDriverSearchTerm(e.target.value)}
@@ -893,16 +936,46 @@ export default function MotoristasView({ motoristas, unidades, veiculos, onRefre
                 {tipo === "Motorista" && (
                   <div>
                     <span className="text-slate-500 block">Cópia da CNH Digital</span>
-                    <input type="file" onChange={(e) => setCnhFile(e.target.files?.[0]?.name || "")} className="w-full text-slate-400 px-1" />
+                    <input 
+                      type="file" 
+                      accept="image/*,application/pdf"
+                      onChange={(e) => handleFileRead(e, setCnhFile)} 
+                      className="w-full text-slate-400 px-1 cursor-pointer" 
+                    />
+                    {cnhFile && (
+                      <span className="text-[9px] text-emerald-400 block mt-0.5">
+                        CNH carregada ({cnhFile.startsWith("data:") ? "Arquivo Base64" : cnhFile})
+                      </span>
+                    )}
                   </div>
                 )}
                 <div className="pt-1">
                   <span className="text-slate-500 block">Comprovante de Laudo ASO</span>
-                  <input type="file" onChange={(e) => setAsoFile(e.target.files?.[0]?.name || "")} className="w-full text-slate-400 px-1" />
+                  <input 
+                    type="file" 
+                    accept="image/*,application/pdf"
+                    onChange={(e) => handleFileRead(e, setAsoFile)} 
+                    className="w-full text-slate-400 px-1 cursor-pointer" 
+                  />
+                  {asoFile && (
+                    <span className="text-[9px] text-emerald-400 block mt-0.5">
+                      ASO carregado ({asoFile.startsWith("data:") ? "Arquivo Base64" : asoFile})
+                    </span>
+                  )}
                 </div>
                 <div className="pt-1">
                   <span className="text-slate-500 block">Comprovante de Integração</span>
-                  <input type="file" onChange={(e) => setIntegracaoFile(e.target.files?.[0]?.name || "")} className="w-full text-slate-400 px-1" />
+                  <input 
+                    type="file" 
+                    accept="image/*,application/pdf"
+                    onChange={(e) => handleFileRead(e, setIntegracaoFile)} 
+                    className="w-full text-slate-400 px-1 cursor-pointer" 
+                  />
+                  {integracaoFile && (
+                    <span className="text-[9px] text-emerald-400 block mt-0.5">
+                      Integração carregada ({integracaoFile.startsWith("data:") ? "Arquivo Base64" : integracaoFile})
+                    </span>
+                  )}
                 </div>
               </div>
 
@@ -1019,7 +1092,7 @@ export default function MotoristasView({ motoristas, unidades, veiculos, onRefre
 
                       {m.statusFinal === "BLOQUEADO" && (
                         <div className="mt-2.5 px-2.5 py-1.5 bg-rose-950/20 rounded border border-rose-900/40 text-[10px] font-mono text-rose-400 flex flex-col gap-0.5">
-                          <span className="font-bold text-rose-300">⚠️ BLOQUEADO:</span>
+                          <span className="font-bold text-rose-300 flex items-center gap-1"><AlertTriangle className="w-3 h-3 text-rose-400" /> BLOQUEADO:</span>
                           <span>{getBloqueioMotivo(m)}</span>
                         </div>
                       )}
@@ -1027,44 +1100,80 @@ export default function MotoristasView({ motoristas, unidades, veiculos, onRefre
                       {/* Document and Compliance checklist banner */}
                       <div className="mt-3 p-3 bg-slate-950/60 rounded-lg border border-slate-800/80 space-y-1.5 font-mono text-[10px]">
                         {((m.tipo || "Motorista") === "Motorista") && (
-                          <div className="flex justify-between text-slate-400">
+                          <div className="flex justify-between items-center text-slate-400">
                             <span>Vencimento CNH:</span>
-                            <span className="text-slate-200">{m.cnhVencimento}</span>
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-slate-200">{m.cnhVencimento}</span>
+                              {m.cnhDocumentoUrl && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleViewFile(m.cnhDocumentoUrl, `${m.nome}_CNH`)}
+                                  className="p-0.5 bg-slate-900 hover:bg-slate-800 text-sky-400 hover:text-sky-300 rounded border border-slate-800 transition cursor-pointer"
+                                  title="Visualizar CNH"
+                                >
+                                  <Eye className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                            </div>
                           </div>
                         )}
-                        <div className="flex justify-between text-slate-400">
+                        <div className="flex justify-between items-center text-slate-400">
                           <span>Vencimento ASO:</span>
-                          <span className="text-slate-200">{formatarDataBr(m.asoVencimento)}</span>
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-slate-200">{formatarDataBr(m.asoVencimento)}</span>
+                            {m.asoDocumentoUrl && (
+                              <button
+                                type="button"
+                                onClick={() => handleViewFile(m.asoDocumentoUrl, `${m.nome}_ASO`)}
+                                className="p-0.5 bg-slate-900 hover:bg-slate-800 text-sky-400 hover:text-sky-300 rounded border border-slate-800 transition cursor-pointer"
+                                title="Visualizar ASO"
+                              >
+                                <Eye className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                          </div>
                         </div>
 
-                        <div className="flex justify-between text-slate-400">
+                        <div className="flex justify-between items-center text-slate-400">
                           <span>Vencimento Integração:</span>
-                          <span className="text-slate-200">{m.integracaoVencimento ? formatarDataBr(m.integracaoVencimento) : "Nenhum"}</span>
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-slate-200">{m.integracaoVencimento ? formatarDataBr(m.integracaoVencimento) : "Nenhum"}</span>
+                            {m.integracaoDocumentoUrl && (
+                              <button
+                                type="button"
+                                onClick={() => handleViewFile(m.integracaoDocumentoUrl, `${m.nome}_Integracao`)}
+                                className="p-0.5 bg-slate-900 hover:bg-slate-800 text-sky-400 hover:text-sky-300 rounded border border-slate-800 transition cursor-pointer"
+                                title="Visualizar Integração"
+                              >
+                                <Eye className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                          </div>
                         </div>
 
                         <div className="grid grid-cols-4 gap-1.5 pt-2 border-t border-slate-900 text-center">
                           <div className="rounded py-1 bg-slate-900">
                             <span className="block text-[8px] text-slate-500">INTEG</span>
                             <span className="font-bold flex items-center justify-center gap-0.5 text-[9px]">
-                              {m.integracao === "Feito" ? <span className="text-emerald-400">✅ SIM</span> : <span className="text-amber-500">❌ NÃO</span>}
+                              {m.integracao === "Feito" ? <span className="text-emerald-400">SIM</span> : <span className="text-amber-500">NÃO</span>}
                             </span>
                           </div>
                           <div className="rounded py-1 bg-slate-900">
                             <span className="block text-[8px] text-slate-500">PESQ</span>
                             <span className="font-bold flex items-center justify-center gap-0.5 text-[9px]">
-                              {m.pesquisa === "Feito" ? <span className="text-emerald-400">✅ SIM</span> : <span className="text-amber-500">❌ NÃO</span>}
+                              {m.pesquisa === "Feito" ? <span className="text-emerald-400">SIM</span> : <span className="text-amber-500">NÃO</span>}
                             </span>
                           </div>
                           <div className="rounded py-1 bg-slate-900">
                             <span className="block text-[8px] text-slate-500">ASO</span>
                             <span className="font-bold flex items-center justify-center gap-0.5 text-[9px]">
-                              {m.aso === "Feito" ? <span className="text-emerald-400">✅ SIM</span> : <span className="text-rose-500">❌ NÃO</span>}
+                              {m.aso === "Feito" ? <span className="text-emerald-400">SIM</span> : <span className="text-rose-500">NÃO</span>}
                             </span>
                           </div>
                           <div className="rounded py-1 bg-slate-900">
                             <span className="block text-[8px] text-slate-500">EPI</span>
                             <span className="font-bold flex items-center justify-center gap-0.5 text-[9px]">
-                              {m.fichaEpi === "Feito" ? <span className="text-emerald-400">✅ SIM</span> : <span className="text-amber-500">❌ NÃO</span>}
+                              {m.fichaEpi === "Feito" ? <span className="text-emerald-400">SIM</span> : <span className="text-amber-500">NÃO</span>}
                             </span>
                           </div>
                         </div>
@@ -1179,30 +1288,52 @@ export default function MotoristasView({ motoristas, unidades, veiculos, onRefre
                           </td>
                           <td className="p-3 text-center">
                             {m.integracao === "Feito" ? (
-                              <span className="px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 font-mono text-[9px]">✅ Feito</span>
+                              <div className="flex items-center justify-center gap-1">
+                                <span className="px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 font-mono text-[9px]">Feito</span>
+                                {m.integracaoDocumentoUrl && (
+                                  <button
+                                    onClick={() => handleViewFile(m.integracaoDocumentoUrl, `${m.nome}_Integracao`)}
+                                    className="p-0.5 text-sky-400 hover:text-sky-300 hover:bg-slate-800 rounded transition cursor-pointer"
+                                    title="Visualizar Comprovante de Integração"
+                                  >
+                                    <Eye className="w-3 h-3" />
+                                  </button>
+                                )}
+                              </div>
                             ) : (
-                              <span className="px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-500 font-mono text-[9px]">⏳ Pendente</span>
+                              <span className="px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-500 font-mono text-[9px]">Pendente</span>
                             )}
                           </td>
                           <td className="p-3 text-center">
                             {m.pesquisa === "Feito" ? (
-                              <span className="px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 font-mono text-[9px]">✅ Feito</span>
+                              <span className="px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 font-mono text-[9px]">Feito</span>
                             ) : (
-                              <span className="px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-500 font-mono text-[9px]">⏳ Pendente</span>
+                              <span className="px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-500 font-mono text-[9px]">Pendente</span>
                             )}
                           </td>
                           <td className="p-3 text-center">
                             {m.aso === "Feito" ? (
-                              <span className="px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 font-mono text-[9px]">✅ Feito</span>
+                              <div className="flex items-center justify-center gap-1">
+                                <span className="px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 font-mono text-[9px]">Feito</span>
+                                {m.asoDocumentoUrl && (
+                                  <button
+                                    onClick={() => handleViewFile(m.asoDocumentoUrl, `${m.nome}_ASO`)}
+                                    className="p-0.5 text-sky-400 hover:text-sky-300 hover:bg-slate-800 rounded transition cursor-pointer"
+                                    title="Visualizar Comprovante ASO"
+                                  >
+                                    <Eye className="w-3 h-3" />
+                                  </button>
+                                )}
+                              </div>
                             ) : (
-                              <span className="px-1.5 py-0.5 rounded bg-rose-500/10 text-rose-400 font-mono text-[9px]">⏳ Pendente</span>
+                              <span className="px-1.5 py-0.5 rounded bg-rose-500/10 text-rose-400 font-mono text-[9px]">Pendente</span>
                             )}
                           </td>
                           <td className="p-3 text-center">
                             {m.fichaEpi === "Feito" ? (
-                              <span className="px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 font-mono text-[9px]">✅ Feito</span>
+                              <span className="px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 font-mono text-[9px]">Feito</span>
                             ) : (
-                              <span className="px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-500 font-mono text-[9px]">⏳ Pendente</span>
+                              <span className="px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-500 font-mono text-[9px]">Pendente</span>
                             )}
                           </td>
                           <td className="p-3 text-center align-middle">
@@ -1228,9 +1359,18 @@ export default function MotoristasView({ motoristas, unidades, veiculos, onRefre
                           </td>
                           <td className="p-3 text-right">
                             <div className="flex justify-end gap-1.5">
+                              {m.cnhDocumentoUrl && (
+                                <button
+                                  onClick={() => handleViewFile(m.cnhDocumentoUrl, `${m.nome}_CNH`)}
+                                  className="p-1 text-sky-400 hover:text-white rounded border border-slate-800 bg-slate-950 transition cursor-pointer"
+                                  title="Visualizar CNH"
+                                >
+                                  <Eye className="w-3.5 h-3.5" />
+                                </button>
+                              )}
                               <button
                                 onClick={() => handleEditInit(m)}
-                                className="p-1 text-slate-400 hover:text-white rounded border border-slate-800 bg-slate-950 transition"
+                                className="p-1 text-slate-400 hover:text-white rounded border border-slate-800 bg-slate-950 transition cursor-pointer"
                                 title="Alterar motorista"
                               >
                                 <Edit className="w-3.5 h-3.5" />

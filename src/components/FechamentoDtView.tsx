@@ -222,6 +222,16 @@ export default function FechamentoDtView({
   const [reentregaValor, setReentregaValor] = useState<number>(0);
   const [abastecimentoValor, setAbastecimentoValor] = useState<number>(0);
 
+  // Validação Financeira de Reentrega (Heineken)
+  const [reentregaValidada, setReentregaValidada] = useState<"Sim" | "Não">("Não");
+  const [dataValidacao, setDataValidacao] = useState<string>(new Date().toISOString().split("T")[0]);
+  const [responsavelValidacao, setResponsavelValidacao] = useState<string>("");
+  const [observacoesValidacao, setObservacoesValidacao] = useState<string>("");
+  const [docValidacaoUrl, setDocValidacaoUrl] = useState<string>("");
+  const [docValidacaoNome, setDocValidacaoNome] = useState<string>("");
+  const [docValidacaoTipo, setDocValidacaoTipo] = useState<string>("");
+  const [docValidacaoDataUpload, setDocValidacaoDataUpload] = useState<string>("");
+
   // Consultas tab filters
   const [filterClosedStatus, setFilterClosedStatus] = useState<string>("Todas");
   const [searchClosedDt, setSearchClosedDt] = useState<string>("");
@@ -537,7 +547,34 @@ export default function FechamentoDtView({
       setNotification({ type: "error", message: "Informe um número de DT para consultar." });
       return;
     }
-    const found = rotas.find(r => r.dt === dtNum.trim());
+
+    const cleanQuery = dtNum.trim().toLowerCase();
+    
+    // First search active routes
+    let found = rotas.find(r => r.dt && String(r.dt).trim().toLowerCase() === cleanQuery);
+
+    // Fallback: search closed closures if not found in active routes
+    if (!found) {
+      const closedMatch = fechamentosDt.find(c => c.dt && String(c.dt).trim().toLowerCase() === cleanQuery);
+      if (closedMatch) {
+        found = {
+          id: `DT-${closedMatch.dt}`,
+          dt: closedMatch.dt,
+          data: closedMatch.dataFechamento || new Date().toISOString().split("T")[0],
+          veiculoId: closedMatch.veiculoId || veiculos[0]?.id || "",
+          motoristaId: closedMatch.motoristaId || motoristas[0]?.id || "",
+          unidadeId: closedMatch.unidadeId || "un-go",
+          status: "Finalizada",
+          status_viagem: closedMatch.statusFechamento || "Finalizada",
+          totalEntregas: 1,
+          entregues: 1,
+          devolucoes: 0,
+          recusadas: 0,
+          tipo: "Entrega"
+        } as Rota;
+      }
+    }
+
     if (found) {
       setActiveSearchedDt(found);
       setOccurrences([]);
@@ -584,6 +621,16 @@ export default function FechamentoDtView({
       setReentregaValor(0);
       setAbastecimentoValor(0);
       setClosureAttachments([]);
+
+      // Reset Reentrega Validation states
+      setReentregaValidada("Não");
+      setDataValidacao(new Date().toISOString().split("T")[0]);
+      setResponsavelValidacao(currentUser?.nome || userEmail || "Operador");
+      setObservacoesValidacao("");
+      setDocValidacaoUrl("");
+      setDocValidacaoNome("");
+      setDocValidacaoTipo("");
+      setDocValidacaoDataUpload("");
 
       const alreadyClosed = fechamentosDt.find(c => c.dt === found.dt && c.statusFechamento !== "EM_ABERTO");
       if (alreadyClosed) {
@@ -649,6 +696,16 @@ export default function FechamentoDtView({
     setReentregaValor(0);
     setAbastecimentoValor(0);
     setClosureAttachments([]);
+
+    // Reset Reentrega Validation states
+    setReentregaValidada("Não");
+    setDataValidacao(new Date().toISOString().split("T")[0]);
+    setResponsavelValidacao(currentUser?.nome || userEmail || "Operador");
+    setObservacoesValidacao("");
+    setDocValidacaoUrl("");
+    setDocValidacaoNome("");
+    setDocValidacaoTipo("");
+    setDocValidacaoDataUpload("");
   };
 
   // Add occurrences to current closure draft list
@@ -759,6 +816,24 @@ export default function FechamentoDtView({
       }
     }
 
+    // Validation for Reentrega Financial Validation
+    if (activeSearchedDt?.tipo?.toLowerCase() === "reentrega") {
+      if (reentregaValidada === "Sim") {
+        if (!dataValidacao) {
+          setNotification({ type: "error", message: "A data de validação é obrigatória quando a reentrega foi validada." });
+          return;
+        }
+        if (!responsavelValidacao.trim()) {
+          setNotification({ type: "error", message: "O responsável pela validação é obrigatório." });
+          return;
+        }
+        if (!docValidacaoUrl) {
+          setNotification({ type: "error", message: "O upload do comprovante de validação é obrigatório quando a reentrega foi validada." });
+          return;
+        }
+      }
+    }
+
     setSubmitting(true);
     try {
       const computedStatus = houveFalta === "Sim" 
@@ -829,7 +904,18 @@ export default function FechamentoDtView({
           descargaResponsavel,
           reentregaValor,
           abastecimentoValor,
-          anexos: closureAttachments
+          anexos: closureAttachments,
+
+          // Validação Financeira de Reentregas
+          reentrega_validada: activeSearchedDt?.tipo?.toLowerCase() === "reentrega" ? (reentregaValidada === "Sim") : false,
+          status_validacao: activeSearchedDt?.tipo?.toLowerCase() === "reentrega" ? (reentregaValidada === "Sim" ? "VALIDADA" : "PENDENTE DE VALIDAÇÃO") : "N/A",
+          data_validacao: activeSearchedDt?.tipo?.toLowerCase() === "reentrega" && reentregaValidada === "Sim" ? dataValidacao : "",
+          responsavel_validacao: activeSearchedDt?.tipo?.toLowerCase() === "reentrega" && reentregaValidada === "Sim" ? responsavelValidacao : "",
+          observacoes_validacao: activeSearchedDt?.tipo?.toLowerCase() === "reentrega" && reentregaValidada === "Sim" ? observacoesValidacao : "",
+          documento_validacao_url: activeSearchedDt?.tipo?.toLowerCase() === "reentrega" && reentregaValidada === "Sim" ? docValidacaoUrl : "",
+          documento_validacao_nome: activeSearchedDt?.tipo?.toLowerCase() === "reentrega" && reentregaValidada === "Sim" ? docValidacaoNome : "",
+          documento_validacao_tipo: activeSearchedDt?.tipo?.toLowerCase() === "reentrega" && reentregaValidada === "Sim" ? docValidacaoTipo : "",
+          documento_validacao_data_upload: activeSearchedDt?.tipo?.toLowerCase() === "reentrega" && reentregaValidada === "Sim" ? docValidacaoDataUpload : ""
         })
       });
 
@@ -1127,27 +1213,27 @@ export default function FechamentoDtView({
         <div className="flex gap-1.5 p-1 bg-slate-950 border border-slate-800 rounded-lg max-w-fit">
           <button
             onClick={() => setActiveTab("fechamento")}
-            className={`px-3 py-1.5 text-xs font-semibold rounded-md transition ${
+            className={`px-3 py-1.5 text-xs font-semibold rounded-md transition flex items-center gap-1.5 ${
               activeTab === "fechamento" ? "bg-sky-600/20 text-sky-400 font-bold border border-sky-505" : "text-slate-400 hover:text-white"
             }`}
           >
-            🔒 Fechar DT Operacional
+            <ShieldCheck className="w-3.5 h-3.5" /> Fechar DT Operacional
           </button>
           <button
             onClick={() => setActiveTab("financeiro")}
-            className={`px-3 py-1.5 text-xs font-semibold rounded-md transition ${
+            className={`px-3 py-1.5 text-xs font-semibold rounded-md transition flex items-center gap-1.5 ${
               activeTab === "financeiro" ? "bg-sky-600/20 text-sky-400 font-bold border border-sky-505" : "text-slate-400 hover:text-white"
             }`}
           >
-            📋 Relatório de Vales {vales.length > 0 && <span className="ml-1 bg-sky-500 text-slate-950 font-mono text-[9px] px-1 py-0.5 rounded-full font-bold">{vales.length}</span>}
+            <FileText className="w-3.5 h-3.5" /> Relatório de Vales {vales.length > 0 && <span className="ml-1 bg-sky-500 text-slate-950 font-mono text-[9px] px-1 py-0.5 rounded-full font-bold">{vales.length}</span>}
           </button>
           <button
             onClick={() => setActiveTab("relatorios")}
-            className={`px-3 py-1.5 text-xs font-semibold rounded-md transition ${
+            className={`px-3 py-1.5 text-xs font-semibold rounded-md transition flex items-center gap-1.5 ${
               activeTab === "relatorios" ? "bg-sky-600/20 text-sky-400 font-bold border border-sky-505" : "text-slate-400 hover:text-white"
             }`}
           >
-            📊 Visão Gerencial (KPIs)
+            <BarChart2 className="w-3.5 h-3.5" /> Visão Gerencial (KPIs)
           </button>
         </div>
       </div>
@@ -1161,7 +1247,9 @@ export default function FechamentoDtView({
               {/* Card 1: DTs em Aberto */}
               <div className="p-4 bg-slate-900 border border-slate-800 rounded-xl relative overflow-hidden flex flex-col justify-between text-left">
                 <div>
-                  <span className="text-[10px] text-slate-400 uppercase font-mono font-bold block">📂 DTs em Aberto</span>
+                  <span className="text-[10px] text-slate-400 uppercase font-mono font-bold flex items-center gap-1">
+                    <FileText className="w-3.5 h-3.5 text-rose-400" /> DTs em Aberto
+                  </span>
                   <strong className="text-3xl font-black text-rose-400 tracking-tight block mt-1 font-mono">
                     {controlPanelStats.openCount}
                   </strong>
@@ -1172,7 +1260,9 @@ export default function FechamentoDtView({
               {/* Card 2: DTs Fechadas Hoje */}
               <div className="p-4 bg-slate-900 border border-slate-800 rounded-xl relative overflow-hidden flex flex-col justify-between text-left">
                 <div>
-                  <span className="text-[10px] text-slate-400 uppercase font-mono font-bold block">✅ Fechadas Hoje</span>
+                  <span className="text-[10px] text-slate-400 uppercase font-mono font-bold flex items-center gap-1">
+                    <CheckCircle className="w-3.5 h-3.5 text-emerald-400" /> Fechadas Hoje
+                  </span>
                   <strong className="text-3xl font-black text-emerald-400 tracking-tight block mt-1 font-mono">
                     {controlPanelStats.closedTodayCount}
                   </strong>
@@ -1183,7 +1273,9 @@ export default function FechamentoDtView({
               {/* Card 3: DTs Críticas */}
               <div className="p-4 bg-slate-900 border border-slate-800 rounded-xl relative overflow-hidden flex flex-col justify-between text-left">
                 <div>
-                  <span className="text-[10px] text-slate-400 uppercase font-mono font-bold block">🚨 DTs Críticas (&gt; 10 dias)</span>
+                  <span className="text-[10px] text-slate-400 uppercase font-mono font-bold flex items-center gap-1">
+                    <AlertTriangle className="w-3.5 h-3.5 text-rose-500" /> DTs Críticas (&gt; 10 dias)
+                  </span>
                   <strong className={`text-3xl font-black tracking-tight block mt-1 font-mono ${controlPanelStats.criticalCount > 0 ? "text-rose-500 animate-pulse" : "text-slate-400"}`}>
                     {controlPanelStats.criticalCount}
                   </strong>
@@ -1194,7 +1286,9 @@ export default function FechamentoDtView({
               {/* Card 4: Média de Dias em Aberto */}
               <div className="p-4 bg-slate-900 border border-slate-800 rounded-xl relative overflow-hidden flex flex-col justify-between text-left">
                 <div>
-                  <span className="text-[10px] text-slate-400 uppercase font-mono font-bold block">⏳ Média de Dias em Aberto</span>
+                  <span className="text-[10px] text-slate-400 uppercase font-mono font-bold flex items-center gap-1">
+                    <Clock className="w-3.5 h-3.5 text-amber-400" /> Média de Dias em Aberto
+                  </span>
                   <strong className="text-3xl font-black text-amber-400 tracking-tight block mt-1 font-mono">
                     {controlPanelStats.avgDaysOpen}
                   </strong>
@@ -1205,7 +1299,9 @@ export default function FechamentoDtView({
               {/* Card 5: DT mais Antiga Aberta */}
               <div className="p-4 bg-slate-900 border border-slate-800 rounded-xl relative overflow-hidden flex flex-col justify-between text-left">
                 <div>
-                  <span className="text-[10px] text-slate-400 uppercase font-mono font-bold block">📅 DT mais Antiga</span>
+                  <span className="text-[10px] text-slate-400 uppercase font-mono font-bold flex items-center gap-1">
+                    <Calendar className="w-3.5 h-3.5 text-sky-400" /> DT mais Antiga
+                  </span>
                   <strong className="text-[13px] font-black text-sky-400 tracking-tight block mt-3 font-mono truncate">
                     {controlPanelStats.oldestDt}
                   </strong>
@@ -1351,10 +1447,10 @@ export default function FechamentoDtView({
                     className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1.5 text-xs text-white focus:border-sky-500"
                   >
                     <option value="">Todas as Situações</option>
-                    <option value="Verde">🟢 Normal (0-2 dias)</option>
-                    <option value="Amarelo">🟡 Atenção (3-5 dias)</option>
-                    <option value="Laranja">🟠 Urgente (6-10 dias)</option>
-                    <option value="Vermelho">🔴 Crítico (&gt;10 dias)</option>
+                    <option value="Verde">Normal (0-2 dias)</option>
+                    <option value="Amarelo">Atenção (3-5 dias)</option>
+                    <option value="Laranja">Urgente (6-10 dias)</option>
+                    <option value="Vermelho">Crítico (&gt;10 dias)</option>
                   </select>
                 </div>
 
@@ -1376,7 +1472,9 @@ export default function FechamentoDtView({
 
                 {/* Fechamento Rápido por Número da DT */}
                 <div className="space-y-1 sm:col-span-2 md:col-span-1">
-                  <label className="text-[10px] text-sky-400 font-mono block font-bold">⚡ Fechamento Rápido</label>
+                  <label className="text-[10px] text-sky-400 font-mono flex items-center gap-1 font-bold">
+                    <Activity className="w-3 h-3 text-sky-400" /> Fechamento Rápido
+                  </label>
                   <div className="flex gap-1.5">
                     <input
                       type="text"
@@ -1408,7 +1506,7 @@ export default function FechamentoDtView({
                       : "border-transparent text-slate-400 hover:text-white"
                   }`}
                 >
-                  📂 DTs Pendentes de Fechamento ({filteredPendingDts.length})
+                  <Clock className="w-4 h-4 text-rose-400" /> DTs Pendentes de Fechamento ({filteredPendingDts.length})
                 </button>
                 <button
                   onClick={() => setControlPanelTab("fechadas")}
@@ -1418,7 +1516,7 @@ export default function FechamentoDtView({
                       : "border-transparent text-slate-400 hover:text-white"
                   }`}
                 >
-                  🔒 Histórico de Fechamentos ({filteredClosedDts.length})
+                  <ShieldCheck className="w-4 h-4 text-emerald-400" /> Histórico de Fechamentos ({filteredClosedDts.length})
                 </button>
               </div>
 
@@ -1620,7 +1718,7 @@ export default function FechamentoDtView({
                   <div className="p-3.5 bg-rose-950/25 border border-rose-900/40 rounded-lg text-rose-300 space-y-2 text-xs leading-relaxed">
                     <div className="flex items-center gap-1.5 font-bold">
                       <AlertTriangle className="w-4 h-4 text-rose-400 animate-pulse shrink-0" />
-                      <span>⚠ Vales Pendentes &gt; 30 Dias</span>
+                      <span>Vales Pendentes &gt; 30 Dias</span>
                     </div>
                     <p className="text-[10px] text-slate-400 leading-normal">
                       Existem <strong className="text-rose-200">{alertOverdueVales.length} vales</strong> aguardando quitação há mais de um mês. Alertas foram enviados para a diretoria.
@@ -1654,7 +1752,9 @@ export default function FechamentoDtView({
                             <strong className="text-white font-mono text-xs">{r.dt}</strong>
                             <span className="text-[10px] text-slate-500 font-mono">({r.tipo})</span>
                           </div>
-                          <p className="text-[10px] text-slate-405 truncate font-sans">👤 {getDriverName(r.motoristaId)}</p>
+                          <p className="text-[10px] text-slate-405 truncate font-sans flex items-center gap-1">
+                            <User className="w-3 h-3 text-slate-400 inline" /> {getDriverName(r.motoristaId)}
+                          </p>
                           <p className="text-[9px] text-slate-500 font-mono">{getVehiclePlaca(r.veiculoId).split(" ")[0]} • {getUnidadeName(r.unidadeId)}</p>
                         </div>
                         <ChevronRight className="w-4 h-4 text-slate-600 shrink-0" />
@@ -1717,10 +1817,10 @@ export default function FechamentoDtView({
                         className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1.5 text-xs text-white focus:border-sky-500"
                       >
                         <option value="Todas">Todos os Fechamentos</option>
-                        <option value="Fechada Sem Vale">🟢 Fechada Sem Vale</option>
-                        <option value="Fechada Com Devolução">🟡 Fechada Com Devolução</option>
-                        <option value="Fechada Com Ocorrência">🟠 Fechada Com Ocorrência</option>
-                        <option value="Fechada Com Vale">🔴 Fechada Com Vale</option>
+                        <option value="Fechada Sem Vale">Fechada Sem Vale</option>
+                        <option value="Fechada Com Devolução">Fechada Com Devolução</option>
+                        <option value="Fechada Com Ocorrência">Fechada Com Ocorrência</option>
+                        <option value="Fechada Com Vale">Fechada Com Vale</option>
                       </select>
                     </div>
                   </div>
@@ -1749,16 +1849,12 @@ export default function FechamentoDtView({
                             const status = c.statusFechamento || "Fechada Sem Vale";
                             
                             let badgeClass = "bg-emerald-500/10 text-emerald-400 border border-emerald-500/25";
-                            let prefix = "🟢";
                             if (status === "Fechada Com Vale") {
                               badgeClass = "bg-rose-500/10 text-rose-400 border border-rose-500/25";
-                              prefix = "🔴";
                             } else if (status === "Fechada Com Ocorrência") {
                               badgeClass = "bg-orange-500/10 text-orange-400 border border-orange-500/25";
-                              prefix = "🟠";
                             } else if (status === "Fechada Com Devolução") {
                               badgeClass = "bg-amber-500/10 text-amber-400 border border-amber-500/25";
-                              prefix = "🟡";
                             }
 
                             return (
@@ -1769,7 +1865,7 @@ export default function FechamentoDtView({
                                 </td>
                                 <td className="p-3">
                                   <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold ${badgeClass}`}>
-                                    {prefix} {status}
+                                    {status}
                                   </span>
                                 </td>
                                 <td className="p-3 text-slate-400 max-w-[124px] truncate">{c.usuarioResponsavel?.split("@")[0] || "Sistema"}</td>
@@ -2595,6 +2691,180 @@ export default function FechamentoDtView({
                         )}
                       </div>
                     </div>
+
+                    {activeSearchedDt?.tipo?.toLowerCase() === "reentrega" && (
+                      <div className="bg-slate-950 p-5 border border-slate-850 rounded-xl space-y-4 text-left">
+                        <div className="border-b border-slate-900 pb-2 flex justify-between items-center">
+                          <h4 className="text-xs font-extrabold text-teal-400 uppercase tracking-wider font-mono flex items-center gap-2">
+                            <ShieldCheck className="w-4 h-4 text-teal-400" />
+                            🛡️ Validação Financeira da Reentrega
+                          </h4>
+                          <span className="text-[9px] bg-teal-955/20 text-teal-400 border border-teal-900/40 px-2 py-0.5 rounded font-mono uppercase font-bold animate-pulse">
+                            Validação Heineken Requerida
+                          </span>
+                        </div>
+
+                        <div className="space-y-3">
+                          <div className="space-y-1">
+                            <label className="text-xs font-extrabold text-white block">
+                              Esta reentrega já foi validada pela Heineken para cobrança do frete? <span className="text-red-500">*</span>
+                            </label>
+                            <p className="text-[10px] text-slate-500 leading-tight">
+                              Apenas reentregas validadas pela Heineken serão elegíveis para faturamento.
+                            </p>
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-2">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setReentregaValidada("Sim");
+                                if (!responsavelValidacao) {
+                                  setResponsavelValidacao(currentUser?.nome || userEmail || "Operador");
+                                }
+                              }}
+                              className={`py-1.5 px-3 text-xs font-bold rounded-lg border transition cursor-pointer uppercase ${
+                                reentregaValidada === "Sim"
+                                  ? "bg-teal-550/20 text-teal-400 border-teal-500 font-extrabold"
+                                  : "bg-slate-900 border-slate-800 text-slate-500 hover:text-slate-300"
+                              }`}
+                            >
+                              Sim
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setReentregaValidada("Não");
+                                setDocValidacaoUrl("");
+                                setDocValidacaoNome("");
+                                setDocValidacaoTipo("");
+                                setDocValidacaoDataUpload("");
+                              }}
+                              className={`py-1.5 px-3 text-xs font-bold rounded-lg border transition cursor-pointer uppercase ${
+                                reentregaValidada === "Não"
+                                  ? "bg-rose-500/10 text-rose-400 border-rose-500 font-extrabold"
+                                  : "bg-slate-900 border-slate-800 text-slate-500 hover:text-slate-300"
+                              }`}
+                            >
+                              Não
+                            </button>
+                          </div>
+
+                          {reentregaValidada === "Sim" ? (
+                            <div className="space-y-3 pt-3 border-t border-teal-950/40 animate-fadeIn text-xs">
+                              <div className="p-1.5 px-2 bg-teal-950/25 border border-teal-900/30 rounded text-[9px] text-teal-350 leading-normal font-mono font-bold text-center">
+                                ✅ INFORMAÇÕES DE VALIDAÇÃO FINANCEIRA
+                              </div>
+
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                <div className="space-y-1">
+                                  <label className="text-slate-400 font-mono text-[10px] uppercase block">
+                                    Data da Validação <span className="text-red-500">*</span>
+                                  </label>
+                                  <input
+                                    type="date"
+                                    value={dataValidacao}
+                                    onChange={(e) => setDataValidacao(e.target.value)}
+                                    className="w-full bg-slate-900 border border-slate-850 rounded px-2.5 py-1.5 text-white text-xs font-mono focus:border-teal-500 focus:outline-none"
+                                  />
+                                </div>
+                                <div className="space-y-1">
+                                  <label className="text-slate-400 font-mono text-[10px] uppercase block">
+                                    Responsável pela Validação <span className="text-red-500">*</span>
+                                  </label>
+                                  <input
+                                    type="text"
+                                    value={responsavelValidacao}
+                                    onChange={(e) => setResponsavelValidacao(e.target.value)}
+                                    className="w-full bg-slate-900 border border-slate-850 rounded px-2.5 py-1.5 text-white text-xs font-semibold focus:border-teal-500 focus:outline-none"
+                                    placeholder="Nome do responsável"
+                                  />
+                                </div>
+                              </div>
+
+                              <div className="space-y-1">
+                                <label className="text-slate-400 font-mono text-[10px] uppercase block">
+                                  Comprovante de Validação <span className="text-red-500">*</span>
+                                </label>
+                                <div className="border border-dashed border-slate-800 hover:border-teal-500 bg-slate-900/60 hover:bg-slate-900 rounded-lg p-4 text-center transition cursor-pointer relative">
+                                  <input
+                                    type="file"
+                                    accept="image/*,application/pdf"
+                                    onChange={(e) => {
+                                      if (e.target.files && e.target.files.length > 0) {
+                                        const file = e.target.files[0];
+                                        const reader = new FileReader();
+                                        reader.onload = (event) => {
+                                          const base64Url = event.target?.result as string;
+                                          if (!base64Url) return;
+                                          
+                                          let tipo = "OUTROS";
+                                          if (file.type.includes("pdf") || file.name.toLowerCase().endsWith(".pdf")) tipo = "PDF";
+                                          else if (file.type.includes("image") || file.name.toLowerCase().endsWith(".png") || file.name.toLowerCase().endsWith(".jpg") || file.name.toLowerCase().endsWith(".jpeg")) tipo = "IMAGEM";
+
+                                          setDocValidacaoUrl(base64Url);
+                                          setDocValidacaoNome(file.name);
+                                          setDocValidacaoTipo(tipo);
+                                          setDocValidacaoDataUpload(new Date().toISOString());
+                                        };
+                                        reader.readAsDataURL(file);
+                                      }
+                                    }}
+                                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                                  />
+                                  <div className="space-y-1">
+                                    <p className="text-[11px] text-slate-300 font-bold">
+                                      Clique para selecionar ou arraste o comprovante
+                                    </p>
+                                    <p className="text-[9px] text-slate-500">PDF, PNG, JPG ou JPEG</p>
+                                  </div>
+                                </div>
+
+                                {docValidacaoNome && (
+                                  <div className="mt-2 bg-slate-900 border border-slate-850 p-2 rounded flex items-center justify-between text-xs font-mono">
+                                    <div className="flex items-center gap-1.5 truncate max-w-[250px]">
+                                      <FileText className="w-3.5 h-3.5 text-teal-400 flex-shrink-0" />
+                                      <span className="text-slate-300 truncate" title={docValidacaoNome}>
+                                        {docValidacaoNome}
+                                      </span>
+                                    </div>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setDocValidacaoUrl("");
+                                        setDocValidacaoNome("");
+                                        setDocValidacaoTipo("");
+                                        setDocValidacaoDataUpload("");
+                                      }}
+                                      className="text-red-400 hover:text-red-300 px-1 py-0.5 rounded transition font-bold cursor-pointer font-mono text-[10px]"
+                                    >
+                                      Remover
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+
+                              <div className="space-y-1">
+                                <label className="text-slate-400 font-mono text-[10px] uppercase block">Observações (Opcional)</label>
+                                <textarea
+                                  value={observacoesValidacao}
+                                  onChange={(e) => setObservacoesValidacao(e.target.value)}
+                                  className="w-full bg-slate-900 border border-slate-850 rounded px-2.5 py-1.5 text-white text-xs h-16 resize-none focus:border-teal-500 focus:outline-none"
+                                  placeholder="Observações adicionais sobre a autorização..."
+                                />
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-lg space-y-1 animate-fadeIn">
+                              <span className="text-[10px] font-bold text-amber-400 font-mono uppercase block">⚠️ Reentrega Não Validada</span>
+                              <p className="text-[10px] text-amber-300 leading-normal">
+                                O status desta reentrega será definido como <strong className="text-amber-200">PENDENTE DE VALIDAÇÃO</strong>. O faturamento estará suspenso até que a autorização seja obtida.
+                              </p>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
 
                     {/* Acerto Financeiro Integrado (FASE 5 Update) */}
                     <div className="bg-slate-950 p-5 border border-slate-850 rounded-xl space-y-4">
@@ -3680,6 +3950,86 @@ export default function FechamentoDtView({
                   <p className="text-slate-500 italic text-[11px] py-4 text-center">Nenhum recibo de descarga associado.</p>
                 )}
               </div>
+
+              {/* Validação Financeira de Reentregas */}
+              {(() => {
+                const rObj = rotas.find(r => r.dt === selectedClosureForDetails.dt);
+                const showValidation = selectedClosureForDetails.status_validacao || rObj?.tipo?.toLowerCase() === "reentrega";
+                if (!showValidation) return null;
+
+                const isValidated = selectedClosureForDetails.reentrega_validada || selectedClosureForDetails.status_validacao === "VALIDADA";
+                
+                return (
+                  <div className="col-span-1 md:col-span-2 bg-slate-950 p-4 rounded-xl border border-slate-850 space-y-2 text-left">
+                    <h4 className="font-bold text-white uppercase font-mono text-[10px] tracking-wider border-b border-slate-850 pb-1 flex items-center justify-between gap-1.5">
+                      <span className="flex items-center gap-1.5">
+                        <ShieldCheck className="w-3.5 h-3.5 text-teal-400" /> Validação Financeira da Reentrega
+                      </span>
+                      <span className={`px-2 py-0.5 rounded-full text-[9px] font-mono font-bold uppercase ${isValidated ? "bg-teal-500/10 text-teal-400 border border-teal-500/20" : "bg-amber-500/10 text-amber-400 border border-amber-500/20 animate-pulse"}`}>
+                        {selectedClosureForDetails.status_validacao || (isValidated ? "VALIDADA" : "PENDENTE DE VALIDAÇÃO")}
+                      </span>
+                    </h4>
+
+                    {isValidated ? (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs pt-1.5">
+                        <div>
+                          <span className="text-[10px] text-slate-500 block">Status de Validação</span>
+                          <strong className="text-teal-400 font-extrabold">AUTORIZADO PELA HEINEKEN</strong>
+                        </div>
+                        <div>
+                          <span className="text-[10px] text-slate-500 block">Data da Validação</span>
+                          <strong className="text-slate-200">{selectedClosureForDetails.data_validacao || selectedClosureForDetails.dataFechamento}</strong>
+                        </div>
+                        <div>
+                          <span className="text-[10px] text-slate-500 block">Responsável</span>
+                          <strong className="text-slate-200">{selectedClosureForDetails.responsavel_validacao || "Não informado"}</strong>
+                        </div>
+                        <div>
+                          <span className="text-[10px] text-slate-500 block">Comprovante de Validação</span>
+                          {selectedClosureForDetails.documento_validacao_url ? (
+                            <div className="flex items-center gap-1.5 mt-1">
+                              <FileText className="w-3.5 h-3.5 text-teal-400" />
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (selectedClosureForDetails.documento_validacao_url) {
+                                    const attachmentId = selectedClosureForDetails.documento_validacao_url.split("/").pop();
+                                    const fauxAnx = {
+                                      id: attachmentId,
+                                      nome: selectedClosureForDetails.documento_validacao_nome || "comprovante_validacao",
+                                      tipo: selectedClosureForDetails.documento_validacao_tipo || "PDF",
+                                      url: selectedClosureForDetails.documento_validacao_url
+                                    };
+                                    handleViewAttachment(fauxAnx);
+                                  }
+                                }}
+                                className="text-teal-400 hover:text-teal-300 font-semibold underline text-[11px] text-left cursor-pointer"
+                              >
+                                {selectedClosureForDetails.documento_validacao_nome || "Visualizar Comprovante"}
+                              </button>
+                            </div>
+                          ) : (
+                            <span className="text-slate-500 italic">Não anexado</span>
+                          )}
+                        </div>
+                        {selectedClosureForDetails.observacoes_validacao && (
+                          <div className="col-span-1 sm:col-span-2">
+                            <span className="text-[10px] text-slate-500 block">Observações da Validação</span>
+                            <p className="text-slate-300 leading-normal bg-slate-900/50 p-2 rounded border border-slate-850 mt-1">{selectedClosureForDetails.observacoes_validacao}</p>
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-lg space-y-1 mt-1.5">
+                        <span className="text-[10px] font-bold text-amber-400 font-mono uppercase block">Pendente de Autorização Heineken</span>
+                        <p className="text-[10px] text-amber-300 leading-normal">
+                          Esta reentrega foi fechada, mas ainda não possui a validação financeira da Heineken para cobrança do frete. O faturamento está suspenso.
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
             </div>
 
             {/* FINANCEIRO */}

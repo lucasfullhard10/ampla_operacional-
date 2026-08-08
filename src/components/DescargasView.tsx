@@ -271,7 +271,7 @@ export default function DescargasView({
       if (response.ok) {
         setNotification({
           type: "success",
-          message: "✅ Recibo de descarga excluído permanentemente!\nA ação foi registrada com sucesso no relatório de auditoria do sistema."
+          message: "Recibo de descarga excluído permanentemente!\nA ação foi registrada com sucesso no relatório de auditoria do sistema."
         });
         setDeletingItem(null);
         onRefresh();
@@ -298,7 +298,7 @@ export default function DescargasView({
     if (!dtVerification.found || !dtVerification.info) {
       setNotification({
         type: "error",
-        message: "SALVAMENTO BLOQUEADO\n\n❌ DT NÃO ENCONTRADA\nA DT informada não está cadastrada no sistema. Verifique o número informado antes de continuar."
+        message: "SALVAMENTO BLOQUEADO\n\nDT NÃO ENCONTRADA\nA DT informada não está cadastrada no sistema. Verifique o número informado antes de continuar."
       });
       return;
     }
@@ -341,8 +341,8 @@ export default function DescargasView({
         setNotification({
           type: "success",
           message: editingItem 
-            ? "✅ Transação e relatório financeiro atualizados com sucesso!"
-            : "✅ Recibo lançado e computado com sucesso!"
+            ? "Transação e relatório financeiro atualizados com sucesso!"
+            : "Recibo lançado e computado com sucesso!"
         });
         setIsAdding(false);
         setEditingItem(null);
@@ -351,14 +351,14 @@ export default function DescargasView({
         const error = await res.json();
         setNotification({
           type: "error",
-          message: `❌ Falha ao processar solicitação: ${error.error || "Operação recusada."}`
+          message: `Falha ao processar solicitação: ${error.error || "Operação recusada."}`
         });
       }
     } catch (err) {
       console.error(err);
       setNotification({
         type: "error",
-        message: "❌ Falha operacional de conexão com o banco de dados."
+        message: "Falha operacional de conexão com o banco de dados."
       });
     }
   };
@@ -421,7 +421,7 @@ export default function DescargasView({
             <div className="flex justify-between items-center border-b border-slate-800 pb-2">
               <h3 className="text-sm font-semibold text-white flex items-center gap-1.5">
                 <FileText className="w-4 h-4 text-sky-400" />
-                {editingItem ? "✏️ Editar Recibo Cadastrado" : "Lançar Despesa Chapa"}
+                {editingItem ? "Editar Recibo Cadastrado" : "Lançar Despesa Chapa"}
               </h3>
               <button 
                 onClick={() => {
@@ -497,7 +497,7 @@ export default function DescargasView({
                     <div className="bg-emerald-950/20 border-emerald-900/30 text-emerald-400 space-y-1">
                       <div className="flex items-center gap-1 font-bold text-xs">
                         <CheckSquare className="w-4 h-4 text-emerald-400" />
-                        <span>✅ DT Encontrada ({dtVerification.info.type})</span>
+                        <span>DT Encontrada ({dtVerification.info.type})</span>
                       </div>
                       <div className="grid grid-cols-2 gap-x-2 gap-y-0.5 text-[10px] font-mono text-slate-300 mt-1">
                         <div><span className="text-slate-500">Mot:</span> {dtVerification.info.motoristaNome}</div>
@@ -510,7 +510,7 @@ export default function DescargasView({
                     <div className="bg-rose-950/20 border-rose-900/30 text-rose-400 space-y-1 p-1">
                       <div className="flex items-center gap-1 font-bold">
                         <AlertTriangle className="w-3.5 h-3.5" />
-                        <span>❌ DT NÃO ENCONTRADA</span>
+                        <span>DT NÃO ENCONTRADA</span>
                       </div>
                       <p className="text-[10px] text-slate-400 font-sans leading-relaxed">
                         A DT informada não existe em nenhum módulo do sistema. Verifique o número informado. O salvamento permanecerá bloqueado.
@@ -797,7 +797,7 @@ export default function DescargasView({
               onClick={() => {
                 setNotification({
                   type: "success",
-                  message: "✅ Cópia oficial do recibo de chapa obtida com sucesso!"
+                  message: "Cópia oficial do recibo de chapa obtida com sucesso!"
                 });
               }}
               className="w-full py-1.5 bg-slate-950 border border-slate-800 text-white rounded text-xs hover:bg-slate-850"

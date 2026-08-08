@@ -4,7 +4,7 @@ import {
   SlidersHorizontal, CheckCircle2, AlertTriangle, Clock, PlayCircle, Eye,
   Trash2, X, PlusCircle, Paperclip, Send, Bell, Check, Edit2, Archive,
   LayoutGrid, BarChart2, Building, User, Users, FileText, Share2, HelpCircle,
-  UserPlus
+  UserPlus, Settings, MessageSquare
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { 
@@ -997,13 +997,13 @@ export default function CentralProcessos({ currentUser, unidades }: CentralProce
                 onClick={() => setShowNewCatInput(!showNewCatInput)}
                 className="text-[11px] font-medium text-indigo-400 hover:text-indigo-300 hover:underline flex items-center gap-1 transition-colors"
               >
-                ⚙️ Criar Categoria
+                <Settings className="w-3 h-3" /> Criar Categoria
               </button>
               <button 
                 onClick={() => setShowNewColInput(!showNewColInput)}
                 className="text-[11px] font-medium text-emerald-400 hover:text-emerald-300 hover:underline flex items-center gap-1 transition-colors"
               >
-                ⚙️ Criar Coluna Kanban
+                <Settings className="w-3 h-3" /> Criar Coluna Kanban
               </button>
             </div>
           )}
@@ -1066,7 +1066,7 @@ export default function CentralProcessos({ currentUser, unidades }: CentralProce
                 type="text" 
                 value={newColName}
                 onChange={e => setNewColName(e.target.value)}
-                placeholder="Ex: 🔧 Oficina" 
+                placeholder="Ex: Oficina" 
                 className="mt-1 w-full bg-[#0F172A] border border-[#334155] hover:border-[#3B82F6] focus:border-[#2563EB] focus:ring-2 focus:ring-[#2563EB]/25 text-white font-medium placeholder-[#94A3B8] rounded-md p-2.5 text-xs transition-all duration-200 outline-none"
               />
             </div>
@@ -1122,10 +1122,10 @@ export default function CentralProcessos({ currentUser, unidades }: CentralProce
               className="w-full bg-[#0F172A] border border-[#334155] hover:border-[#3B82F6] focus:border-[#2563EB] focus:ring-2 focus:ring-[#2563EB]/25 text-white font-medium rounded-lg p-2.5 text-xs transition-all duration-200 outline-none"
             >
               <option value="all" className="bg-[#0F172A] text-white">Todas Prioridades</option>
-              <option value="Baixa" className="bg-[#0F172A] text-white">🟢 Baixa</option>
-              <option value="Média" className="bg-[#0F172A] text-white">🔵 Média</option>
-              <option value="Alta" className="bg-[#0F172A] text-white">🟡 Alta</option>
-              <option value="Crítica" className="bg-[#0F172A] text-white">🔴 Crítica</option>
+              <option value="Baixa" className="bg-[#0F172A] text-white">Baixa</option>
+              <option value="Média" className="bg-[#0F172A] text-white">Média</option>
+              <option value="Alta" className="bg-[#0F172A] text-white">Alta</option>
+              <option value="Crítica" className="bg-[#0F172A] text-white">Crítica</option>
             </select>
           </div>
 
@@ -1154,7 +1154,7 @@ export default function CentralProcessos({ currentUser, unidades }: CentralProce
             className="rounded border-[#334155] text-[#2563EB] focus:ring-[#2563EB] bg-[#0F172A] cursor-pointer"
           />
           <label htmlFor="assignedToMeOnly" className="cursor-pointer font-semibold select-none text-slate-300 hover:text-white transition-colors">
-            👤 Mostrar apenas tarefas que sou participante ou responsável principal
+            Mostrar apenas tarefas que sou participante ou responsável principal
           </label>
         </div>
       </div>
@@ -1339,10 +1339,10 @@ export default function CentralProcessos({ currentUser, unidades }: CentralProce
                       onChange={e => setNewProcesso({ ...newProcesso, prioridade: e.target.value as any })}
                       className="mt-1 w-full bg-[#0F172A] border border-[#334155] hover:border-[#3B82F6] focus:border-[#2563EB] focus:ring-2 focus:ring-[#2563EB]/25 text-white font-medium rounded-md p-2.5 text-xs transition-all duration-200 outline-none"
                     >
-                      <option value="Baixa" className="bg-[#0F172A] text-white">🟢 Baixa</option>
-                      <option value="Média" className="bg-[#0F172A] text-white">🔵 Média</option>
-                      <option value="Alta" className="bg-[#0F172A] text-white">🟡 Alta</option>
-                      <option value="Crítica" className="bg-[#0F172A] text-white">🔴 Crítica</option>
+                      <option value="Baixa" className="bg-[#0F172A] text-white">Baixa</option>
+                      <option value="Média" className="bg-[#0F172A] text-white">Média</option>
+                      <option value="Alta" className="bg-[#0F172A] text-white">Alta</option>
+                      <option value="Crítica" className="bg-[#0F172A] text-white">Crítica</option>
                     </select>
                   </div>
 
@@ -1421,7 +1421,7 @@ export default function CentralProcessos({ currentUser, unidades }: CentralProce
                           }}
                           className="text-indigo-400 hover:text-indigo-300 font-medium transition"
                         >
-                          ✓ Selecionar Todos
+                          Selecionar Todos
                         </button>
                         <span className="text-[#334155]">|</span>
                         <button
@@ -1431,7 +1431,7 @@ export default function CentralProcessos({ currentUser, unidades }: CentralProce
                           }}
                           className="text-rose-400 hover:text-rose-300 font-medium transition"
                         >
-                          ✕ Limpar
+                          Limpar
                         </button>
                         <span className="text-[#334155]">|</span>
                         <button
@@ -1445,7 +1445,7 @@ export default function CentralProcessos({ currentUser, unidades }: CentralProce
                           }}
                           className="text-sky-400 hover:text-sky-300 font-medium transition"
                         >
-                          🏬 Mesma Filial
+                          Mesma Filial
                         </button>
                       </div>
                     </div>
@@ -1504,7 +1504,7 @@ export default function CentralProcessos({ currentUser, unidades }: CentralProce
                           onChange={e => setNewProcesso({ ...newProcesso, compartilharGeral: e.target.checked })}
                           className="rounded border-[#334155] text-[#2563EB] focus:ring-[#2563EB] bg-[#0F172A] cursor-pointer"
                         />
-                        <label htmlFor="shareGeral" className="font-semibold text-slate-200 cursor-pointer">🌍 Compartilhar com todas as filiais e Masters simultaneamente</label>
+                        <label htmlFor="shareGeral" className="font-semibold text-slate-200 cursor-pointer">Compartilhar com todas as filiais e Masters simultaneamente</label>
                       </div>
 
                       <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mt-1.5">
@@ -1691,7 +1691,7 @@ export default function CentralProcessos({ currentUser, unidades }: CentralProce
                       <div className="flex flex-wrap gap-1 mt-1">
                         {selectedProcesso.unidadesCompartilhadas.map(unId => (
                           <span key={unId} className="text-[10px] bg-slate-800 text-slate-200 font-semibold px-2 py-0.5 rounded">
-                            {unId === "Todas" ? "🌍 Todas Filiais" : (unidadesList.find(u => u.id === unId)?.cidade || unId)}
+                            {unId === "Todas" ? "Todas Filiais" : (unidadesList.find(u => u.id === unId)?.cidade || unId)}
                           </span>
                         ))}
                       </div>
@@ -1852,7 +1852,7 @@ export default function CentralProcessos({ currentUser, unidades }: CentralProce
                           }}
                           className="w-full bg-[#131B2E] border border-slate-700 hover:border-slate-600 rounded px-2 py-1 text-[10px] text-slate-300 focus:border-indigo-500 font-semibold cursor-pointer outline-none"
                         >
-                          <option value="">➕ Adicionar participante...</option>
+                          <option value="">+ Adicionar participante...</option>
                           {participantesDisponiveis
                             .filter(u => 
                               u.email.toLowerCase() !== selectedProcesso.responsavel?.toLowerCase() &&
@@ -1930,8 +1930,9 @@ export default function CentralProcessos({ currentUser, unidades }: CentralProce
 
                 {/* Real-time Collaboration Comments Block */}
                 <div className="space-y-3.5 border-t border-[#334155] pt-4">
-                  <h4 className="text-xs font-semibold text-slate-405 uppercase tracking-wide flex items-center gap-1">
-                    💬 Comentários e Alinhamentos ({comentarios.length})
+                  <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wide flex items-center gap-1.5">
+                    <MessageSquare className="w-3.5 h-3.5 text-indigo-400" />
+                    Comentários e Alinhamentos ({comentarios.length})
                   </h4>
 
                   {/* Comment list */}
@@ -2086,8 +2087,9 @@ export default function CentralProcessos({ currentUser, unidades }: CentralProce
               </div>
               
               <div className="space-y-2 bg-[#0F172A] border border-slate-800 rounded-lg p-3.5 text-xs text-slate-350">
-                <p className="font-semibold text-amber-440 flex items-center gap-1.5">
-                  ⚠️ O usuário não possui acesso ao processo.
+                <p className="font-semibold text-amber-400 flex items-center gap-1.5">
+                  <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+                  O usuário não possui acesso ao processo.
                 </p>
                 <p className="text-slate-300 font-medium mt-1">
                   Membro: <span className="text-slate-100 font-bold">{mentionPrompt.user.nome || mentionPrompt.user.email}</span>

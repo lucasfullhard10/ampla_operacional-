@@ -1,7 +1,8 @@
 import React, { useState, useMemo } from "react";
 import { 
   Plus, Search, ShieldAlert, Archive, FileText, ArrowRight, User, 
-  RefreshCw, TrendingUp, AlertTriangle, Layers, DollarSign, Calendar, Info, Bell, Tag 
+  RefreshCw, TrendingUp, AlertTriangle, Layers, DollarSign, Calendar, Info, Bell, Tag,
+  ArrowDownRight, ArrowUpRight, RotateCcw, AlertOctagon, Sliders
 } from "lucide-react";
 import { EstoqueEpi, MovimentacaoEpi, Motorista } from "../types";
 import { NotificationModal, ConfirmModal, NotificationType, ConfirmType } from "./NotificationModal";
@@ -33,7 +34,7 @@ export default function EpiView({ estoque, movimentacoes, motoristas, onRefresh,
   const [epiQtdInicial, setEpiQtdInicial] = useState<number>(0);
   const [epiEstoqueMinimo, setEpiEstoqueMinimo] = useState<number>(5);
   const [epiValorUnitario, setEpiValorUnitario] = useState<number>(0);
-  const [epiDataCompra, setEpiDataCompra] = useState("2026-06-14");
+  const [epiDataCompra, setEpiDataCompra] = useState(() => new Date().toISOString().split("T")[0]);
   const [epiFornecedor, setEpiFornecedor] = useState("");
   const [epiObservacoes, setEpiObservacoes] = useState("");
 
@@ -43,7 +44,7 @@ export default function EpiView({ estoque, movimentacoes, motoristas, onRefresh,
   const [movQuantidade, setMovQuantidade] = useState<number>(1);
   const [movRecebedor, setMovRecebedor] = useState("");
   const [movMotoristaId, setMovMotoristaId] = useState("");
-  const [movData, setMovData] = useState("2026-06-14");
+  const [movData, setMovData] = useState(() => new Date().toISOString().split("T")[0]);
   const [movMotivo, setMovMotivo] = useState("");
 
   const [loading, setLoading] = useState(false);
@@ -398,7 +399,7 @@ export default function EpiView({ estoque, movimentacoes, motoristas, onRefresh,
                 onClick={() => setIsAddingNewEpi(false)}
                 className="text-xs text-slate-400 hover:text-white font-mono"
               >
-                Fechar Form (✕)
+                Fechar Form
               </button>
             </div>
 
@@ -602,7 +603,7 @@ export default function EpiView({ estoque, movimentacoes, motoristas, onRefresh,
                 onClick={() => setIsAddingMovement(false)}
                 className="text-xs text-slate-400 hover:text-white font-mono"
               >
-                Fechar Form (✕)
+                Fechar Form
               </button>
             </div>
 
@@ -808,7 +809,7 @@ export default function EpiView({ estoque, movimentacoes, motoristas, onRefresh,
                     <div className="flex flex-col items-end gap-1.5">
                       <span className="px-2 py-0.5 text-[9px] rounded font-bold font-mono bg-rose-500/20 text-rose-400 flex items-center gap-1 uppercase tracking-wide border border-rose-500/10">
                         <AlertTriangle className="w-3 h-3 text-rose-400 animate-bounce" />
-                        ⚠ Estoque Baixo
+                        Estoque Baixo
                       </span>
                       
                       <button
@@ -880,35 +881,35 @@ export default function EpiView({ estoque, movimentacoes, motoristas, onRefresh,
                     const norm = (tipo || "Saída").toLowerCase().trim();
                     if (norm === "entrada") {
                       return (
-                        <span className="px-2 py-0.5 rounded text-[9px] font-mono font-bold bg-emerald-500/10 text-emerald-400 uppercase tracking-wide border border-emerald-500/10">
-                          📥 Entrada
+                        <span className="px-2 py-0.5 rounded text-[9px] font-mono font-bold bg-emerald-500/10 text-emerald-400 uppercase tracking-wide border border-emerald-500/10 flex items-center justify-center gap-1">
+                          <ArrowDownRight className="w-3 h-3 shrink-0" /> Entrada
                         </span>
                       );
                     }
                     if (norm === "devolução" || norm === "devolucao") {
                       return (
-                        <span className="px-2 py-0.5 rounded text-[9px] font-mono font-bold bg-blue-500/10 text-blue-400 uppercase tracking-wide border border-blue-500/10">
-                          🔄 Devolução
+                        <span className="px-2 py-0.5 rounded text-[9px] font-mono font-bold bg-blue-500/10 text-blue-400 uppercase tracking-wide border border-blue-500/10 flex items-center justify-center gap-1">
+                          <RotateCcw className="w-3 h-3 shrink-0" /> Devolução
                         </span>
                       );
                     }
                     if (norm === "perda") {
                       return (
-                        <span className="px-2 py-0.5 rounded text-[9px] font-mono font-bold bg-amber-500/10 text-amber-500 uppercase tracking-wide border border-amber-500/10">
-                          💥 Perda
+                        <span className="px-2 py-0.5 rounded text-[9px] font-mono font-bold bg-amber-500/10 text-amber-500 uppercase tracking-wide border border-amber-500/10 flex items-center justify-center gap-1">
+                          <AlertOctagon className="w-3 h-3 shrink-0" /> Perda
                         </span>
                       );
                     }
                     if (norm === "ajuste") {
                       return (
-                        <span className="px-2 py-0.5 rounded text-[9px] font-mono font-bold bg-indigo-500/10 text-indigo-400 uppercase tracking-wide border border-indigo-500/10">
-                          ⚙ Ajuste
+                        <span className="px-2 py-0.5 rounded text-[9px] font-mono font-bold bg-indigo-500/10 text-indigo-400 uppercase tracking-wide border border-indigo-500/10 flex items-center justify-center gap-1">
+                          <Sliders className="w-3 h-3 shrink-0" /> Ajuste
                         </span>
                       );
                     }
                     return (
-                      <span className="px-2 py-0.5 rounded text-[9px] font-mono font-bold bg-rose-500/10 text-rose-450 uppercase tracking-wide border border-rose-500/10">
-                        📤 Saída
+                      <span className="px-2 py-0.5 rounded text-[9px] font-mono font-bold bg-rose-500/10 text-rose-450 uppercase tracking-wide border border-rose-500/10 flex items-center justify-center gap-1">
+                        <ArrowUpRight className="w-3 h-3 shrink-0" /> Saída
                       </span>
                     );
                   };
