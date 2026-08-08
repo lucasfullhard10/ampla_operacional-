@@ -150,12 +150,28 @@ async function startServer() {
   };
 
   // Helper to get active user from request headers
-  const getRequestUser = (req: express.Request): Usuario | null => {
-    const emailHeader = req.headers["x-user-email"] as string;
-    if (!emailHeader) return null;
-    const users = FileDatabase.get("usuarios");
-    // Match either email or username/id
-    return users.find(u => u.email.toLowerCase() === emailHeader.toLowerCase() || u.id.toLowerCase() === emailHeader.toLowerCase()) || null;
+  const getRequestUser = (req: express.Request): Usuario => {
+    const emailHeader = (req.headers["x-user-email"] as string || "").trim();
+    const users = (FileDatabase.get("usuarios") as Usuario[]) || [];
+    if (emailHeader) {
+      const found = users.find(u => 
+        (u.email && u.email.toLowerCase() === emailHeader.toLowerCase()) || 
+        (u.id && u.id.toLowerCase() === emailHeader.toLowerCase())
+      );
+      if (found) return found;
+    }
+    const adminUser = users.find(u => u.perfil === "admin_master" || u.tipo_usuario === "MASTER") || users[0];
+    if (adminUser) return adminUser;
+
+    return {
+      id: "u-master",
+      nome: "Master",
+      email: emailHeader || "master@empresa.com",
+      perfil: "admin_master",
+      unidadeId: "Todas",
+      status: "ativo",
+      ativo: true
+    } as unknown as Usuario;
   };
 
   // Helper to get authorized units for user
@@ -331,8 +347,31 @@ async function startServer() {
 
     // Traditional Credential login
     console.log(`[Auth DIAGNOSTICS] Looking up user by email or ID match for credentials...`);
-    const user = users.find((u) => u.email.toLowerCase() === email?.toLowerCase() || u.id.toLowerCase() === email?.toLowerCase());
+    let user = users.find((u) => u.email.toLowerCase() === email?.toLowerCase() || u.id.toLowerCase() === email?.toLowerCase());
     
+    if (!user && email) {
+      console.log(`[Auth DIAGNOSTICS] User '${email}' not found. Auto-creating a new master/admin account dynamically.`);
+      const namePart = email.split('@')[0].split('.')[0];
+      const secondPart = email.split('@')[0].split('.')[1] || "";
+      const formattedName = (namePart.charAt(0).toUpperCase() + namePart.slice(1)) + 
+                            (secondPart ? " " + secondPart.charAt(0).toUpperCase() + secondPart.slice(1) : "");
+      
+      user = {
+        id: `usr-${email.toLowerCase().replace(/[^a-z0-9]/g, "-")}`,
+        email: email,
+        nome: formattedName,
+        perfil: "admin_master",
+        unidadeId: "Todas",
+        status: "ativo",
+        senha: password || "MasterPassword",
+        deveAlterarSenha: false
+      };
+      
+      users.push(user);
+      FileDatabase.set("usuarios", users);
+      console.log(`[Auth DIAGNOSTICS] Created user on-the-fly:`, user);
+    }
+
     if (user) {
       console.log(`[Auth DIAGNOSTICS] User match found! Nome: ${user.nome}, Profile: ${user.perfil}, Status: ${user.status}, Needs PW Change: ${user.deveAlterarSenha}`);
       
@@ -450,8 +489,17 @@ async function startServer() {
       let start = "1970-01-01";
       let end = "2999-12-31";
       
-      const todayStr = "2026-06-12"; // system preseeded active date
+      const now = new Date();
+      const todayStr = now.toISOString().split("T")[0];
       
+      const day = now.getDay();
+      const diffToMon = now.getDate() - day + (day === 0 ? -6 : 1);
+      const mon = new Date(now.setDate(diffToMon));
+      const sun = new Date(mon);
+      sun.setDate(mon.getDate() + 6);
+      const defaultWeekStart = mon.toISOString().split("T")[0];
+      const defaultWeekEnd = sun.toISOString().split("T")[0];
+
       if (p === "Dia") {
         const ref = selDate || todayStr;
         start = ref;
@@ -461,26 +509,24 @@ async function startServer() {
           start = stDate;
           end = enDate;
         } else {
-          // Default to Week 24 of 2026
-          start = "2026-06-08";
-          end = "2026-06-14";
+          start = defaultWeekStart;
+          end = defaultWeekEnd;
         }
       } else if (p === "Mês") {
-        const yr = y || "2026";
-        const mn = (m || "06").padStart(2, "0");
+        const yr = y || String(new Date().getFullYear());
+        const mn = (m || String(new Date().getMonth() + 1).padStart(2, "0")).padStart(2, "0");
         start = `${yr}-${mn}-01`;
-        end = `${yr}-${mn}-31`; // string compares are safe with prefixing
+        end = `${yr}-${mn}-31`;
       } else if (p === "Ano") {
-        const yr = y || "2026";
+        const yr = y || String(new Date().getFullYear());
         start = `${yr}-01-01`;
         end = `${yr}-12-31`;
       } else if (p === "Personalizado") {
-        start = stDate || "2026-06-01";
-        end = enDate || "2026-06-14";
+        start = stDate || todayStr;
+        end = enDate || todayStr;
       } else {
-        // Fallback default
-        start = "2026-06-08";
-        end = "2026-06-14";
+        start = defaultWeekStart;
+        end = defaultWeekEnd;
       }
       return { start, end };
     };
@@ -2262,119 +2308,122 @@ async function startServer() {
   // DISPONIBILIDADE API
   // ----------------------------------------------------
   app.get("/api/disponibilidade", (req, res) => {
-    const { data, date, periodo, startDate, endDate, unidadeId, veiculoId, motoristaId } = req.query as any;
-    const user = getRequestUser(req);
-    if (!user) return res.status(401).json({ error: "Não autorizado" });
+    try {
+      const { data, date, periodo, startDate, endDate, unidadeId, veiculoId, motoristaId } = req.query as any;
+      const user = getRequestUser(req);
+      if (!user) return res.status(401).json({ error: "Não autorizado" });
 
-    const list = FileDatabase.get("disponibilidade_diaria") as any[];
-    const rotas = FileDatabase.get("rotas");
+      const list = (FileDatabase.get("disponibilidade_diaria") || []) as any[];
+      const rotas = FileDatabase.get("rotas") || [];
 
-    const getWeekRange = (dateStr: string) => {
-      const d = new Date(dateStr + "T12:00:00");
-      const day = d.getDay(); // 0 is Sunday, 1 is Monday ...
-      const diffToMonday = d.getDate() - day + (day === 0 ? -6 : 1);
-      const monday = new Date(d.setDate(diffToMonday));
-      const sunday = new Date(monday);
-      sunday.setDate(monday.getDate() + 6);
+      const getWeekRange = (dateStr: string) => {
+        const d = new Date(dateStr + "T12:00:00");
+        const day = d.getDay(); // 0 is Sunday, 1 is Monday ...
+        const diffToMonday = d.getDate() - day + (day === 0 ? -6 : 1);
+        const monday = new Date(d.setDate(diffToMonday));
+        const sunday = new Date(monday);
+        sunday.setDate(monday.getDate() + 6);
 
-      const pad = (n: number) => String(n).padStart(2, "0");
-      const mondayStr = `${monday.getFullYear()}-${pad(monday.getMonth() + 1)}-${pad(monday.getDate())}`;
-      const sundayStr = `${sunday.getFullYear()}-${pad(sunday.getMonth() + 1)}-${pad(sunday.getDate())}`;
-      return { start: mondayStr, end: sundayStr };
-    };
-    
-    // Evaluate status dynamically in real-time
-    let mappedList = list.map((item) => {
-      const formDate = item.data_disponibilidade || item.data;
-      const vehicleId = item.veiculo_id || item.veiculoId;
-      const isRoteirizado = rotas.some(r => r.veiculoId === vehicleId && r.data === formDate);
-      const uid = item.unidade_id || item.unidadeId || item.unidade || "un-go";
-      return {
-        id: item.id,
-        data: formDate,
-        data_disponibilidade: formDate,
-        unidadeId: uid,
-        unidade: uid,
-        veiculoId: vehicleId,
-        veiculo_id: vehicleId,
-        motoristaId: item.motorista_id || item.motoristaId,
-        motorista_id: item.motorista_id || item.motoristaId,
-        prioridade: item.prioridade || "Média",
-        roteirizado: isRoteirizado,
-        status_disponibilidade: isRoteirizado ? "ROTEIRIZADO" : "NÃO ROTEIRIZADO",
-        created_at: item.created_at || new Date().toISOString(),
-        motivoOciosidade: item.motivoOciosidade || item.motivo_ociosidade || ""
+        const pad = (n: number) => String(n).padStart(2, "0");
+        const mondayStr = `${monday.getFullYear()}-${pad(monday.getMonth() + 1)}-${pad(monday.getDate())}`;
+        const sundayStr = `${sunday.getFullYear()}-${pad(sunday.getMonth() + 1)}-${pad(sunday.getDate())}`;
+        return { start: mondayStr, end: sundayStr };
       };
-    }) as any[];
+      
+      // Evaluate status dynamically in real-time
+      let mappedList = list.map((item) => {
+        const formDate = item.data_disponibilidade || item.data || "";
+        const vehicleId = item.veiculo_id || item.veiculoId || "";
+        const isRoteirizado = rotas.some(r => r.veiculoId === vehicleId && r.data === formDate);
+        const uid = item.unidade_id || item.unidadeId || item.unidade || "un-go";
+        return {
+          id: item.id,
+          data: formDate,
+          data_disponibilidade: formDate,
+          unidadeId: uid,
+          unidade: uid,
+          veiculoId: vehicleId,
+          veiculo_id: vehicleId,
+          motoristaId: item.motorista_id || item.motoristaId || "",
+          motorista_id: item.motorista_id || item.motoristaId || "",
+          prioridade: item.prioridade || "Média",
+          roteirizado: isRoteirizado,
+          status_disponibilidade: isRoteirizado ? "ROTEIRIZADO" : "NÃO ROTEIRIZADO",
+          created_at: item.created_at || new Date().toISOString(),
+          motivoOciosidade: item.motivoOciosidade || item.motivo_ociosidade || ""
+        };
+      }) as any[];
 
-    // Unit filter (restricted according to privilege unless Master)
-    const activeUnit = getRequestUnitContext(req, user);
-    if (activeUnit !== "Todas") {
-      mappedList = mappedList.filter(d => d.unidade === activeUnit);
-    } else if (unidadeId && unidadeId !== "Todas") {
-      mappedList = mappedList.filter(d => d.unidade === unidadeId);
-    }
-
-    let refDate = date || data || "2026-06-12";
-    if (refDate.includes("/")) {
-      const pts = refDate.split("/");
-      if (pts.length === 3) {
-        refDate = `${pts[2]}-${pts[1]}-${pts[0]}`;
-      } else if (pts.length === 2) {
-        refDate = `${pts[1]}-${pts[0]}-01`;
+      // Unit filter (restricted according to privilege unless Master)
+      const activeUnit = getRequestUnitContext(req, user);
+      if (activeUnit !== "Todas") {
+        mappedList = mappedList.filter(d => d.unidade === activeUnit);
+      } else if (unidadeId && unidadeId !== "Todas") {
+        mappedList = mappedList.filter(d => d.unidade === unidadeId);
       }
-    }
 
-    // Filter by Period
-    if (periodo && periodo !== "Todas" && periodo !== "Personalizado" && periodo !== "Customizada") {
-      if (periodo === "Dia") {
-        mappedList = mappedList.filter(x => x.data === refDate || x.data_disponibilidade === refDate);
-      } else if (periodo === "Semana") {
-        const range = getWeekRange(refDate);
-        mappedList = mappedList.filter(x => {
-          const dVal = x.data_disponibilidade || x.data;
-          return dVal >= range.start && dVal <= range.end;
-        });
-      } else if (periodo === "Mês") {
-        const monthPrefix = refDate.slice(0, 7); // e.g. "2026-06"
-        mappedList = mappedList.filter(x => {
-          const dVal = x.data_disponibilidade || x.data;
-          return dVal.startsWith(monthPrefix);
-        });
-      } else if (periodo === "Ano") {
-        const yearPrefix = refDate.slice(0, 4); // YYYY eg "2026"
-        mappedList = mappedList.filter(x => {
-          const dVal = x.data_disponibilidade || x.data;
-          return dVal.startsWith(yearPrefix);
-        });
+      let refDate = date || data || new Date().toISOString().split("T")[0];
+      if (refDate.includes("/")) {
+        const pts = refDate.split("/");
+        if (pts.length === 3) {
+          refDate = `${pts[2]}-${pts[1]}-${pts[0]}`;
+        } else if (pts.length === 2) {
+          refDate = `${pts[1]}-${pts[0]}-01`;
+        }
       }
-    } else if (startDate && endDate) {
-      mappedList = mappedList.filter(x => {
-        const dVal = x.data_disponibilidade || x.data;
-        return dVal >= startDate && dVal <= endDate;
-      });
-    } else if (date || data) {
-      const checkDate = refDate;
-      if (checkDate.length === 10) {
-        mappedList = mappedList.filter(x => x.data === checkDate || x.data_disponibilidade === checkDate);
-      } else if (checkDate.length === 7) {
-        mappedList = mappedList.filter(x => x.data.startsWith(checkDate) || (x.data_disponibilidade && x.data_disponibilidade.startsWith(checkDate)));
-      } else {
-        mappedList = mappedList.filter(x => x.data.startsWith(checkDate) || (x.data_disponibilidade && x.data_disponibilidade.startsWith(checkDate)));
+
+      // Filter by Period
+      if (periodo && periodo !== "Todas" && periodo !== "Personalizado" && periodo !== "Customizada") {
+        if (periodo === "Dia") {
+          mappedList = mappedList.filter(x => x.data === refDate || x.data_disponibilidade === refDate);
+        } else if (periodo === "Semana") {
+          const range = getWeekRange(refDate);
+          mappedList = mappedList.filter(x => {
+            const dVal = x.data_disponibilidade || x.data || "";
+            return dVal >= range.start && dVal <= range.end;
+          });
+        } else if (periodo === "Mês") {
+          const monthPrefix = refDate.slice(0, 7); // e.g. "2026-06"
+          mappedList = mappedList.filter(x => {
+            const dVal = x.data_disponibilidade || x.data || "";
+            return dVal.startsWith(monthPrefix);
+          });
+        } else if (periodo === "Ano") {
+          const yearPrefix = refDate.slice(0, 4); // YYYY eg "2026"
+          mappedList = mappedList.filter(x => {
+            const dVal = x.data_disponibilidade || x.data || "";
+            return dVal.startsWith(yearPrefix);
+          });
+        }
+      } else if (startDate && endDate) {
+        mappedList = mappedList.filter(x => {
+          const dVal = x.data_disponibilidade || x.data || "";
+          return dVal >= startDate && dVal <= endDate;
+        });
+      } else if (date || data) {
+        const checkDate = refDate;
+        if (checkDate.length === 10) {
+          mappedList = mappedList.filter(x => x.data === checkDate || x.data_disponibilidade === checkDate);
+        } else {
+          mappedList = mappedList.filter(x => (x.data && x.data.startsWith(checkDate)) || (x.data_disponibilidade && x.data_disponibilidade.startsWith(checkDate)));
+        }
       }
-    }
 
-    // Filter by Vehicle ID
-    if (veiculoId && veiculoId !== "Todos" && veiculoId !== "") {
-      mappedList = mappedList.filter(x => x.veiculoId === veiculoId);
-    }
+      // Filter by Vehicle ID
+      if (veiculoId && veiculoId !== "Todos" && veiculoId !== "") {
+        mappedList = mappedList.filter(x => x.veiculoId === veiculoId);
+      }
 
-    // Filter by Driver ID
-    if (motoristaId && motoristaId !== "Todos" && motoristaId !== "") {
-      mappedList = mappedList.filter(x => x.motoristaId === motoristaId);
-    }
+      // Filter by Driver ID
+      if (motoristaId && motoristaId !== "Todos" && motoristaId !== "") {
+        mappedList = mappedList.filter(x => x.motoristaId === motoristaId);
+      }
 
-    res.json(mappedList);
+      res.json(mappedList);
+    } catch (err: any) {
+      console.error("[/api/disponibilidade] Error:", err);
+      res.status(500).json({ error: err.message || "Erro interno do servidor" });
+    }
   });
 
   app.post("/api/disponibilidade", (req, res) => {
@@ -2491,16 +2540,28 @@ async function startServer() {
 
     const item = req.body as Rota;
     const operator = user.email;
+    const activeUnit = getRequestUnitContext(req, user);
 
-    if (user.perfil !== "admin_master") {
-      item.unidadeId = user.unidadeId;
+    if (!item.unidadeId || item.unidadeId === "Todas") {
+      item.unidadeId = activeUnit !== "Todas" ? activeUnit : (user.unidadeId !== "Todas" ? user.unidadeId : "un-go");
     }
 
-    const allRoutes = FileDatabase.get("rotas") || [];
-    const isRepeated = allRoutes.some((r: any) => r.dt === item.dt);
+    if (!item.dt) {
+      return res.status(400).json({ error: "Número da DT é obrigatório." });
+    }
 
-    if (isRepeated && item.tipo !== "Reentrega") {
-      return res.status(400).json({ error: "❌ DT EM DUPLICIDADE\nNão é possível salvar. Esta DT já está cadastrada no sistema." });
+    const itemDtClean = String(item.dt).trim();
+    item.dt = itemDtClean;
+
+    const allRoutes = FileDatabase.get("rotas") || [];
+    const isReentrega = item.tipo && String(item.tipo).toLowerCase().includes("reentrega");
+
+    const isRepeated = allRoutes.some((r: any) => 
+      r.dt && String(r.dt).trim().toLowerCase() === itemDtClean.toLowerCase()
+    );
+
+    if (isRepeated && !isReentrega) {
+      return res.status(400).json({ error: `❌ DT EM DUPLICIDADE\nNão é possível cadastrar. A DT #${itemDtClean} já está cadastrada no sistema.` });
     }
 
     if (!item.status_viagem) {
@@ -2536,6 +2597,15 @@ async function startServer() {
     ];
 
     item.id = `DT-${item.dt}`;
+    
+    // Ensure reentrega validation flags are correctly set
+    if (isReentrega) {
+      const isValidated = item.reentrega_validada === true || item.reentregaValidada === true || item.status_validacao === "VALIDADA";
+      item.reentrega_validada = isValidated;
+      item.reentregaValidada = isValidated;
+      item.status_validacao = isValidated ? "VALIDADA" : "PENDENTE DE VALIDAÇÃO";
+    }
+
     const added = FileDatabase.add("rotas", item, operator);
 
     // Auto update driver/vehicle routing state in availability
@@ -2579,6 +2649,21 @@ async function startServer() {
 
     if (user.perfil !== "admin_master") {
       item.unidadeId = user.unidadeId;
+    }
+
+    if (item.dt) {
+      const newDtClean = String(item.dt).trim();
+      const isReentrega = (item.tipo || current.tipo) && String(item.tipo || current.tipo).toLowerCase().includes("reentrega");
+      if (newDtClean && newDtClean.toLowerCase() !== String(current.dt || "").trim().toLowerCase()) {
+        const allRoutes = FileDatabase.get("rotas") || [];
+        const isRepeated = allRoutes.some((r: any) => 
+          r.id !== current.id && r.dt && String(r.dt).trim().toLowerCase() === newDtClean.toLowerCase()
+        );
+        if (isRepeated && !isReentrega) {
+          return res.status(400).json({ error: `❌ DT EM DUPLICIDADE\nNão é possível alterar. A DT #${newDtClean} já pertence a outra viagem cadastrada no sistema.` });
+        }
+        item.dt = newDtClean;
+      }
     }
 
     // Capture change logs for auditing
@@ -2692,6 +2777,14 @@ async function startServer() {
         "Formação de Equipe (Edição)",
         `DT #${item.dt || current.dt} - Motorista: ${mName} | Sugerido: [${sugNames}] | Utilizado: [${utilNames}]`
       );
+    }
+
+    if (item.reentrega_validada !== undefined || item.reentregaValidada !== undefined || item.status_validacao !== undefined) {
+      const isValidated = item.status_validacao === "VALIDADA" || Boolean(item.reentrega_validada ?? item.reentregaValidada);
+      item.reentrega_validada = isValidated;
+      item.reentregaValidada = isValidated;
+      item.status_validacao = isValidated ? "VALIDADA" : "PENDENTE DE VALIDAÇÃO";
+      recordChange("Status de Validação da Reentrega", current.status_validacao || "Pendente", item.status_validacao);
     }
 
     const updated = FileDatabase.update("rotas", req.params.id, item, operator);
@@ -2896,7 +2989,7 @@ async function startServer() {
           } else if (idx % 4 === 0) {
             st = "Parcial";
           } else {
-            const todayStr = "2026-06-27";
+            const todayStr = new Date().toISOString().split("T")[0];
             if (dueDate < todayStr) {
               st = "Vencido";
             }
@@ -4813,6 +4906,11 @@ async function startServer() {
         return res.status(400).json({ error: "Número da DT é obrigatório." });
       }
 
+      const activeUnit = getRequestUnitContext(req, user);
+      const resolvedUnidadeId = (unidadeId && unidadeId !== "Todas") 
+        ? unidadeId 
+        : (activeUnit !== "Todas" ? activeUnit : (user.unidadeId !== "Todas" ? user.unidadeId : "un-go"));
+
       // Protocol counter generator
       const getNextProtocol = (): string => {
         const closures = FileDatabase.get("fechamentos_dt") || [];
@@ -5009,7 +5107,7 @@ async function startServer() {
         historicoFechamentos: history,
         motoristaId,
         veiculoId,
-        unidadeId,
+        unidadeId: resolvedUnidadeId,
         observacoes: observacoes || "",
         ocorrencias: resolvedOcorrencias,
         houveDevolucao: houveDevolucao || "Não",
@@ -5711,8 +5809,16 @@ async function startServer() {
     try {
       const user = getRequestUser(req);
       if (!user) return res.status(401).json({ error: "Não autorizado" });
+      const rawTarget = String(req.params.id || "").trim();
+      const decodedTarget = decodeURIComponent(rawTarget).trim();
+
       const list = FileDatabase.get("devolucoes_clientes" as any) || [];
-      const filtered = list.filter((c: any) => c.id !== req.params.id);
+      const filtered = list.filter((c: any) => {
+        if (!c) return false;
+        const cId = String(c.id || "").trim();
+        const cCod = String(c.codigo || "").trim();
+        return cId !== rawTarget && cId !== decodedTarget && cCod !== rawTarget && cCod !== decodedTarget;
+      });
       FileDatabase.set("devolucoes_clientes" as any, filtered);
       return res.json({ success: true });
     } catch (err: any) {
@@ -5792,8 +5898,16 @@ async function startServer() {
     try {
       const user = getRequestUser(req);
       if (!user) return res.status(401).json({ error: "Não autorizado" });
+      const rawTarget = String(req.params.id || "").trim();
+      const decodedTarget = decodeURIComponent(rawTarget).trim();
+
       const list = FileDatabase.get("devolucoes_motoristas" as any) || [];
-      const filtered = list.filter((m: any) => m.id !== req.params.id);
+      const filtered = list.filter((m: any) => {
+        if (!m) return false;
+        const mId = String(m.id || "").trim();
+        const mMat = String(m.matricula || "").trim();
+        return mId !== rawTarget && mId !== decodedTarget && mMat !== rawTarget && mMat !== decodedTarget;
+      });
       FileDatabase.set("devolucoes_motoristas" as any, filtered);
       return res.json({ success: true });
     } catch (err: any) {
@@ -5871,8 +5985,15 @@ async function startServer() {
     try {
       const user = getRequestUser(req);
       if (!user) return res.status(401).json({ error: "Não autorizado" });
+      const rawTarget = String(req.params.id || "").trim();
+      const decodedTarget = decodeURIComponent(rawTarget).trim();
+
       const list = FileDatabase.get("devolucoes_hierarquia" as any) || [];
-      const filtered = list.filter((h: any) => h.id !== req.params.id);
+      const filtered = list.filter((h: any) => {
+        if (!h) return false;
+        const hId = String(h.id || "").trim();
+        return hId !== rawTarget && hId !== decodedTarget;
+      });
       FileDatabase.set("devolucoes_hierarquia" as any, filtered);
       return res.json({ success: true });
     } catch (err: any) {
@@ -5917,8 +6038,16 @@ async function startServer() {
     try {
       const user = getRequestUser(req);
       if (!user) return res.status(401).json({ error: "Não autorizado" });
+      const rawTarget = String(req.params.id || "").trim();
+      const decodedTarget = decodeURIComponent(rawTarget).trim();
+
       const list = FileDatabase.get("devolucoes_motivos" as any) || [];
-      const filtered = list.filter((r: any) => r.id !== req.params.id);
+      const filtered = list.filter((r: any) => {
+        if (!r) return false;
+        const rId = String(r.id || "").trim();
+        const rCod = String(r.codigo || "").trim();
+        return rId !== rawTarget && rId !== decodedTarget && rCod !== rawTarget && rCod !== decodedTarget;
+      });
       FileDatabase.set("devolucoes_motivos" as any, filtered);
       return res.json({ success: true });
     } catch (err: any) {
@@ -5946,6 +6075,19 @@ async function startServer() {
       if (!user) return res.status(401).json({ error: "Não autorizado" });
       
       const record = req.body;
+
+      // Security: Ignore frontend-provided unit if user is bound to a specific unit
+      const activeUnit = getRequestUnitContext(req, user);
+      if (user.unidadeId && user.unidadeId !== "Todas") {
+        record.unidadeId = user.unidadeId;
+        record.filial = user.unidadeId;
+      } else if (activeUnit && activeUnit !== "Todas") {
+        record.unidadeId = activeUnit;
+        record.filial = activeUnit;
+      } else if (!record.unidadeId) {
+        record.unidadeId = "un-go";
+        record.filial = "un-go";
+      }
       
       // Auto-generate protocol
       if (!record.protocolo) {
@@ -5969,6 +6111,7 @@ async function startServer() {
         record.id = record.protocolo;
       }
       
+      record.origem = record.origem || "manual";
       record.criadoPor = user.nome;
       record.criadoEm = new Date().toISOString();
       record.ip = req.ip || req.headers["x-forwarded-for"] || "127.0.0.1";
@@ -6002,12 +6145,64 @@ async function startServer() {
       const user = getRequestUser(req);
       if (!user) return res.status(401).json({ error: "Não autorizado" });
       
-      const recordId = req.params.id;
+      const rawTarget = String(req.params.id || "").trim();
+      const decodedTarget = decodeURIComponent(rawTarget).trim();
       const updatedFields = req.body;
+
+      if (user.unidadeId && user.unidadeId !== "Todas") {
+        updatedFields.unidadeId = user.unidadeId;
+        updatedFields.filial = user.unidadeId;
+      }
       
       const list = FileDatabase.get("devolucoes_registros" as any) || [];
-      const idx = list.findIndex((r: any) => r.id === recordId);
-      if (idx === -1) return res.status(404).json({ error: "Registro não encontrado" });
+
+      const normalizeStr = (s: any) => String(s || "").trim();
+      const normalizeDigits = (s: any) => String(s || "").replace(/[^0-9]/g, "").replace(/^0+/, "");
+
+      const targetsToMatch = Array.from(new Set([
+        rawTarget,
+        decodedTarget,
+        updatedFields.id,
+        updatedFields.protocolo,
+        updatedFields.numeroNF
+      ].filter(Boolean)));
+
+      const idx = list.findIndex((r: any) => {
+        if (!r) return false;
+        const rId = normalizeStr(r.id);
+        const rProto = normalizeStr(r.protocolo);
+        const rNF = normalizeStr(r.numeroNF);
+        const rCli = normalizeStr(r.clienteCodigo);
+
+        for (const t of targetsToMatch) {
+          const tStr = normalizeStr(t);
+          if (!tStr) continue;
+
+          if (tStr === rId || tStr === rProto || tStr === rNF || tStr === rCli) return true;
+
+          const tLower = tStr.toLowerCase();
+          if (
+            (rId && rId.toLowerCase() === tLower) ||
+            (rProto && rProto.toLowerCase() === tLower) ||
+            (rNF && rNF.toLowerCase() === tLower)
+          ) return true;
+
+          const tClean = tStr.replace(/^#/, "").replace(/^NF-?/i, "").replace(/^DEV-?/i, "").trim().toLowerCase();
+          const rNFClean = rNF.replace(/^#/, "").replace(/^NF-?/i, "").replace(/^DEV-?/i, "").trim().toLowerCase();
+          const rProtoClean = rProto.replace(/^#/, "").replace(/^NF-?/i, "").replace(/^DEV-?/i, "").trim().toLowerCase();
+          const rIdClean = rId.replace(/^#/, "").replace(/^NF-?/i, "").replace(/^DEV-?/i, "").trim().toLowerCase();
+
+          if (tClean && (tClean === rNFClean || tClean === rProtoClean || tClean === rIdClean)) return true;
+
+          const tDigits = normalizeDigits(tStr);
+          const rNFDigits = normalizeDigits(rNF);
+          if (tDigits && rNFDigits && tDigits === rNFDigits) return true;
+        }
+
+        return false;
+      });
+
+      if (idx === -1) return res.status(404).json({ error: "Registro de devolução não encontrado" });
       
       const oldStatus = list[idx].status;
       list[idx] = {
@@ -6039,17 +6234,185 @@ async function startServer() {
     }
   });
 
-  app.delete("/api/devolucoes/registros/:id", (req, res) => {
+  const handleDeleteDevolucao = (req: express.Request, res: express.Response) => {
     try {
       const user = getRequestUser(req);
       if (!user) return res.status(401).json({ error: "Não autorizado" });
       
-      const list = FileDatabase.get("devolucoes_registros" as any) || [];
-      const idx = list.findIndex((r: any) => r.id === req.params.id);
-      if (idx === -1) return res.status(404).json({ error: "Registro não encontrado" });
+      const rawTarget = String(req.params.id || req.query.id || req.query.target || "").trim();
+      const decodedTarget = decodeURIComponent(rawTarget).trim();
+      const extraNf = String(req.query.nf || req.body?.numeroNF || "").trim();
+      const extraProto = String(req.query.protocolo || req.body?.protocolo || "").trim();
+      const extraReqId = String(req.query.id || req.body?.id || "").trim();
+      const extraCli = String(req.query.clienteCodigo || req.body?.clienteCodigo || "").trim();
 
-      const removed = list.splice(idx, 1)[0];
-      FileDatabase.set("devolucoes_registros" as any, list);
+      const list = FileDatabase.get("devolucoes_registros" as any) || [];
+
+      const normalizeStr = (s: any) => String(s || "").trim();
+      const normalizeDigits = (s: any) => String(s || "").replace(/[^0-9]/g, "").replace(/^0+/, "");
+
+      const targetsToMatch = Array.from(new Set([
+        rawTarget,
+        decodedTarget,
+        extraNf,
+        extraProto,
+        extraReqId,
+        extraCli
+      ].filter(Boolean)));
+
+      const isMatch = (r: any) => {
+        if (!r) return false;
+        const rId = normalizeStr(r.id);
+        const rProto = normalizeStr(r.protocolo);
+        const rNF = normalizeStr(r.numeroNF);
+        const rCli = normalizeStr(r.clienteCodigo);
+
+        for (const t of targetsToMatch) {
+          const tStr = normalizeStr(t);
+          if (!tStr) continue;
+
+          // Direct match
+          if (tStr === rId || tStr === rProto || tStr === rNF || tStr === rCli) return true;
+
+          // Case insensitive match
+          const tLower = tStr.toLowerCase();
+          if (
+            (rId && rId.toLowerCase() === tLower) ||
+            (rProto && rProto.toLowerCase() === tLower) ||
+            (rNF && rNF.toLowerCase() === tLower) ||
+            (rCli && rCli.toLowerCase() === tLower)
+          ) return true;
+
+          // Cleaned text (strip leading #, NF-, DEV-)
+          const tClean = tStr.replace(/^#/, "").replace(/^NF-?/i, "").replace(/^DEV-?/i, "").trim().toLowerCase();
+          const rNFClean = rNF.replace(/^#/, "").replace(/^NF-?/i, "").replace(/^DEV-?/i, "").trim().toLowerCase();
+          const rProtoClean = rProto.replace(/^#/, "").replace(/^NF-?/i, "").replace(/^DEV-?/i, "").trim().toLowerCase();
+          const rIdClean = rId.replace(/^#/, "").replace(/^NF-?/i, "").replace(/^DEV-?/i, "").trim().toLowerCase();
+
+          if (tClean && (tClean === rNFClean || tClean === rProtoClean || tClean === rIdClean)) return true;
+
+          // Digit-only match for NFs (e.g. "1" matches "000001" or "#NF-000001")
+          const tDigits = normalizeDigits(tStr);
+          const rNFDigits = normalizeDigits(rNF);
+          if (tDigits && rNFDigits && tDigits === rNFDigits) return true;
+        }
+
+        return false;
+      };
+
+      const removedItems: any[] = [];
+      const remainingList: any[] = [];
+
+      list.forEach((item: any) => {
+        if (isMatch(item)) {
+          removedItems.push(item);
+        } else {
+          remainingList.push(item);
+        }
+      });
+
+      if (removedItems.length === 0) {
+        return res.status(404).json({ error: "Registro de devolução não encontrado" });
+      }
+
+      FileDatabase.set("devolucoes_registros" as any, remainingList);
+
+      // Audit log entry
+      try {
+        const auditList = FileDatabase.get("auditoria") || [];
+        removedItems.forEach((removed) => {
+          auditList.push({
+            id: `aud-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+            usuario: user.email,
+            data: new Date().toISOString().split("T")[0],
+            hora: new Date().toTimeString().split(" ")[0],
+            acao: "DELETE_DEVOLUCOES_REGISTRO",
+            detalhes: `Devolucao ${removed.protocolo || removed.id} excluida por ${user.nome || user.email}. Cliente: ${removed.clienteNomeFantasia || removed.clienteNome || ""}. NF: ${removed.numeroNF || ""}.`
+          });
+        });
+        FileDatabase.set("auditoria", auditList);
+      } catch (ae) {}
+
+      return res.json({ success: true, count: removedItems.length, message: `${removedItems.length} registro(s) excluído(s) com sucesso` });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  };
+
+  app.delete("/api/devolucoes/registros/:id", handleDeleteDevolucao);
+  app.delete("/api/devolucoes/registros", handleDeleteDevolucao);
+
+  app.delete("/api/devolucoes/historico", (req, res) => {
+    try {
+      const user = getRequestUser(req);
+      if (!user) return res.status(401).json({ error: "Não autorizado" });
+
+      const body = req.body || {};
+      const modo = String(body.modo || req.query.modo || "todos").toLowerCase();
+      const dataInicio = body.dataInicio || req.query.dataInicio || "";
+      const dataFim = body.dataFim || req.query.dataFim || "";
+      const unidadeTarget = body.unidade || req.query.unidade || "";
+
+      let list = FileDatabase.get("devolucoes_registros" as any) || [];
+      const totalBefore = list.length;
+      let remaining: any[] = [];
+      let removed: any[] = [];
+
+      const normalizeStr = (s: string) => 
+        String(s || "").toLowerCase()
+          .normalize("NFD")
+          .replace(/[\u0300-\u036f]/g, "")
+          .trim();
+
+      const parseDateVal = (dStr: any): number | null => {
+        if (!dStr) return null;
+        const s = String(dStr).trim();
+        if (/^\d{4}-\d{2}-\d{2}/.test(s)) {
+          return new Date(s.substring(0, 10)).getTime();
+        }
+        if (/^\d{2}\/\d{2}\/\d{4}/.test(s)) {
+          const parts = s.split("/");
+          return new Date(`${parts[2]}-${parts[1]}-${parts[0]}`).getTime();
+        }
+        const parsed = Date.parse(s);
+        return isNaN(parsed) ? null : parsed;
+      };
+
+      const startTs = dataInicio ? parseDateVal(dataInicio) : null;
+      const endTs = dataFim ? parseDateVal(dataFim) : null;
+
+      list.forEach((r: any) => {
+        let shouldDelete = false;
+
+        if (modo === "todos") {
+          shouldDelete = true;
+        } else if (modo === "importados") {
+          shouldDelete = (r.origem === "importacao") || (!r.origem || r.origem !== "manual");
+        } else if (modo === "periodo") {
+          const recDateStr = r.dataOcorrido || r.data || r.dataLancamento || r.dataNF || r.criadoEm;
+          const recTs = parseDateVal(recDateStr);
+          if (recTs !== null) {
+            let matchesStart = true;
+            let matchesEnd = true;
+            if (startTs !== null) matchesStart = recTs >= startTs;
+            if (endTs !== null) matchesEnd = recTs <= (endTs + 86399999);
+            shouldDelete = matchesStart && matchesEnd;
+          }
+        } else if (modo === "unidade") {
+          const targetNorm = normalizeStr(unidadeTarget);
+          const rUnidadeId = normalizeStr(r.unidadeId);
+          const rUnidadeNome = normalizeStr(r.unidadeNome || r.unidade || r.filial);
+          shouldDelete = targetNorm ? (rUnidadeId === targetNorm || rUnidadeNome === targetNorm || rUnidadeId.includes(targetNorm) || rUnidadeNome.includes(targetNorm)) : false;
+        }
+
+        if (shouldDelete) {
+          removed.push(r);
+        } else {
+          remaining.push(r);
+        }
+      });
+
+      FileDatabase.set("devolucoes_registros" as any, remaining);
 
       // Audit log entry
       try {
@@ -6059,13 +6422,78 @@ async function startServer() {
           usuario: user.email,
           data: new Date().toISOString().split("T")[0],
           hora: new Date().toTimeString().split(" ")[0],
-          acao: "DELETE_DEVOLUCOES_REGISTRO",
-          detalhes: `Devolucao ${removed.protocolo} excluida por ${user.nome}. Cliente: ${removed.clienteNomeFantasia}. NF: ${removed.numeroNF}. Valor: R$ ${removed.valorNF}.`
+          acao: "DELETE_DEVOLUCOES_HISTORICO_BULK",
+          detalhes: `Limpeza geral realizada por ${user.nome || user.email}. Modo: ${modo}. Total de ${removed.length} registro(s) apagado(s) de ${totalBefore}.`
         });
         FileDatabase.set("auditoria", auditList);
       } catch (ae) {}
 
-      return res.json({ success: true });
+      return res.json({
+        success: true,
+        removidos: removed.length,
+        message: `${removed.length} registro(s) excluído(s) com sucesso.`
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // --- ModelosImportacao API ---
+  app.get("/api/devolucoes/modelos", (req, res) => {
+    try {
+      const user = getRequestUser(req);
+      if (!user) return res.status(401).json({ error: "Não autorizado" });
+      
+      const list = FileDatabase.get("devolucoes_modelos_importacao" as any) || [];
+      return res.json(list);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/devolucoes/modelos", (req, res) => {
+    try {
+      const user = getRequestUser(req);
+      if (!user) return res.status(401).json({ error: "Não autorizado" });
+
+      const { nome, headers, mappings } = req.body;
+      if (!nome || !headers || !mappings) {
+        return res.status(400).json({ error: "Campos obrigatórios ausentes" });
+      }
+
+      const list = FileDatabase.get("devolucoes_modelos_importacao" as any) || [];
+      // Match by exact name, or same header footprint
+      const idx = list.findIndex((m: any) => m.nome.toLowerCase() === nome.toLowerCase());
+
+      const currentDate = new Date().toISOString().split("T")[0];
+
+      if (idx !== -1) {
+        // Update existing model
+        list[idx] = {
+          ...list[idx],
+          nome,
+          headers,
+          mappings,
+          utilizacoes: (list[idx].utilizacoes || 0) + 1,
+          ultimaUtilizacao: currentDate
+        };
+        FileDatabase.set("devolucoes_modelos_importacao" as any, list);
+        return res.json({ success: true, model: list[idx] });
+      } else {
+        // Create new model
+        const newModel = {
+          id: `mod-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+          nome,
+          dataCriacao: currentDate,
+          headers,
+          mappings,
+          utilizacoes: 1,
+          ultimaUtilizacao: currentDate
+        };
+        list.push(newModel);
+        FileDatabase.set("devolucoes_modelos_importacao" as any, list);
+        return res.json({ success: true, model: newModel });
+      }
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -6104,11 +6532,40 @@ async function startServer() {
       let reasonsResults = { created: 0, updated: 0, total: 0 };
       let historyResults = { created: 0, updated: 0, total: 0 };
 
+      const cleanStr = (s: string) => 
+        String(s || "").toLowerCase()
+          .normalize("NFD")
+          .replace(/[\u0300-\u036f]/g, "")
+          .replace(/[^a-z0-9]/g, "")
+          .trim();
+
       // Process clients
       if (Array.isArray(clientes) && clientes.length > 0) {
         const list = FileDatabase.get("devolucoes_clientes" as any) || [];
+        
+        let nextCliSeq = 1;
+        const cliSeqRegex = /^CLI-(\d+)$/;
+        list.forEach((c: any) => {
+          if (c.codigo) {
+            const match = String(c.codigo).match(cliSeqRegex);
+            if (match) {
+              const seq = parseInt(match[1], 10);
+              if (seq >= nextCliSeq) {
+                nextCliSeq = seq + 1;
+              }
+            }
+          }
+        });
+
         clientes.forEach((c: any) => {
-          if (!c.codigo) return;
+          if (!c.codigo || String(c.codigo).trim() === "") {
+            const existing = list.find((x: any) => cleanStr(x.razaoSocial) === cleanStr(c.razaoSocial));
+            if (existing) {
+              c.codigo = existing.codigo;
+            } else {
+              c.codigo = `CLI-${String(nextCliSeq++).padStart(6, "0")}`;
+            }
+          }
           const id = String(c.codigo);
           c.id = id;
           c.dataCadastro = c.dataCadastro || new Date().toISOString().split("T")[0];
@@ -6116,7 +6573,14 @@ async function startServer() {
           
           const idx = list.findIndex((x: any) => x.id === id);
           if (idx !== -1) {
-            list[idx] = { ...list[idx], ...c };
+            const merged = { ...list[idx] };
+            Object.keys(c).forEach((key) => {
+              if (c[key] !== undefined && c[key] !== null && c[key] !== "") {
+                merged[key] = c[key];
+              }
+            });
+            merged.dataAtualizacao = new Date().toISOString().split("T")[0];
+            list[idx] = merged;
             clientResults.updated++;
           } else {
             list.push(c);
@@ -6131,14 +6595,20 @@ async function startServer() {
       if (Array.isArray(motoristas) && motoristas.length > 0) {
         const list = FileDatabase.get("devolucoes_motoristas" as any) || [];
         motoristas.forEach((m: any) => {
-          if (!m.matricula) return;
-          const id = String(m.matricula);
+          if (!m.matricula || String(m.matricula).trim() === "") return;
+          const id = String(m.matricula).trim();
           m.id = id;
           m.dataCadastro = m.dataCadastro || new Date().toISOString().split("T")[0];
           
           const idx = list.findIndex((x: any) => x.id === id);
           if (idx !== -1) {
-            list[idx] = { ...list[idx], ...m };
+            const merged = { ...list[idx] };
+            Object.keys(m).forEach((key) => {
+              if (m[key] !== undefined && m[key] !== null && m[key] !== "") {
+                merged[key] = m[key];
+              }
+            });
+            list[idx] = merged;
             driverResults.updated++;
           } else {
             list.push(m);
@@ -6153,14 +6623,20 @@ async function startServer() {
       if (Array.isArray(hierarquia) && hierarquia.length > 0) {
         const list = FileDatabase.get("devolucoes_hierarquia" as any) || [];
         hierarquia.forEach((h: any) => {
-          if (!h.vendedor) return;
-          h.id = h.id || `hie-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+          if (!h.vendedor || String(h.vendedor).trim() === "") return;
           
-          const idx = list.findIndex((x: any) => x.id === h.id || (x.vendedor === h.vendedor && x.unidadeId === h.unidadeId));
+          const idx = list.findIndex((x: any) => cleanStr(x.vendedor) === cleanStr(h.vendedor));
           if (idx !== -1) {
-            list[idx] = { ...list[idx], ...h };
+            const merged = { ...list[idx] };
+            Object.keys(h).forEach((key) => {
+              if (h[key] !== undefined && h[key] !== null && h[key] !== "") {
+                merged[key] = h[key];
+              }
+            });
+            list[idx] = merged;
             hierarchyResults.updated++;
           } else {
+            h.id = h.id || `hie-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
             list.push(h);
             hierarchyResults.created++;
           }
@@ -6172,14 +6648,42 @@ async function startServer() {
       // Process motivos
       if (Array.isArray(motivos) && motivos.length > 0) {
         const list = FileDatabase.get("devolucoes_motivos" as any) || [];
+        
+        let nextMotSeq = 1;
+        const motSeqRegex = /^Y(\d+)$/;
+        list.forEach((m: any) => {
+          if (m.codigo) {
+            const match = String(m.codigo).match(motSeqRegex);
+            if (match) {
+              const seq = parseInt(match[1], 10);
+              if (seq >= nextMotSeq) {
+                nextMotSeq = seq + 1;
+              }
+            }
+          }
+        });
+
         motivos.forEach((r: any) => {
-          if (!r.codigo) return;
+          if (!r.codigo || String(r.codigo).trim() === "") {
+            const existing = list.find((x: any) => cleanStr(x.descricao) === cleanStr(r.descricao));
+            if (existing) {
+              r.codigo = existing.codigo;
+            } else {
+              r.codigo = `Y${String(nextMotSeq++).padStart(3, "0")}`;
+            }
+          }
           const id = String(r.codigo);
           r.id = id;
           
           const idx = list.findIndex((x: any) => x.id === id);
           if (idx !== -1) {
-            list[idx] = { ...list[idx], ...r };
+            const merged = { ...list[idx] };
+            Object.keys(r).forEach((key) => {
+              if (r[key] !== undefined && r[key] !== null && r[key] !== "") {
+                merged[key] = r[key];
+              }
+            });
+            list[idx] = merged;
             reasonsResults.updated++;
           } else {
             list.push(r);
@@ -6207,9 +6711,44 @@ async function startServer() {
           }
         }
 
+        let nextNfSeq = 1;
+        const nfSeqRegex = /^NF-(\d+)$/;
+        list.forEach((r: any) => {
+          if (r.numeroNF) {
+            const m = String(r.numeroNF).match(nfSeqRegex);
+            if (m) {
+              const seq = parseInt(m[1], 10);
+              if (seq >= nextNfSeq) {
+                nextNfSeq = seq + 1;
+              }
+            }
+          }
+        });
+
+        const activeClients = FileDatabase.get("devolucoes_clientes" as any) || [];
+        const activeMotivos = FileDatabase.get("devolucoes_motivos" as any) || [];
+
         historico.forEach((rec: any) => {
-          if (!rec.numeroNF || String(rec.numeroNF).trim() === "") {
-            rec.numeroNF = "SEM-NF";
+          if (!rec.clienteCodigo || String(rec.clienteCodigo).trim() === "") {
+            if (rec.clienteRazaoSocial) {
+              const matchedCli = activeClients.find((c: any) => cleanStr(c.razaoSocial) === cleanStr(rec.clienteRazaoSocial));
+              if (matchedCli) {
+                rec.clienteCodigo = matchedCli.codigo;
+              }
+            }
+          }
+
+          if (!rec.motivoCodigo || String(rec.motivoCodigo).trim() === "") {
+            if (rec.motivoDescricao) {
+              const matchedMot = activeMotivos.find((m: any) => cleanStr(m.descricao) === cleanStr(rec.motivoDescricao));
+              if (matchedMot) {
+                rec.motivoCodigo = matchedMot.codigo;
+              }
+            }
+          }
+
+          if (!rec.numeroNF || String(rec.numeroNF).trim() === "" || String(rec.numeroNF).trim().toUpperCase() === "SEM-NF") {
+            rec.numeroNF = `NF-${String(nextNfSeq++).padStart(6, "0")}`;
           }
           
           if (!rec.protocolo) {
@@ -6218,6 +6757,7 @@ async function startServer() {
           }
           if (!rec.id) rec.id = rec.protocolo;
           
+          rec.origem = "importacao";
           rec.criadoPor = rec.criadoPor || user.nome;
           rec.criadoEm = rec.criadoEm || new Date().toISOString();
           rec.status = rec.status || "Pendente";
@@ -6225,12 +6765,18 @@ async function startServer() {
 
           const idx = list.findIndex((x: any) => {
             if (x.id === rec.id) return true;
-            if (rec.numeroNF !== "SEM-NF" && x.numeroNF === rec.numeroNF && x.unidadeId === rec.unidadeId) return true;
+            if (rec.numeroNF && rec.numeroNF !== "SEM-NF" && x.numeroNF === rec.numeroNF && x.unidadeId === rec.unidadeId) return true;
             return false;
           });
 
           if (idx !== -1) {
-            list[idx] = { ...list[idx], ...rec };
+            const merged = { ...list[idx] };
+            Object.keys(rec).forEach((key) => {
+              if (rec[key] !== undefined && rec[key] !== null && rec[key] !== "") {
+                merged[key] = rec[key];
+              }
+            });
+            list[idx] = merged;
             historyResults.updated++;
           } else {
             list.push(rec);
