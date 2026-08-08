@@ -44,6 +44,19 @@ const isVehicleBlocked = (v: any) => {
   return false;
 };
 
+const getVehicleIcon = (perfil?: string) => {
+  switch (perfil) {
+    case "Van":
+    case "Utilitário":
+      return "🚐";
+    case "VUC":
+    case "3/4":
+      return "🚚";
+    default:
+      return "🚛";
+  }
+};
+
 export default function MonitoramentoView({ rotas, veiculos, motoristas, unidades = [], onRefresh, userEmail, noShows = [] }: MonitoramentoProps) {
   const [searchTerm, setSearchTerm] = useState("");
   const [isAdding, setIsAdding] = useState(false);

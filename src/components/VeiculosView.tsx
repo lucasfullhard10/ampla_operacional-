@@ -307,7 +307,7 @@ export default function VeiculosView({
     };
 
     try {
-      const res = await fetch("/api/manutencoes", {
+      const res = await fetch("/api/manutencao", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -338,7 +338,7 @@ export default function VeiculosView({
   const handleDeleteMaint = async (maintId: string) => {
     if (!window.confirm("Deseja realmente excluir esta ordem de serviço/manutenção?")) return;
     try {
-      const res = await fetch(`/api/manutencoes/${maintId}`, {
+      const res = await fetch(`/api/manutencao/${maintId}`, {
         method: "DELETE",
         headers: {
           "x-user-email": userEmail
