@@ -22,11 +22,24 @@ export default function DisponibilidadeView({ veiculos, motoristas, userEmail }:
   // Notification Modal State
   const [notification, setNotification] = useState<NotificationType | null>(null);
 
-  // Query Filters State
-  const [selectedDate, setSelectedDate] = useState("2026-06-12");
+  // Query Filters State dynamically initialized to current date/time
+  const [selectedDate, setSelectedDate] = useState(() => new Date().toISOString().split("T")[0]);
   const [periodFilter, setPeriodFilter] = useState<"Dia" | "Semana" | "Mês" | "Ano" | "Customizada">("Dia");
-  const [startDate, setStartDate] = useState("2026-06-08");
-  const [endDate, setEndDate] = useState("2026-06-14");
+  const [startDate, setStartDate] = useState(() => {
+    const d = new Date();
+    const day = d.getDay();
+    const diffToMon = d.getDate() - day + (day === 0 ? -6 : 1);
+    return new Date(d.setDate(diffToMon)).toISOString().split("T")[0];
+  });
+  const [endDate, setEndDate] = useState(() => {
+    const d = new Date();
+    const day = d.getDay();
+    const diffToMon = d.getDate() - day + (day === 0 ? -6 : 1);
+    const mon = new Date(d.setDate(diffToMon));
+    const sun = new Date(mon);
+    sun.setDate(mon.getDate() + 6);
+    return sun.toISOString().split("T")[0];
+  });
   const [selectedUnit, setSelectedUnit] = useState("Todas");
   const [selectedVehicle, setSelectedVehicle] = useState("");
   const [selectedDriver, setSelectedDriver] = useState("");
@@ -69,6 +82,9 @@ export default function DisponibilidadeView({ veiculos, motoristas, userEmail }:
   const getPersonStatus = (m: Motorista) => {
     if (m.statusFinal === "BLOQUEADO" || m.statusConformidade === "BLOQUEADO") {
       return { status: "Bloqueado", icon: "🔴", color: "text-rose-500", bgColor: "bg-rose-500/10", borderColor: "border-rose-500/20" };
+    }
+    if (m.statusFinal === "PENDENTE" || (m.statusConformidade === "ATENÇÃO" && (m.aso === "Pendente" || m.integracao === "Pendente" || m.pesquisa === "Pendente" || m.fichaEpi === "Pendente"))) {
+      return { status: "Pendente (Agregamento)", icon: "🟡", color: "text-amber-500", bgColor: "bg-amber-500/10", borderColor: "border-amber-500/20" };
     }
     const activeDt = rotas.find(r => 
       r.data === selectedDate && 
@@ -1854,11 +1870,11 @@ export default function DisponibilidadeView({ veiculos, motoristas, userEmail }:
                                     <option 
                                       key={m.id} 
                                       value={m.id}
-                                      disabled={m.statusFinal === "BLOQUEADO"}
-                                      title={m.statusFinal === "BLOQUEADO" ? m.motivoBloqueio : undefined}
-                                      className={m.statusFinal === "BLOQUEADO" ? "text-rose-500 line-through" : "text-white"}
+                                      disabled={m.statusFinal === "BLOQUEADO" || m.statusFinal === "PENDENTE"}
+                                      title={m.statusFinal === "BLOQUEADO" ? m.motivoBloqueio : m.statusFinal === "PENDENTE" ? "Pendente em agregamento" : undefined}
+                                      className={m.statusFinal === "BLOQUEADO" ? "text-rose-500 line-through" : m.statusFinal === "PENDENTE" ? "text-amber-500 font-semibold" : "text-white"}
                                     >
-                                      {m.nome} {m.statusFinal === "BLOQUEADO" ? `(🔴 BLOQUEADO)` : ""}
+                                      {m.nome} {m.statusFinal === "BLOQUEADO" ? `(🔴 BLOQUEADO)` : m.statusFinal === "PENDENTE" ? `(🟡 PENDENTE)` : ""}
                                     </option>
                                   ))}
                                 </select>
