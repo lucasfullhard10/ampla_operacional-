@@ -1,9 +1,12 @@
 import React from "react";
 import { 
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, 
-  PieChart, Pie, Cell, LineChart, Line, AreaChart, Area 
+  PieChart, Pie, Cell, AreaChart, Area 
 } from "recharts";
-import { TrendingDown, Percent, AlertCircle, DollarSign, ArrowUpRight, ArrowDownRight } from "lucide-react";
+import { 
+  TrendingDown, DollarSign, FileText, Clock, CheckCircle2, 
+  AlertTriangle, XCircle, Building2, User, Users, HelpCircle 
+} from "lucide-react";
 import { DevolucaoRegistro } from "../../types";
 
 interface DashboardProps {
@@ -12,257 +15,321 @@ interface DashboardProps {
 }
 
 export default function DevolucoesDashboard({ registros, unidades }: DashboardProps) {
-  // Aggregate stats
+  // 1. STATS CALCULATION
   const totalCount = registros.length;
-  const totalValue = registros.reduce((sum, r) => sum + (r.valorNF || 0), 0);
+  const totalValue = registros.reduce((sum, r) => sum + (Number(r.valorNF) || 0), 0);
+  const totalNFs = new Set(registros.map(r => r.numeroNF).filter(Boolean)).size || totalCount;
+
+  // Status breakdown
   const resolvedCount = registros.filter(r => r.status === "Resolvida").length;
-  const pendingCount = registros.filter(r => r.status === "Pendente").length;
-  const resolutionRate = totalCount > 0 ? (resolvedCount / totalCount) * 100 : 0;
+  const pendingCount = registros.filter(r => 
+    r.status === "Pendente" || r.status === "Aguardando Tratativa"
+  ).length;
+  const inProgressCount = registros.filter(r => 
+    ["Em Análise", "Em Atendimento", "Aguardando Comercial"].includes(r.status)
+  ).length;
+  const canceledCount = registros.filter(r => r.status === "Cancelada").length;
 
-  // Let's assume a standard monthly billing target or total invoices to calculate return rate (e.g., 1.2% mock or simulated limit of 1.5%)
-  const simulatedTotalValue = totalValue * 65; // Simulated total sales
-  const returnRate = simulatedTotalValue > 0 ? (totalValue / simulatedTotalValue) * 100 : 0;
-
-  // Group by Unidade
-  const unitStats = unidades.map(u => {
-    const unitRecords = registros.filter(r => r.unidadeId === u.id);
-    const count = unitRecords.length;
-    const value = unitRecords.reduce((sum, r) => sum + (r.valorNF || 0), 0);
-    return {
-      name: u.nome || u.id,
-      volume: count,
-      valor: value
-    };
-  }).filter(item => item.volume > 0);
-
-  // Group by Motivo (Reason)
-  const reasonMap: Record<string, { count: number; value: number; desc: string }> = {};
-  registros.forEach(r => {
-    const code = r.motivoCodigo || "Outros";
-    if (!reasonMap[code]) {
-      reasonMap[code] = { count: 0, value: 0, desc: r.motivoDescricao || "Outros" };
-    }
-    reasonMap[code].count++;
-    reasonMap[code].value += r.valorNF || 0;
-  });
-
-  const reasonStats = Object.entries(reasonMap).map(([code, item]) => ({
-    name: `${code} - ${item.desc.substring(0, 15)}...`,
-    code,
-    volume: item.count,
-    valor: item.value
-  })).sort((a, b) => b.valor - a.valor);
-
-  // Group by Date for trend (last 7 days of activity)
-  const dateMap: Record<string, { date: string; volume: number; valor: number }> = {};
-  // Pre-populate last 7 days
-  for (let i = 6; i >= 0; i--) {
+  // 2. CHART DATA CALCULATIONS
+  
+  // A. Chart por Mês (Evolution by month)
+  const monthMap: Record<string, { monthKey: string; monthName: string; count: number; value: number }> = {};
+  
+  // Initialize last 6 months
+  for (let i = 5; i >= 0; i--) {
     const d = new Date();
-    d.setDate(d.getDate() - i);
-    const dateStr = d.toISOString().split("T")[0];
-    const formattedDate = d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
-    dateMap[dateStr] = { date: formattedDate, volume: 0, valor: 0 };
+    d.setMonth(d.getMonth() - i);
+    const mKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+    const mName = d.toLocaleDateString("pt-BR", { month: "short", year: "2-digit" }).toUpperCase();
+    monthMap[mKey] = { monthKey: mKey, monthName: mName, count: 0, value: 0 };
   }
 
   registros.forEach(r => {
-    const rDate = r.data;
-    if (dateMap[rDate]) {
-      dateMap[rDate].volume++;
-      dateMap[rDate].valor += r.valorNF || 0;
-    } else if (rDate) {
-      // If outside last 7 days but valid, parse for date
-      const d = new Date(rDate + "T12:00:00");
-      if (!isNaN(d.getTime())) {
-        const formattedDate = d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
-        dateMap[rDate] = { date: formattedDate, volume: 1, valor: r.valorNF || 0 };
+    const dateStr = r.dataOcorrido || r.data;
+    if (dateStr && dateStr.length >= 7) {
+      const mKey = dateStr.substring(0, 7);
+      if (!monthMap[mKey]) {
+        const parts = mKey.split("-");
+        const monthIndex = parseInt(parts[1], 10) - 1;
+        const yearShort = parts[0]?.substring(2);
+        const dateObj = new Date(parseInt(parts[0], 10), monthIndex, 1);
+        const mName = !isNaN(dateObj.getTime())
+          ? dateObj.toLocaleDateString("pt-BR", { month: "short" }).toUpperCase() + "/" + yearShort
+          : mKey;
+        monthMap[mKey] = { monthKey: mKey, monthName: mName, count: 0, value: 0 };
       }
+      monthMap[mKey].count += 1;
+      monthMap[mKey].value += Number(r.valorNF) || 0;
     }
   });
 
-  const trendStats = Object.values(dateMap).slice(-10);
+  const monthChartData = Object.values(monthMap).sort((a, b) => a.monthKey.localeCompare(b.monthKey));
 
-  // Top Drivers with returns
-  const driverMap: Record<string, { nome: string; count: number; value: number }> = {};
+  // B. Chart por Motivo
+  const reasonMap: Record<string, { code: string; desc: string; count: number; value: number }> = {};
   registros.forEach(r => {
-    const driver = r.motoristaNome || "Não Informado";
-    if (!driverMap[driver]) {
-      driverMap[driver] = { nome: driver, count: 0, value: 0 };
+    const code = r.motivoCodigo || "Outros";
+    const desc = r.motivoDescricao || "Motivo Não Informado";
+    if (!reasonMap[code]) {
+      reasonMap[code] = { code, desc, count: 0, value: 0 };
     }
-    driverMap[driver].count++;
-    driverMap[driver].value += r.valorNF || 0;
+    reasonMap[code].count += 1;
+    reasonMap[code].value += Number(r.valorNF) || 0;
   });
-  const topDrivers = Object.values(driverMap).sort((a, b) => b.value - a.value).slice(0, 5);
 
-  // Top Customers with returns
-  const customerMap: Record<string, { nome: string; count: number; value: number }> = {};
+  const reasonChartData = Object.values(reasonMap)
+    .sort((a, b) => b.value - a.value)
+    .slice(0, 6)
+    .map(item => ({
+      name: `${item.code} - ${item.desc.length > 18 ? item.desc.substring(0, 18) + "..." : item.desc}`,
+      code: item.code,
+      desc: item.desc,
+      count: item.count,
+      value: item.value
+    }));
+
+  // C. Chart por Filial
+  const filialMap: Record<string, { filial: string; count: number; value: number }> = {};
   registros.forEach(r => {
-    const client = r.clienteNomeFantasia || r.clienteRazaoSocial || "Desconhecido";
-    if (!customerMap[client]) {
-      customerMap[client] = { nome: client, count: 0, value: 0 };
+    const fId = r.filial || r.unidadeId || "Goiânia";
+    const uObj = unidades.find(u => u.id === fId);
+    const fName = uObj?.nome || uObj?.cidade || fId;
+    if (!filialMap[fName]) {
+      filialMap[fName] = { filial: fName, count: 0, value: 0 };
     }
-    customerMap[client].count++;
-    customerMap[client].value += r.valorNF || 0;
+    filialMap[fName].count += 1;
+    filialMap[fName].value += Number(r.valorNF) || 0;
   });
-  const topCustomers = Object.values(customerMap).sort((a, b) => b.value - a.value).slice(0, 5);
 
-  // COLORS for charts
-  const PIE_COLORS = ["#38bdf8", "#0284c7", "#0ea5e9", "#075985", "#0c4a6e", "#60a5fa", "#2563eb", "#1d4ed8"];
+  const filialChartData = Object.values(filialMap).sort((a, b) => b.value - a.value);
+
+  // D. Chart Top Clientes
+  const clientMap: Record<string, { client: string; count: number; value: number }> = {};
+  registros.forEach(r => {
+    const cName = r.clienteNomeFantasia || r.clienteRazaoSocial || r.clienteNome || r.clienteCodigo || "Cliente Desconhecido";
+    if (!clientMap[cName]) {
+      clientMap[cName] = { client: cName, count: 0, value: 0 };
+    }
+    clientMap[cName].count += 1;
+    clientMap[cName].value += Number(r.valorNF) || 0;
+  });
+
+  const topClientesData = Object.values(clientMap)
+    .sort((a, b) => b.value - a.value)
+    .slice(0, 5)
+    .map(item => ({
+      name: item.client.length > 20 ? item.client.substring(0, 20) + "..." : item.client,
+      count: item.count,
+      value: item.value
+    }));
+
+  // E. Chart Top Motoristas
+  const driverMap: Record<string, { driver: string; count: number; value: number }> = {};
+  registros.forEach(r => {
+    const dName = r.motoristaNome || r.motoristaMatricula || "Motorista Não Informado";
+    if (!driverMap[dName]) {
+      driverMap[dName] = { driver: dName, count: 0, value: 0 };
+    }
+    driverMap[dName].count += 1;
+    driverMap[dName].value += Number(r.valorNF) || 0;
+  });
+
+  const topMotoristasData = Object.values(driverMap)
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 5)
+    .map(item => ({
+      name: item.driver.length > 20 ? item.driver.substring(0, 20) + "..." : item.driver,
+      count: item.count,
+      value: item.value
+    }));
+
+  const PIE_COLORS = ["#38bdf8", "#0284c7", "#0ea5e9", "#075985", "#38bdf8", "#60a5fa"];
 
   return (
     <div className="space-y-6">
-      {/* Cards de Métricas */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* Total Devoluções */}
-        <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-5 relative overflow-hidden group hover:border-slate-700 transition-all duration-300">
-          <div className="absolute top-0 right-0 w-24 h-24 bg-sky-500/5 rounded-full blur-xl translate-x-8 -translate-y-8 group-hover:bg-sky-500/10 transition-all duration-300"></div>
-          <div className="flex items-center justify-between mb-3">
-            <span className="text-xs font-semibold text-slate-400 font-mono tracking-wider uppercase">Frequência Total</span>
-            <div className="p-2 bg-sky-500/10 rounded-lg text-sky-400">
-              <TrendingDown className="w-5 h-5" />
+      {/* 1. SEÇÃO DE CARDS KPIS (7 CARDS) */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7 gap-3">
+        {/* Card 1: Total Devoluções */}
+        <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-3.5 flex flex-col justify-between relative overflow-hidden shadow-sm">
+          <div className="flex items-center justify-between text-slate-400">
+            <span className="text-[10px] font-bold font-mono uppercase tracking-wider">Total Dev.</span>
+            <div className="p-1.5 bg-sky-500/10 rounded-md text-sky-400">
+              <TrendingDown className="w-3.5 h-3.5" />
             </div>
           </div>
-          <div className="flex items-baseline gap-2">
-            <span className="text-3xl font-extrabold text-slate-100 tracking-tight">{totalCount}</span>
-            <span className="text-xs text-slate-500">devoluções</span>
-          </div>
-          <div className="mt-4 flex items-center gap-1.5 text-xs">
-            <span className="text-sky-400 font-mono font-medium flex items-center">
-              {pendingCount} Pendentes
+          <div className="mt-2">
+            <span className="text-2xl font-black text-slate-100 font-mono tracking-tight block">
+              {totalCount}
             </span>
-            <span className="text-slate-600 font-mono">|</span>
-            <span className="text-emerald-400 font-mono font-medium">
-              {resolvedCount} Resolvidas
-            </span>
+            <span className="text-[10px] text-slate-400 font-mono">Registros</span>
           </div>
         </div>
 
-        {/* Valor Total Devoluções */}
-        <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-5 relative overflow-hidden group hover:border-slate-700 transition-all duration-300">
-          <div className="absolute top-0 right-0 w-24 h-24 bg-sky-500/5 rounded-full blur-xl translate-x-8 -translate-y-8 group-hover:bg-sky-500/10 transition-all duration-300"></div>
-          <div className="flex items-center justify-between mb-3">
-            <span className="text-xs font-semibold text-slate-400 font-mono tracking-wider uppercase">Impacto Financeiro</span>
-            <div className="p-2 bg-sky-500/10 rounded-lg text-sky-400">
-              <DollarSign className="w-5 h-5" />
+        {/* Card 2: Valor Total */}
+        <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-3.5 flex flex-col justify-between relative overflow-hidden shadow-sm">
+          <div className="flex items-center justify-between text-slate-400">
+            <span className="text-[10px] font-bold font-mono uppercase tracking-wider">Valor Total</span>
+            <div className="p-1.5 bg-emerald-500/10 rounded-md text-emerald-400">
+              <DollarSign className="w-3.5 h-3.5" />
             </div>
           </div>
-          <div className="flex items-baseline gap-1">
-            <span className="text-sm font-semibold text-slate-400">R$</span>
-            <span className="text-3xl font-extrabold text-slate-100 tracking-tight">
-              {totalValue.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+          <div className="mt-2">
+            <span className="text-lg font-black text-emerald-400 font-mono tracking-tight block truncate">
+              R$ {totalValue.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </span>
-          </div>
-          <div className="mt-4 flex items-center gap-1.5 text-xs text-slate-400">
-            <span className="font-mono">Média de R$ {totalCount > 0 ? (totalValue / totalCount).toLocaleString("pt-BR", { maximumFractionDigits: 0 }) : "0"} por nota</span>
+            <span className="text-[10px] text-slate-400 font-mono">Valor Acumulado</span>
           </div>
         </div>
 
-        {/* Taxa de Devolução */}
-        <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-5 relative overflow-hidden group hover:border-slate-700 transition-all duration-300">
-          <div className="absolute top-0 right-0 w-24 h-24 bg-sky-500/5 rounded-full blur-xl translate-x-8 -translate-y-8 group-hover:bg-sky-500/10 transition-all duration-300"></div>
-          <div className="flex items-center justify-between mb-3">
-            <span className="text-xs font-semibold text-slate-400 font-mono tracking-wider uppercase">Índice Devolução</span>
-            <div className="p-2 bg-sky-500/10 rounded-lg text-sky-400">
-              <Percent className="w-5 h-5" />
+        {/* Card 3: Qtd NFs */}
+        <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-3.5 flex flex-col justify-between relative overflow-hidden shadow-sm">
+          <div className="flex items-center justify-between text-slate-400">
+            <span className="text-[10px] font-bold font-mono uppercase tracking-wider">Qtd. NFs</span>
+            <div className="p-1.5 bg-indigo-500/10 rounded-md text-indigo-400">
+              <FileText className="w-3.5 h-3.5" />
             </div>
           </div>
-          <div className="flex items-baseline gap-1">
-            <span className="text-3xl font-extrabold text-slate-100 tracking-tight">
-              {returnRate.toFixed(2)}%
+          <div className="mt-2">
+            <span className="text-2xl font-black text-slate-100 font-mono tracking-tight block">
+              {totalNFs}
             </span>
-            <span className="text-xs text-slate-500">do faturamento</span>
-          </div>
-          <div className="mt-4 flex items-center gap-1 text-xs">
-            {returnRate <= 1.5 ? (
-              <span className="text-emerald-400 font-medium flex items-center gap-0.5">
-                <ArrowDownRight className="w-3.5 h-3.5" /> Sob controle (Meta max 1.5%)
-              </span>
-            ) : (
-              <span className="text-rose-400 font-medium flex items-center gap-0.5">
-                <ArrowUpRight className="w-3.5 h-3.5" /> Acima da meta (Limite 1.5%)
-              </span>
-            )}
+            <span className="text-[10px] text-slate-400 font-mono">Notas Afetadas</span>
           </div>
         </div>
 
-        {/* Taxa de Resolução */}
-        <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-5 relative overflow-hidden group hover:border-slate-700 transition-all duration-300">
-          <div className="absolute top-0 right-0 w-24 h-24 bg-sky-500/5 rounded-full blur-xl translate-x-8 -translate-y-8 group-hover:bg-sky-500/10 transition-all duration-300"></div>
-          <div className="flex items-center justify-between mb-3">
-            <span className="text-xs font-semibold text-slate-400 font-mono tracking-wider uppercase">Eficiência Resolução</span>
-            <div className="p-2 bg-sky-500/10 rounded-lg text-sky-400">
-              <AlertCircle className="w-5 h-5" />
+        {/* Card 4: Pendentes */}
+        <div className="bg-slate-900/80 border border-rose-900/40 rounded-xl p-3.5 flex flex-col justify-between relative overflow-hidden shadow-sm">
+          <div className="flex items-center justify-between text-slate-400">
+            <span className="text-[10px] font-bold font-mono uppercase tracking-wider text-rose-400">Pendentes</span>
+            <div className="p-1.5 bg-rose-500/10 rounded-md text-rose-400">
+              <AlertTriangle className="w-3.5 h-3.5" />
             </div>
           </div>
-          <div className="flex items-baseline gap-1">
-            <span className="text-3xl font-extrabold text-slate-100 tracking-tight">
-              {resolutionRate.toFixed(1)}%
+          <div className="mt-2">
+            <span className="text-2xl font-black text-rose-400 font-mono tracking-tight block">
+              {pendingCount}
             </span>
-            <span className="text-xs text-slate-500">resolvidos</span>
+            <span className="text-[10px] text-rose-300/70 font-mono">Sem Tratativa</span>
           </div>
-          <div className="mt-4 flex items-center gap-1.5 text-xs text-slate-400">
-            <span className="font-mono">{resolvedCount} resolvidas de {totalCount} casos</span>
+        </div>
+
+        {/* Card 5: Em Andamento */}
+        <div className="bg-slate-900/80 border border-amber-900/40 rounded-xl p-3.5 flex flex-col justify-between relative overflow-hidden shadow-sm">
+          <div className="flex items-center justify-between text-slate-400">
+            <span className="text-[10px] font-bold font-mono uppercase tracking-wider text-amber-400">Em Andamento</span>
+            <div className="p-1.5 bg-amber-500/10 rounded-md text-amber-400">
+              <Clock className="w-3.5 h-3.5" />
+            </div>
+          </div>
+          <div className="mt-2">
+            <span className="text-2xl font-black text-amber-400 font-mono tracking-tight block">
+              {inProgressCount}
+            </span>
+            <span className="text-[10px] text-amber-300/70 font-mono">Em Tratativa</span>
+          </div>
+        </div>
+
+        {/* Card 6: Resolvidas */}
+        <div className="bg-slate-900/80 border border-emerald-900/40 rounded-xl p-3.5 flex flex-col justify-between relative overflow-hidden shadow-sm">
+          <div className="flex items-center justify-between text-slate-400">
+            <span className="text-[10px] font-bold font-mono uppercase tracking-wider text-emerald-400">Resolvidas</span>
+            <div className="p-1.5 bg-emerald-500/10 rounded-md text-emerald-400">
+              <CheckCircle2 className="w-3.5 h-3.5" />
+            </div>
+          </div>
+          <div className="mt-2">
+            <span className="text-2xl font-black text-emerald-400 font-mono tracking-tight block">
+              {resolvedCount}
+            </span>
+            <span className="text-[10px] text-emerald-300/70 font-mono">Finalizadas</span>
+          </div>
+        </div>
+
+        {/* Card 7: Canceladas */}
+        <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-3.5 flex flex-col justify-between relative overflow-hidden shadow-sm">
+          <div className="flex items-center justify-between text-slate-400">
+            <span className="text-[10px] font-bold font-mono uppercase tracking-wider text-slate-400">Canceladas</span>
+            <div className="p-1.5 bg-slate-800 rounded-md text-slate-400">
+              <XCircle className="w-3.5 h-3.5" />
+            </div>
+          </div>
+          <div className="mt-2">
+            <span className="text-2xl font-black text-slate-400 font-mono tracking-tight block">
+              {canceledCount}
+            </span>
+            <span className="text-[10px] text-slate-500 font-mono">Anuladas</span>
           </div>
         </div>
       </div>
 
-      {/* Gráficos Principais */}
+      {/* 2. GRÁFICOS (5 GRÁFICOS ORGANIZADOS) */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Histórico Temporal */}
-        <div className="lg:col-span-2 bg-slate-900/60 border border-slate-800 rounded-xl p-5">
-          <h3 className="text-sm font-semibold text-slate-200 mb-4 font-mono uppercase tracking-wider">Evolução Diária de Ocorrências (Últimos Dias)</h3>
-          <div className="h-[280px]">
-            {totalCount > 0 ? (
+        {/* Gráfico 1: Evolução Mensal (BarChart / AreaChart) */}
+        <div className="lg:col-span-2 bg-slate-900/80 border border-slate-800 rounded-xl p-5 shadow-sm">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h3 className="text-xs font-bold text-slate-100 font-mono uppercase tracking-wider flex items-center gap-2">
+                <TrendingDown className="w-4 h-4 text-sky-400" /> Gráfico Por Mês (Evolução em R$)
+              </h3>
+              <p className="text-[11px] text-slate-400 mt-0.5">Valores acumulados de devolução nos últimos meses.</p>
+            </div>
+          </div>
+          <div className="h-[240px]">
+            {monthChartData.length > 0 ? (
               <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={trendStats}>
+                <AreaChart data={monthChartData}>
                   <defs>
-                    <linearGradient id="colorValue" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#0ea5e9" stopOpacity={0.2}/>
-                      <stop offset="95%" stopColor="#0ea5e9" stopOpacity={0}/>
+                    <linearGradient id="colorMonthVal" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#38bdf8" stopOpacity={0.3}/>
+                      <stop offset="95%" stopColor="#38bdf8" stopOpacity={0}/>
                     </linearGradient>
                   </defs>
                   <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
-                  <XAxis dataKey="date" stroke="#64748b" fontSize={11} tickLine={false} />
-                  <YAxis stroke="#64748b" fontSize={11} tickLine={false} />
+                  <XAxis dataKey="monthName" stroke="#64748b" fontSize={11} tickLine={false} />
+                  <YAxis stroke="#64748b" fontSize={11} tickLine={false} tickFormatter={(v) => `R$${v >= 1000 ? (v/1000).toFixed(0) + "k" : v}`} />
                   <Tooltip 
+                    formatter={(v: any) => [`R$ ${Number(v).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}`, "Valor Devolvido"]}
                     contentStyle={{ backgroundColor: "#0b1329", borderColor: "#1e293b", borderRadius: "8px", color: "#f8fafc" }}
-                    labelClassName="text-sky-400 font-semibold text-xs font-mono"
                   />
-                  <Legend wrapperStyle={{ fontSize: 11, paddingTop: 10 }} />
-                  <Area type="monotone" dataKey="valor" name="Valor Retornado (R$)" stroke="#0ea5e9" strokeWidth={2} fillOpacity={1} fill="url(#colorValue)" />
-                  <Line type="monotone" dataKey="volume" name="Qtd Ocorrências" stroke="#38bdf8" strokeWidth={1.5} activeDot={{ r: 4 }} />
+                  <Area type="monotone" dataKey="value" name="Valor (R$)" stroke="#38bdf8" strokeWidth={2} fillOpacity={1} fill="url(#colorMonthVal)" />
                 </AreaChart>
               </ResponsiveContainer>
             ) : (
               <div className="h-full flex items-center justify-center text-slate-500 font-mono text-xs">
-                Nenhum dado cadastrado para exibir evolução temporal.
+                Sem histórico de datas suficiente.
               </div>
             )}
           </div>
         </div>
 
-        {/* Divisão por Motivo */}
-        <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-5 flex flex-col">
-          <h3 className="text-sm font-semibold text-slate-200 mb-4 font-mono uppercase tracking-wider">Principais Motivos</h3>
-          <div className="flex-1 min-h-[200px] flex items-center justify-center">
-            {reasonStats.length > 0 ? (
+        {/* Gráfico 2: Gráfico por Motivo */}
+        <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-5 shadow-sm flex flex-col justify-between">
+          <div>
+            <h3 className="text-xs font-bold text-slate-100 font-mono uppercase tracking-wider flex items-center gap-2 mb-1">
+              <HelpCircle className="w-4 h-4 text-sky-400" /> Gráfico Por Motivo
+            </h3>
+            <p className="text-[11px] text-slate-400 mb-3">Principais motivos Y-Codes registrados.</p>
+          </div>
+          <div className="h-[180px] flex items-center justify-center">
+            {reasonChartData.length > 0 ? (
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
                   <Pie
-                    data={reasonStats}
+                    data={reasonChartData}
                     cx="50%"
                     cy="50%"
-                    innerRadius={60}
-                    outerRadius={80}
+                    innerRadius={45}
+                    outerRadius={70}
                     paddingAngle={3}
-                    dataKey="valor"
+                    dataKey="value"
                     nameKey="code"
                   >
-                    {reasonStats.map((entry, index) => (
+                    {reasonChartData.map((_, index) => (
                       <Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
                     ))}
                   </Pie>
                   <Tooltip 
-                    formatter={(val: number) => `R$ ${val.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}`}
+                    formatter={(v: any) => [`R$ ${Number(v).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}`, "Valor"]}
                     contentStyle={{ backgroundColor: "#0b1329", borderColor: "#1e293b", borderRadius: "8px" }}
                   />
                 </PieChart>
@@ -271,92 +338,87 @@ export default function DevolucoesDashboard({ registros, unidades }: DashboardPr
               <span className="text-slate-500 font-mono text-xs">Sem dados de motivos</span>
             )}
           </div>
-          <div className="mt-2 space-y-1.5 max-h-[110px] overflow-y-auto scrollbar-thin">
-            {reasonStats.slice(0, 4).map((entry, idx) => (
-              <div key={entry.code} className="flex items-center justify-between text-xs font-mono">
-                <div className="flex items-center gap-1.5 truncate">
-                  <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: PIE_COLORS[idx % PIE_COLORS.length] }}></span>
-                  <span className="text-slate-300 truncate">{entry.code} - {entry.name.split("-")[1]?.replace("...", "") || "Outros"}</span>
-                </div>
-                <span className="text-slate-400 font-semibold text-[11px]">R$ {entry.valor.toLocaleString("pt-BR", { maximumFractionDigits: 0 })}</span>
+          <div className="space-y-1.5 max-h-[80px] overflow-y-auto scrollbar-thin mt-2">
+            {reasonChartData.slice(0, 3).map((r, idx) => (
+              <div key={r.code} className="flex items-center justify-between text-xs font-mono">
+                <span className="text-slate-300 truncate text-[11px] flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: PIE_COLORS[idx % PIE_COLORS.length] }}></span>
+                  {r.code} - {r.desc}
+                </span>
+                <span className="text-sky-400 font-bold text-[11px]">R$ {r.value.toLocaleString("pt-BR", { maximumFractionDigits: 0 })}</span>
               </div>
             ))}
           </div>
         </div>
       </div>
 
-      {/* Visão de Filiais e Listas Críticas */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Retorno por Unidade */}
-        <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-5">
-          <h3 className="text-sm font-semibold text-slate-200 mb-4 font-mono uppercase tracking-wider">Volume e Valor por Unidade</h3>
-          <div className="h-[220px]">
-            {unitStats.length > 0 ? (
+      {/* Terceira Linha de Gráficos: Filial, Top Clientes e Top Motoristas */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        {/* Gráfico 3: Gráfico por Filial */}
+        <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-5 shadow-sm">
+          <h3 className="text-xs font-bold text-slate-100 font-mono uppercase tracking-wider flex items-center gap-2 mb-1">
+            <Building2 className="w-4 h-4 text-emerald-400" /> Gráfico Por Filial
+          </h3>
+          <p className="text-[11px] text-slate-400 mb-3">Devoluções acumuladas por unidade.</p>
+          <div className="h-[180px]">
+            {filialChartData.length > 0 ? (
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={unitStats}>
+                <BarChart data={filialChartData} layout="vertical">
                   <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
-                  <XAxis dataKey="name" stroke="#64748b" fontSize={11} tickLine={false} />
-                  <YAxis yAxisId="left" orientation="left" stroke="#38bdf8" fontSize={10} />
-                  <YAxis yAxisId="right" orientation="right" stroke="#10b981" fontSize={10} />
-                  <Tooltip contentStyle={{ backgroundColor: "#0b1329", borderColor: "#1e293b", borderRadius: "8px" }} />
-                  <Bar yAxisId="left" dataKey="valor" name="Valor (R$)" fill="#38bdf8" radius={[4, 4, 0, 0]} />
-                  <Bar yAxisId="right" dataKey="volume" name="Qtd Casos" fill="#10b981" radius={[4, 4, 0, 0]} />
+                  <XAxis type="number" stroke="#64748b" fontSize={10} tickFormatter={(v) => `R$${v >= 1000 ? (v/1000).toFixed(0) + "k" : v}`} />
+                  <YAxis type="category" dataKey="filial" stroke="#94a3b8" fontSize={10} width={80} />
+                  <Tooltip formatter={(v: any) => [`R$ ${Number(v).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}`, "Valor"]} contentStyle={{ backgroundColor: "#0b1329", borderColor: "#1e293b", borderRadius: "8px" }} />
+                  <Bar dataKey="value" fill="#10b981" radius={[0, 4, 4, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             ) : (
-              <div className="h-full flex items-center justify-center text-slate-500 font-mono text-xs">
-                Nenhum registro por filial encontrado.
-              </div>
+              <div className="h-full flex items-center justify-center text-slate-500 font-mono text-xs">Sem dados de filial.</div>
             )}
           </div>
         </div>
 
-        {/* Top Motoristas / Clientes Críticos */}
-        <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-5">
-          <h3 className="text-sm font-semibold text-slate-200 mb-3.5 font-mono uppercase tracking-wider">Top Motoristas (Por Valor de Devolução)</h3>
-          <div className="space-y-3">
-            {topDrivers.length > 0 ? (
-              topDrivers.map((item, idx) => (
-                <div key={item.nome} className="flex items-center justify-between p-2.5 bg-slate-950/40 rounded-lg border border-slate-800/60 hover:border-slate-800 transition-colors">
-                  <div className="flex items-center gap-2.5 truncate">
-                    <span className="w-5 h-5 flex items-center justify-center bg-slate-800 text-sky-400 font-mono font-bold text-xs rounded-full">{idx + 1}</span>
-                    <span className="text-xs font-semibold text-slate-300 truncate">{item.nome}</span>
-                  </div>
-                  <div className="text-right font-mono shrink-0">
-                    <div className="text-[11px] font-bold text-slate-200">R$ {item.value.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
-                    <div className="text-[9px] text-slate-500">{item.count} ocorrência{item.count > 1 ? "s" : ""}</div>
-                  </div>
-                </div>
-              ))
+        {/* Gráfico 4: Top Clientes */}
+        <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-5 shadow-sm">
+          <h3 className="text-xs font-bold text-slate-100 font-mono uppercase tracking-wider flex items-center gap-2 mb-1">
+            <Users className="w-4 h-4 text-amber-400" /> Top Clientes (Valor)
+          </h3>
+          <p className="text-[11px] text-slate-400 mb-3">Maiores clientes em valor devolvido.</p>
+          <div className="h-[180px]">
+            {topClientesData.length > 0 ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={topClientesData} layout="vertical">
+                  <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
+                  <XAxis type="number" stroke="#64748b" fontSize={10} tickFormatter={(v) => `R$${v >= 1000 ? (v/1000).toFixed(0) + "k" : v}`} />
+                  <YAxis type="category" dataKey="name" stroke="#94a3b8" fontSize={10} width={90} />
+                  <Tooltip formatter={(v: any) => [`R$ ${Number(v).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}`, "Valor"]} contentStyle={{ backgroundColor: "#0b1329", borderColor: "#1e293b", borderRadius: "8px" }} />
+                  <Bar dataKey="value" fill="#f59e0b" radius={[0, 4, 4, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
             ) : (
-              <div className="text-center py-10 text-slate-500 font-mono text-xs">
-                Nenhum motorista registrado.
-              </div>
+              <div className="h-full flex items-center justify-center text-slate-500 font-mono text-xs">Sem dados de clientes.</div>
             )}
           </div>
         </div>
 
-        {/* Top Clientes Críticos */}
-        <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-5">
-          <h3 className="text-sm font-semibold text-slate-200 mb-3.5 font-mono uppercase tracking-wider">Top Clientes Críticos</h3>
-          <div className="space-y-3">
-            {topCustomers.length > 0 ? (
-              topCustomers.map((item, idx) => (
-                <div key={item.nome} className="flex items-center justify-between p-2.5 bg-slate-950/40 rounded-lg border border-slate-800/60 hover:border-slate-800 transition-colors">
-                  <div className="flex items-center gap-2.5 truncate">
-                    <span className="w-5 h-5 flex items-center justify-center bg-slate-800 text-rose-400 font-mono font-bold text-xs rounded-full">{idx + 1}</span>
-                    <span className="text-xs font-semibold text-slate-300 truncate">{item.nome}</span>
-                  </div>
-                  <div className="text-right font-mono shrink-0">
-                    <div className="text-[11px] font-bold text-slate-200">R$ {item.value.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
-                    <div className="text-[9px] text-slate-500">{item.count} caso{item.count > 1 ? "s" : ""}</div>
-                  </div>
-                </div>
-              ))
+        {/* Gráfico 5: Top Motoristas */}
+        <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-5 shadow-sm">
+          <h3 className="text-xs font-bold text-slate-100 font-mono uppercase tracking-wider flex items-center gap-2 mb-1">
+            <User className="w-4 h-4 text-indigo-400" /> Top Motoristas (Volume)
+          </h3>
+          <p className="text-[11px] text-slate-400 mb-3">Motoristas com maior nº de devoluções.</p>
+          <div className="h-[180px]">
+            {topMotoristasData.length > 0 ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={topMotoristasData} layout="vertical">
+                  <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
+                  <XAxis type="number" stroke="#64748b" fontSize={10} precision={0} />
+                  <YAxis type="category" dataKey="name" stroke="#94a3b8" fontSize={10} width={90} />
+                  <Tooltip formatter={(v: any) => [`${v} devoluções`, "Qtd"]} contentStyle={{ backgroundColor: "#0b1329", borderColor: "#1e293b", borderRadius: "8px" }} />
+                  <Bar dataKey="count" fill="#6366f1" radius={[0, 4, 4, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
             ) : (
-              <div className="text-center py-10 text-slate-500 font-mono text-xs">
-                Nenhum cliente registrado.
-              </div>
+              <div className="h-full flex items-center justify-center text-slate-500 font-mono text-xs">Sem dados de motoristas.</div>
             )}
           </div>
         </div>

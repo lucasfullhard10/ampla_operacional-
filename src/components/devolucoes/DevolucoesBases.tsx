@@ -98,11 +98,12 @@ export default function DevolucoesBases({ unidades, currentUser }: BasesProps) {
   const handleDelete = async (id: string) => {
     if (!confirm("Tem certeza que deseja excluir este item?")) return;
     try {
+      const encodedId = encodeURIComponent(id);
       const endpoint = 
-        activeSubTab === "clientes" ? `/api/devolucoes/clientes/${id}` :
-        activeSubTab === "motoristas" ? `/api/devolucoes/motoristas/${id}` :
-        activeSubTab === "hierarquia" ? `/api/devolucoes/hierarquia/${id}` :
-        `/api/devolucoes/motivos/${id}`;
+        activeSubTab === "clientes" ? `/api/devolucoes/clientes/${encodedId}` :
+        activeSubTab === "motoristas" ? `/api/devolucoes/motoristas/${encodedId}` :
+        activeSubTab === "hierarquia" ? `/api/devolucoes/hierarquia/${encodedId}` :
+        `/api/devolucoes/motivos/${encodedId}`;
 
       const res = await fetch(endpoint, { 
         method: "DELETE",
@@ -113,9 +114,13 @@ export default function DevolucoesBases({ unidades, currentUser }: BasesProps) {
       });
       if (res.ok) {
         fetchBases();
+      } else {
+        const err = await res.json().catch(() => ({}));
+        alert(err.error || "Erro ao excluir item.");
       }
     } catch (err) {
       console.error(err);
+      alert("Falha na requisição de exclusão.");
     }
   };
 

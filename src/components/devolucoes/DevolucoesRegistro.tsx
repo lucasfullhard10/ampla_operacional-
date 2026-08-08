@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
-import { Plus, Search, Filter, Calendar, CheckSquare, XCircle, Trash2, Eye, ShieldCheck, RefreshCw, FileText, Edit3 } from "lucide-react";
+import { Plus, Search, Filter, Calendar, CheckSquare, XCircle, Trash2, Eye, ShieldCheck, RefreshCw, FileText, Edit3, AlertTriangle, CheckCircle2, X } from "lucide-react";
 import { DevolucaoRegistro, DevolucaoCliente, DevolucaoMotorista, DevolucaoMotivo } from "../../types";
+import DevolucoesDeleteModal from "./DevolucoesDeleteModal";
 
 interface RegistroProps {
   unidades: any[];
@@ -25,6 +26,20 @@ export default function DevolucoesRegistro({ unidades, currentUser, onRefresh }:
   const [editFormData, setEditFormData] = useState<any>(null);
   const [isDetailOpen, setIsDetailOpen] = useState(false);
   const [selectedReg, setSelectedReg] = useState<DevolucaoRegistro | null>(null);
+
+  // Delete modal state
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [recordToDelete, setRecordToDelete] = useState<DevolucaoRegistro | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [toastMessage, setToastMessage] = useState<{ text: string; type: "success" | "error" } | null>(null);
+
+  // Auto-hide toast
+  useEffect(() => {
+    if (toastMessage) {
+      const timer = setTimeout(() => setToastMessage(null), 4000);
+      return () => clearTimeout(timer);
+    }
+  }, [toastMessage]);
 
   // Autocomplete states
   const [clientSearch, setClientSearch] = useState("");
@@ -71,17 +86,45 @@ export default function DevolucoesRegistro({ unidades, currentUser, onRefresh }:
         "x-user-email": currentUser?.email || "",
         "x-selected-unit": currentUser?.unidadeId || "Todas"
       };
-      const [resReg, resCli, resMot, resDrv] = await Promise.all([
+      const [resReg, resCli, resMot, resDrv, resSysDrv] = await Promise.all([
         fetch("/api/devolucoes/registros", { headers }),
         fetch("/api/devolucoes/clientes", { headers }),
         fetch("/api/devolucoes/motivos", { headers }),
-        fetch("/api/devolucoes/motoristas", { headers })
+        fetch("/api/devolucoes/motoristas", { headers }),
+        fetch("/api/motoristas", { headers })
       ]);
 
       if (resReg.ok) setRegistros(await resReg.json());
       if (resCli.ok) setClientes(await resCli.json());
       if (resMot.ok) setMotivos(await resMot.json());
-      if (resDrv.ok) setMotoristas(await resDrv.json());
+
+      let devDrivers: DevolucaoMotorista[] = [];
+      let sysDrivers: any[] = [];
+      if (resDrv.ok) devDrivers = await resDrv.json();
+      if (resSysDrv && resSysDrv.ok) sysDrivers = await resSysDrv.json();
+
+      const mergedDrivers: DevolucaoMotorista[] = [...devDrivers];
+      const seen = new Set(devDrivers.map(d => (d.matricula || d.id || d.nome).toLowerCase()));
+
+      sysDrivers.forEach((m: any) => {
+        if (m.statusFinal === "BLOQUEADO") return;
+        const key = (m.matricula || m.id || m.cpf || m.nome).toLowerCase();
+        if (!seen.has(key)) {
+          seen.add(key);
+          mergedDrivers.push({
+            id: m.id || m.matricula || m.cpf || "",
+            matricula: m.matricula || m.id || m.cpf || "",
+            nome: m.nome,
+            telefone: m.telefone || "",
+            funcao: m.tipo || "Motorista",
+            unidadeId: m.unidadeId || "",
+            status: "Ativo",
+            dataCadastro: m.dataCriacao || new Date().toISOString()
+          });
+        }
+      });
+
+      setMotoristas(mergedDrivers);
     } catch (err) {
       console.error(err);
     } finally {
@@ -303,22 +346,62 @@ export default function DevolucoesRegistro({ unidades, currentUser, onRefresh }:
     }
   };
 
-  const handleDelete = async (id: string) => {
-    if (!confirm("Tem certeza que deseja excluir esta devolução de forma permanente? Esta ação será registrada no log de auditoria.")) return;
+  // Trigger Delete Confirmation Modal
+  const handleDelete = (record: any) => {
+    if (!record) return;
+    const recObj = typeof record === "object" ? record : { id: record };
+    setRecordToDelete(recObj);
+    setIsDeleteModalOpen(true);
+  };
+
+  // Confirm and Execute Deletion via API
+  const handleConfirmDelete = async () => {
+    if (!recordToDelete) return;
+    setIsDeleting(true);
+
+    const targetId = recordToDelete.id || recordToDelete.protocolo || recordToDelete.numeroNF;
+    if (!targetId) {
+      setToastMessage({ text: "Não foi possível excluir o registro.", type: "error" });
+      setIsDeleting(false);
+      return;
+    }
+
     try {
-      const res = await fetch(`/api/devolucoes/registros/${id}`, {
+      const queryParams = new URLSearchParams({
+        id: recordToDelete.id || "",
+        protocolo: recordToDelete.protocolo || "",
+        nf: recordToDelete.numeroNF || "",
+        clienteCodigo: recordToDelete.clienteCodigo || ""
+      }).toString();
+
+      const res = await fetch(`/api/devolucoes/registros/${encodeURIComponent(targetId)}?${queryParams}`, {
         method: "DELETE",
         headers: {
           "x-user-email": currentUser?.email || "",
           "x-selected-unit": currentUser?.unidadeId || "Todas"
         }
       });
+
       if (res.ok) {
-        fetchData();
+        setRegistros((prev) => prev.filter((r) => 
+          r.id !== recordToDelete.id && 
+          r.protocolo !== recordToDelete.protocolo && 
+          r.numeroNF !== recordToDelete.numeroNF
+        ));
+        setToastMessage({ text: "Registro excluído com sucesso.", type: "success" });
+        setIsDeleteModalOpen(false);
+        setRecordToDelete(null);
+
+        await fetchData();
         onRefresh();
+      } else {
+        setToastMessage({ text: "Não foi possível excluir o registro.", type: "error" });
       }
     } catch (err) {
-      console.error(err);
+      console.error("Erro na exclusão em DevolucoesRegistro:", err);
+      setToastMessage({ text: "Não foi possível excluir o registro.", type: "error" });
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -493,7 +576,7 @@ export default function DevolucoesRegistro({ unidades, currentUser, onRefresh }:
                           <Edit3 className="w-3.5 h-3.5" />
                         </button>
                         <button
-                          onClick={() => handleDelete(reg.id)}
+                          onClick={() => handleDelete(reg)}
                           className="p-1.5 bg-slate-800/60 hover:bg-rose-500/10 hover:text-rose-400 text-slate-500 rounded transition-colors"
                           title="Excluir Devolução"
                         >
@@ -991,6 +1074,26 @@ export default function DevolucoesRegistro({ unidades, currentUser, onRefresh }:
                 </div>
               )}
 
+              {/* Campos Extras */}
+              {selectedReg.camposExtras && Object.keys(selectedReg.camposExtras).length > 0 && (
+                <div className="space-y-1.5">
+                  <span className="text-[10px] text-sky-400 font-bold uppercase block tracking-wider">Campos Extras da Planilha (Base Corporativa)</span>
+                  <div className="grid grid-cols-2 gap-2 bg-slate-900/40 p-3 rounded-lg border border-slate-850 max-h-[160px] overflow-y-auto scrollbar-thin">
+                    {Object.entries(selectedReg.camposExtras).map(([key, value]) => {
+                      if (value === undefined || value === null || String(value).trim() === "") return null;
+                      return (
+                        <div key={key} className="border-b border-slate-800/40 pb-1.5 last:border-0 font-mono text-[10px] min-w-0">
+                          <span className="text-slate-500 uppercase block truncate" title={key}>{key}</span>
+                          <span className="text-slate-300 font-medium block truncate" title={String(value)}>
+                            {String(value)}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
               {/* Action */}
               <div className="flex justify-end gap-3 pt-2">
                 <button
@@ -1372,6 +1475,42 @@ export default function DevolucoesRegistro({ unidades, currentUser, onRefresh }:
               </div>
             </form>
           </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      <DevolucoesDeleteModal
+        isOpen={isDeleteModalOpen}
+        onClose={() => {
+          if (!isDeleting) {
+            setIsDeleteModalOpen(false);
+            setRecordToDelete(null);
+          }
+        }}
+        onConfirm={handleConfirmDelete}
+        record={recordToDelete}
+        isDeleting={isDeleting}
+      />
+
+      {/* TOAST NOTIFICATION */}
+      {toastMessage && (
+        <div className={`fixed bottom-6 right-6 z-50 px-4 py-3 rounded-xl shadow-2xl border flex items-center gap-3 text-xs font-mono font-bold transition-all animate-fade-in ${
+          toastMessage.type === "success" 
+            ? "bg-emerald-950/90 border-emerald-500/40 text-emerald-300 shadow-emerald-950/50" 
+            : "bg-rose-950/90 border-rose-500/40 text-rose-300 shadow-rose-950/50"
+        }`}>
+          {toastMessage.type === "success" ? (
+            <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
+          ) : (
+            <AlertTriangle className="w-5 h-5 text-rose-400 shrink-0" />
+          )}
+          <span>{toastMessage.text}</span>
+          <button 
+            onClick={() => setToastMessage(null)} 
+            className="ml-2 text-slate-400 hover:text-white p-0.5 rounded hover:bg-slate-800 transition-colors"
+          >
+            <X className="w-4 h-4" />
+          </button>
         </div>
       )}
     </div>

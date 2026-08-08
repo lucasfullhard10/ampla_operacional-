@@ -1,6 +1,6 @@
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import * as XLSX from "xlsx";
-import { Upload, FileSpreadsheet, CheckCircle2, AlertCircle, RefreshCw, Layers, Check, Clock, Users, UserCheck, CheckSquare, Tag, AlertTriangle, Edit3 } from "lucide-react";
+import { Upload, FileSpreadsheet, CheckCircle2, AlertCircle, RefreshCw, Layers, Check, Clock, Users, UserCheck, CheckSquare, Tag, AlertTriangle, Edit3, Sparkles } from "lucide-react";
 
 interface ImportProps {
   unidades: any[];
@@ -10,10 +10,12 @@ interface ImportProps {
 
 export default function DevolucoesImport({ unidades, onRefresh, currentUser }: ImportProps) {
   const [dragActive, setDragActive] = useState(false);
+  const [showMappingPanel, setShowMappingPanel] = useState(false);
   const [file, setFile] = useState<File | null>(null);
   const [parsedData, setParsedData] = useState<any[]>([]);
-  const [, setHeaders] = useState<string[]>([]);
+  const [headers, setHeaders] = useState<string[]>([]);
   const [detectedMappings, setDetectedMappings] = useState<Record<string, string>>({});
+  const [layoutLearnedMessage, setLayoutLearnedMessage] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [importProgress, setImportProgress] = useState<{ current: number; total: number } | null>(null);
   const [status, setStatus] = useState<{ type: "success" | "error" | null; msg: string }>({ type: null, msg: "" });
@@ -29,7 +31,74 @@ export default function DevolucoesImport({ unidades, onRefresh, currentUser }: I
   const [importSummary, setImportSummary] = useState<any | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const autoDetectColumns = (rawHeaders: string[]) => {
+  const [modelos, setModelos] = useState<any[]>([]);
+  const [layoutName, setLayoutName] = useState("");
+  const [isNewLayout, setIsNewLayout] = useState(false);
+  const [activeModelId, setActiveModelId] = useState<string | null>(null);
+  const [showAllFields, setShowAllFields] = useState(false);
+
+  const fetchModelos = async () => {
+    try {
+      const res = await fetch("/api/devolucoes/modelos", {
+        headers: {
+          "x-user-email": currentUser?.email || ""
+        }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setModelos(data);
+        return data;
+      }
+    } catch (err) {
+      console.error("Error fetching modelos", err);
+    }
+    return [];
+  };
+
+  useEffect(() => {
+    fetchModelos();
+  }, [currentUser]);
+
+interface SystemField {
+  key: string;
+  label: string;
+  group: string;
+  required: boolean;
+  synonyms: string[];
+}
+
+const SYSTEM_FIELDS: SystemField[] = [
+  { key: "data", label: "Data do Ocorrido", group: "Devolução", required: true, synonyms: ["data", "emissao", "dt", "data devolucao", "data da devolucao", "data da ocorrencia", "data entrega", "data retorno", "data do ocorrido"] },
+  { key: "clienteCodigo", label: "Código do Cliente", group: "Clientes", required: true, synonyms: ["cod cliente", "codigo cliente", "cod pdv", "codigo pdv", "pdv", "loja", "cliente sap", "codigo sap", "cliente erp", "codigo erp", "parceiro", "destinatario", "codigo destinatario", "cliente"] },
+  { key: "valorNF", label: "Valor", group: "Devolução", required: true, synonyms: ["valor", "valor total", "total", "valor devolucao", "valor devolvida", "total devolvido", "valor produtos", "vlr nf", "vlr dev", "vlr", "valor_liquido"] },
+  { key: "numeroNF", label: "Número da NF", group: "Devolução", required: false, synonyms: ["numero nf", "numero da nf", "nf", "nota", "numero", "documento"] },
+  { key: "clienteRazaoSocial", label: "Razão Social", group: "Clientes", required: false, synonyms: ["razao social", "razao", "nome cliente", "nome razao", "razao social cliente", "nome razao social", "cliente nome"] },
+  { key: "clienteNomeFantasia", label: "Nome Fantasia", group: "Clientes", required: false, synonyms: ["nome fantasia", "fantasia", "nome comercial", "apelido", "fantasia cliente", "nome pdv"] },
+  { key: "canal", label: "Canal", group: "Clientes", required: false, synonyms: ["canal", "canal venda", "canal de venda", "canalvenda", "meio de venda", "segmento", "subcanal"] },
+  { key: "endereco", label: "Endereço", group: "Clientes", required: false, synonyms: ["endereco", "logradouro", "rua", "av", "avenida", "endereco cliente", "endereco pdv"] },
+  { key: "cidade", label: "Cidade", group: "Clientes", required: false, synonyms: ["cidade", "municipio", "localidade", "cidade cliente", "cidade pdv"] },
+  { key: "uf", label: "UF", group: "Clientes", required: false, synonyms: ["uf", "estado", "est", "uf cliente", "uf pdv"] },
+  { key: "telefone", label: "Telefone do Cliente", group: "Clientes", required: false, synonyms: ["telefone", "tel", "contato", "telefone cliente", "telefone pdv", "fone", "celular"] },
+  { key: "cnpj", label: "CNPJ", group: "Clientes", required: false, synonyms: ["cnpj", "c n p j", "inscricao", "inscricao estadual", "ie", "cpf", "cpf cnpj"] },
+  { key: "area", label: "Área", group: "Clientes", required: false, synonyms: ["area", "setor", "area responsavel", "regiao", "setor responsavel"] },
+  { key: "status", label: "Status do Cliente", group: "Clientes", required: false, synonyms: ["status", "situacao", "situacao cliente", "status cliente", "ativo", "bloqueado"] },
+  { key: "motoristaNome", label: "Nome do Motorista", group: "Motoristas", required: false, synonyms: ["motorista", "condutor", "entregador", "nome motorista", "nome condutor", "nome entregador"] },
+  { key: "motoristaMatricula", label: "Matrícula do Motorista", group: "Motoristas", required: false, synonyms: ["matricula", "chapa", "re", "funcional", "codigo funcionario", "matricula motorista", "chapa motorista"] },
+  { key: "motoristaTelefone", label: "Telefone do Motorista", group: "Motoristas", required: false, synonyms: ["telefone motorista", "tel motorista", "contato motorista", "fone motorista", "celular motorista"] },
+  { key: "motoristaFuncao", label: "Função do Motorista", group: "Motoristas", required: false, synonyms: ["funcao", "cargo", "funcao motorista", "cargo motorista"] },
+  { key: "motoristaStatus", label: "Status do Motorista", group: "Motoristas", required: false, synonyms: ["status motorista", "situacao motorista", "motorista status"] },
+  { key: "motoristaUnidade", label: "Unidade do Motorista", group: "Motoristas", required: false, synonyms: ["unidade motorista", "filial motorista", "motorista unidade", "motorista filial"] },
+  { key: "vendedor", label: "Vendedor RCA", group: "Hierarquia Comercial", required: false, synonyms: ["vendedor", "rca", "representante", "vend", "consultor", "promotor", "nome vendedor", "vendedor rca"] },
+  { key: "supervisor", label: "Supervisor", group: "Hierarquia Comercial", required: false, synonyms: ["supervisor", "sup", "coordenador", "coordenador vendas", "supervisor vendas", "supervisor rca"] },
+  { key: "gerente", label: "Gerente", group: "Hierarquia Comercial", required: false, synonyms: ["gerente", "ger", "gerencia", "gerente vendas", "gerente rca", "gerente canal"] },
+  { key: "hierarquiaTelefone", label: "Telefone do Vendedor", group: "Hierarquia Comercial", required: false, synonyms: ["telefone vendedor", "tel vendedor", "telefone rca", "tel rca", "contato vendedor"] },
+  { key: "hierarquiaEmail", label: "Email do Vendedor", group: "Hierarquia Comercial", required: false, synonyms: ["email", "e mail", "email vendedor", "email rca", "email supervisor", "email gerente"] },
+  { key: "motivoCodigo", label: "Código do Motivo", group: "Motivo Heineken", required: false, synonyms: ["codigo motivo", "cod motivo", "motivo codigo", "motivo cod", "codigo do motivo", "cod do motivo"] },
+  { key: "motivoDescricao", label: "Descrição do Motivo", group: "Motivo Heineken", required: false, synonyms: ["motivo", "motivo devolucao", "motivo heineken", "descricao motivo", "descricao do motivo", "ocorrencia", "ocorrencia", "descricao", "historico", "motivo desc"] },
+  { key: "observacao", label: "Observação", group: "Geral", required: false, synonyms: ["observacao", "obs", "comentario", "comentarios", "obs devolucao", "observacoes"] },
+];
+
+  const autoDetectColumns = (rawHeaders: string[], fetchedModels?: any[]) => {
     const cleanStr = (s: string) => 
       String(s || "").toLowerCase()
         .normalize("NFD")
@@ -37,111 +106,109 @@ export default function DevolucoesImport({ unidades, onRefresh, currentUser }: I
         .replace(/[^a-z0-9]/g, " ")     // replace special chars with space
         .trim();
 
-    const detected: Record<string, string> = {
-      data: "",
-      clienteCodigo: "",
-      clienteRazaoSocial: "",
-      motoristaNome: "",
-      motoristaMatricula: "",
-      supervisor: "",
-      vendedor: "",
-      motivoDescricao: "",
-      motivoCodigo: "",
-      valorNF: "",
-      unidadeId: "",
-      numeroNF: ""
-    };
+    const detected: Record<string, string> = {};
+    SYSTEM_FIELDS.forEach(sf => {
+      detected[sf.key] = "";
+    });
 
-    const cleanHeaders = rawHeaders.map(h => ({ original: h, clean: cleanStr(h) }));
-    const usedHeaders = new Set<string>();
+    let layoutMatched = false;
+    let matchedName = "";
+    let matchedId = null;
 
-    const findMatch = (synonymsList: string[]): string => {
-      const cleanSyns = synonymsList.map(s => cleanStr(s));
-      
-      // 1st pass: exact matches
-      for (const h of cleanHeaders) {
-        if (usedHeaders.has(h.original)) continue;
-        if (cleanSyns.includes(h.clean)) {
-          usedHeaders.add(h.original);
-          return h.original;
+    // 1. Try database models from server first
+    const activeModels = fetchedModels || modelos;
+    if (activeModels && activeModels.length > 0) {
+      for (const layout of activeModels) {
+        if (Array.isArray(layout.headers)) {
+          const commonHeaders = layout.headers.filter((h: string) => rawHeaders.includes(h));
+          const matchRatio = commonHeaders.length / Math.max(layout.headers.length, 1);
+          if (matchRatio >= 0.75) {
+            Object.keys(layout.mappings).forEach(key => {
+              const colName = layout.mappings[key];
+              if (colName && rawHeaders.includes(colName)) {
+                detected[key] = colName;
+              }
+            });
+            layoutMatched = true;
+            matchedName = layout.nome;
+            matchedId = layout.id;
+            setLayoutLearnedMessage(`Layout "${layout.nome}" reconhecido automaticamente da Base Ampla!`);
+            break;
+          }
         }
       }
+    }
 
-      // 2nd pass: substring matches
-      for (const h of cleanHeaders) {
-        if (usedHeaders.has(h.original)) continue;
-        for (const syn of cleanSyns) {
-          if (h.clean.includes(syn) || syn.includes(h.clean)) {
+    // 2. Fall back to localStorage learned layouts
+    if (!layoutMatched) {
+      try {
+        const storedLayoutsStr = localStorage.getItem("ampla_devolucoes_learned_layouts");
+        if (storedLayoutsStr) {
+          const storedLayouts = JSON.parse(storedLayoutsStr);
+          for (const layout of storedLayouts) {
+            if (Array.isArray(layout.headers)) {
+              const commonHeaders = layout.headers.filter((h: string) => rawHeaders.includes(h));
+              const matchRatio = commonHeaders.length / Math.max(layout.headers.length, 1);
+              if (matchRatio >= 0.75) {
+                Object.keys(layout.mappings).forEach(key => {
+                  const colName = layout.mappings[key];
+                  if (colName && rawHeaders.includes(colName)) {
+                    detected[key] = colName;
+                  }
+                });
+                layoutMatched = true;
+                matchedName = layout.nome || "Histórico Local";
+                setLayoutLearnedMessage("Layout reconhecido automaticamente com base no histórico local!");
+                break;
+              }
+            }
+          }
+        }
+      } catch (e) {
+        console.error("Error reading learned layouts", e);
+      }
+    }
+
+    if (!layoutMatched) {
+      setLayoutLearnedMessage("");
+      setIsNewLayout(true);
+      setActiveModelId(null);
+      setLayoutName("");
+      const cleanHeaders = rawHeaders.map(h => ({ original: h, clean: cleanStr(h) }));
+      const usedHeaders = new Set<string>();
+
+      const findMatchForField = (field: SystemField): string => {
+        const cleanSyns = field.synonyms.map(s => cleanStr(s));
+        
+        // 1st pass: exact matches
+        for (const h of cleanHeaders) {
+          if (usedHeaders.has(h.original)) continue;
+          if (cleanSyns.includes(h.clean)) {
             usedHeaders.add(h.original);
             return h.original;
           }
         }
-      }
-      return "";
-    };
 
-    // Strict synonyms list from specification
-    detected.data = findMatch([
-      "data devolucao", "data da devolucao", "data da ocorrencia", 
-      "data entrega", "data retorno", "emissao", "dt", "data"
-    ]);
+        // 2nd pass: substring matches
+        for (const h of cleanHeaders) {
+          if (usedHeaders.has(h.original)) continue;
+          for (const syn of cleanSyns) {
+            if (h.clean.includes(syn) || syn.includes(h.clean)) {
+              usedHeaders.add(h.original);
+              return h.original;
+            }
+          }
+        }
+        return "";
+      };
 
-    detected.clienteCodigo = findMatch([
-      "cod cliente", "codigo cliente", "cod pdv", "codigo pdv", "pdv", 
-      "cliente erp", "cliente sap", "loja", "parceiro", "destinatario", 
-      "codigo destinatario", "cliente"
-    ]);
-
-    detected.clienteRazaoSocial = findMatch([
-      "nome cliente", "razao social", "fantasia", "nome fantasia", "destinatario"
-    ]);
-
-    detected.valorNF = findMatch([
-      "valor total", "valor nota", "vlr nf", "vlr dev", "valor devolucao", 
-      "valor devolvida", "total devolvido", "valor produtos", "valor", "total", "vlr"
-    ]);
-
-    detected.motoristaNome = findMatch([
-      "nome motorista", "motorista", "condutor", "entregador"
-    ]);
-
-    detected.motoristaMatricula = findMatch([
-      "matricula", "chapa", "re", "funcional", "codigo funcionario"
-    ]);
-
-    detected.supervisor = findMatch([
-      "supervisor vendas", "supervisor", "sup", "coordenador"
-    ]);
-
-    detected.vendedor = findMatch([
-      "vendedor", "rca", "representante", "consultor", "promotor"
-    ]);
-
-    detected.motivoDescricao = findMatch([
-      "descricao motivo", "motivo devolucao", "ocorrencia", "ocorrencia", 
-      "descricao", "tipo devolucao", "tipo", "motivo"
-    ]);
-
-    detected.motivoCodigo = findMatch([
-      "cod motivo", "codigo motivo", "codigo", "cod"
-    ]);
-
-    detected.unidadeId = findMatch([
-      "filial", "unidade", "empresa", "cd", "centro distribuicao"
-    ]);
-
-    detected.numeroNF = findMatch([
-      "numero nf", "numero da nf", "nf", "nota", "numero", "documento"
-    ]);
-
-    // Secondary checks & Fallbacks
-    if (!detected.clienteCodigo) {
-      detected.clienteCodigo = findMatch(["cliente"]);
-    }
-    if (!detected.clienteRazaoSocial && !usedHeaders.has(detected.clienteCodigo)) {
-      detected.clienteRazaoSocial = detected.clienteCodigo;
-    } else if (!detected.clienteRazaoSocial) {
-      detected.clienteRazaoSocial = findMatch(["cliente"]);
+      SYSTEM_FIELDS.forEach(sf => {
+        detected[sf.key] = findMatchForField(sf);
+      });
+    } else {
+      setIsNewLayout(false);
+      setLayoutName(matchedName);
+      setActiveModelId(matchedId);
     }
 
     return detected;
@@ -204,60 +271,7 @@ export default function DevolucoesImport({ unidades, onRefresh, currentUser }: I
         const mappings = autoDetectColumns(rawHeaders);
         setDetectedMappings(mappings);
 
-        // Perform instant count calculations on autodetected fills
-        let noNfCount = 0;
-        let noValorCount = 0;
-        let noClienteCodeCount = 0;
-        let noDataCount = 0;
-
-        const getRowVal = (row: any, key: string) => {
-          const colName = mappings[key];
-          if (!colName) return "";
-          return row[colName] !== undefined ? row[colName] : "";
-        };
-
-        rows.forEach(row => {
-          // Check client code
-          let cliCode = String(getRowVal(row, "clienteCodigo") || "").trim();
-          if (!cliCode) {
-            // Check other potential SAP/ERP/PDV fallback columns manually
-            const fallbackKeys = ["codigo sap", "codigo erp", "codigo pdv", "numero da loja", "codigo destinatario", "sap", "erp", "loja", "destinatario"];
-            let foundFallback = "";
-            for (const header of rawHeaders) {
-              const cleanedHeader = header.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-              if (fallbackKeys.some(fk => cleanedHeader.includes(fk))) {
-                foundFallback = String(row[header] || "").trim();
-                if (foundFallback) break;
-              }
-            }
-            if (!foundFallback) {
-              noClienteCodeCount++;
-            }
-          }
-
-          // Check NF
-          const nf = String(getRowVal(row, "numeroNF") || "").trim();
-          if (!nf) noNfCount++;
-
-          // Check Value
-          const val = getRowVal(row, "valorNF");
-          if (val === "" || val === undefined || val === null) {
-            noValorCount++;
-          }
-
-          // Check Data
-          const dt = getRowVal(row, "data");
-          if (!dt) noDataCount++;
-        });
-
-        setAutoFillCounts({
-          noNf: noNfCount,
-          noValor: noValorCount,
-          noClienteCode: noClienteCodeCount,
-          noData: noDataCount
-        });
-
-        setStatus({ type: "success", msg: `${rows.length} linhas carregadas com sucesso! Pronto para realizar a Importação Inteligente sem mapeamento manual.` });
+        setStatus({ type: "success", msg: `${rows.length} linhas carregadas com sucesso! Verifique ou corrija os mapeamentos de coluna abaixo.` });
       } catch (err: any) {
         setStatus({ type: "error", msg: err.message || "Erro ao processar planilha" });
         setFile(null);
@@ -305,6 +319,69 @@ export default function DevolucoesImport({ unidades, onRefresh, currentUser }: I
     fileInputRef.current?.click();
   };
 
+  const handleMappingChange = (key: string, val: string) => {
+    setDetectedMappings(prev => ({
+      ...prev,
+      [key]: val
+    }));
+  };
+
+  useEffect(() => {
+    if (parsedData.length === 0) return;
+    
+    let noNfCount = 0;
+    let noValorCount = 0;
+    let noClienteCodeCount = 0;
+    let noDataCount = 0;
+
+    const getRowVal = (row: any, key: string) => {
+      const colName = detectedMappings[key];
+      if (!colName) return "";
+      return row[colName] !== undefined ? row[colName] : "";
+    };
+
+    parsedData.forEach(row => {
+      // Check client code
+      let cliCode = String(getRowVal(row, "clienteCodigo") || "").trim();
+      if (!cliCode) {
+        // Check other potential SAP/ERP/PDV fallback columns manually in row keys
+        const fallbackKeys = ["codigo sap", "codigo erp", "codigo pdv", "numero da loja", "codigo destinatario", "sap", "erp", "loja", "destinatario"];
+        let foundFallback = "";
+        for (const header of Object.keys(row)) {
+          const cleanedHeader = header.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+          if (fallbackKeys.some(fk => cleanedHeader.includes(fk))) {
+            foundFallback = String(row[header] || "").trim();
+            if (foundFallback) break;
+          }
+        }
+        if (!foundFallback) {
+          noClienteCodeCount++;
+        }
+      }
+
+      // Check NF
+      const nf = String(getRowVal(row, "numeroNF") || "").trim();
+      if (!nf || nf.toUpperCase() === "SEM-NF") noNfCount++;
+
+      // Check Value
+      const val = getRowVal(row, "valorNF");
+      if (val === "" || val === undefined || val === null || parseFloat(String(val).replace(/[^\d,.-]/g, "").replace(",", ".")) === 0) {
+        noValorCount++;
+      }
+
+      // Check Data
+      const dt = getRowVal(row, "data");
+      if (!dt) noDataCount++;
+    });
+
+    setAutoFillCounts({
+      noNf: noNfCount,
+      noValor: noValorCount,
+      noClienteCode: noClienteCodeCount,
+      noData: noDataCount
+    });
+  }, [detectedMappings, parsedData]);
+
   const executeImport = async () => {
     if (parsedData.length === 0) return;
     setIsLoading(true);
@@ -336,6 +413,7 @@ export default function DevolucoesImport({ unidades, onRefresh, currentUser }: I
 
       // Sequential counter for autogenerated client codes in this run
       let nextCliNum = 1;
+      const mappedCols = Object.values(detectedMappings).filter(Boolean);
 
       for (let i = 0; i < parsedData.length; i += BATCH_SIZE) {
         const batchIndex = Math.floor(i / BATCH_SIZE) + 1;
@@ -393,23 +471,49 @@ export default function DevolucoesImport({ unidades, onRefresh, currentUser }: I
             rowDate = new Date().toISOString().split("T")[0];
           }
 
-          const motoristaMatricula = String(getRowVal(row, "motoristaMatricula") || "").trim();
-          const motoristaNome = String(getRowVal(row, "motoristaNome") || "").trim();
-          const motoristaTelefone = "Não Informado";
-
           const clienteRazaoSocial = String(getRowVal(row, "clienteRazaoSocial") || "").trim();
-          const clienteNomeFantasia = clienteRazaoSocial || `PDV-${clienteCodigo}`;
+          const clienteNomeFantasia = String(getRowVal(row, "clienteNomeFantasia") || "").trim() || clienteRazaoSocial || "";
+          const canal = String(getRowVal(row, "canal") || "").trim();
+          const endereco = String(getRowVal(row, "endereco") || "").trim();
+          const cidade = String(getRowVal(row, "cidade") || "").trim();
+          const uf = String(getRowVal(row, "uf") || "").trim();
+          const telefone = String(getRowVal(row, "telefone") || "").trim();
+          const cnpj = String(getRowVal(row, "cnpj") || "").trim();
+          const area = String(getRowVal(row, "area") || "").trim();
+          const status = String(getRowVal(row, "status") || "").trim() || "Ativo";
+
+          const motoristaNome = String(getRowVal(row, "motoristaNome") || "").trim();
+          const motoristaMatricula = String(getRowVal(row, "motoristaMatricula") || "").trim();
+          const motoristaTelefone = String(getRowVal(row, "motoristaTelefone") || "").trim();
+          const motoristaFuncao = String(getRowVal(row, "motoristaFuncao") || "").trim();
+          const motoristaStatus = String(getRowVal(row, "motoristaStatus") || "").trim() || "Ativo";
 
           const vendedor = String(getRowVal(row, "vendedor") || "").trim();
           const supervisor = String(getRowVal(row, "supervisor") || "").trim();
-          const gerente = "Gerente Vendas";
-          const canal = "Rotas";
-          const endereco = "Não Informado";
+          const gerente = String(getRowVal(row, "gerente") || "").trim();
+          const hierarquiaTelefone = String(getRowVal(row, "hierarquiaTelefone") || "").trim();
+          const hierarquiaEmail = String(getRowVal(row, "hierarquiaEmail") || "").trim();
 
-          // If NF doesn't exist, assign standard SEM-NF fallback
+          const motivoCodigo = String(getRowVal(row, "motivoCodigo") || "").trim();
+          const motivoDescricao = String(getRowVal(row, "motivoDescricao") || "").trim();
+          const observacao = String(getRowVal(row, "observacao") || "").trim();
+
+          let rowUnitId = defaultUnit;
+          const rowUnidadeVal = getRowVal(row, "motoristaUnidade") || getRowVal(row, "unidadeId");
+          if (rowUnidadeVal) {
+            const mappedUnitName = String(rowUnidadeVal).toUpperCase();
+            const matchedUnit = unidades.find(u => 
+              (u.nome && u.nome.toUpperCase().includes(mappedUnitName)) || 
+              (u.id && u.id.toUpperCase() === mappedUnitName)
+            );
+            if (matchedUnit) {
+              rowUnitId = matchedUnit.id;
+            }
+          }
+
           let numeroNF = String(getRowVal(row, "numeroNF") || "").trim();
           if (!numeroNF) {
-            numeroNF = "SEM-NF";
+            numeroNF = ""; // let backend generate sequence NF-xxxxxx
           }
 
           // Parse Value
@@ -423,50 +527,41 @@ export default function DevolucoesImport({ unidades, onRefresh, currentUser }: I
             }
           }
 
-          const motivoCodigo = String(getRowVal(row, "motivoCodigo") || "").trim() || "Y40";
-          const motivoDescricao = String(getRowVal(row, "motivoDescricao") || "").trim() || "PDV Fechado";
-          const observacao = "";
-
-          let rowUnitId = defaultUnit;
-          const rowUnidadeVal = getRowVal(row, "unidadeId");
-          if (rowUnidadeVal) {
-            const mappedUnitName = String(rowUnidadeVal).toUpperCase();
-            const matchedUnit = unidades.find(u => 
-              (u.nome && u.nome.toUpperCase().includes(mappedUnitName)) || 
-              (u.id && u.id.toUpperCase() === mappedUnitName)
-            );
-            if (matchedUnit) {
-              rowUnitId = matchedUnit.id;
+          // Extract unmapped / additional columns as Campos Extras
+          const camposExtras: Record<string, any> = {};
+          headers.forEach((h) => {
+            if (!mappedCols.includes(h)) {
+              camposExtras[h] = row[h] !== undefined ? row[h] : "";
             }
-          }
+          });
 
           // Clientes collection
           clientes.push({
             codigo: clienteCodigo,
             razaoSocial: clienteRazaoSocial || clienteNomeFantasia,
             nomeFantasia: clienteNomeFantasia,
-            cnpj: "00.000.000/0001-00",
-            cidade: "Goiânia",
-            uf: "GO",
-            telefone: "Não cadastrado",
+            cnpj,
+            cidade,
+            uf,
+            telefone,
             canalVenda: canal,
             vendedor,
             supervisor,
             gerente,
-            areaResponsavel: "Vendas",
-            situacao: "Ativo",
+            areaResponsavel: area,
+            situacao: status,
             unidadeId: rowUnitId
           });
 
           // Motoristas collection
-          if (motoristaMatricula && motoristaNome) {
+          if (motoristaMatricula || motoristaNome) {
             motoristas.push({
-              matricula: motoristaMatricula,
-              nome: motoristaNome,
+              matricula: motoristaMatricula || `MOT-${Math.floor(Math.random() * 100000)}`,
+              nome: motoristaNome || "",
               telefone: motoristaTelefone,
-              funcao: "Motorista",
+              funcao: motoristaFuncao,
               unidadeId: rowUnitId,
-              status: "Ativo"
+              status: motoristaStatus
             });
           }
 
@@ -476,28 +571,28 @@ export default function DevolucoesImport({ unidades, onRefresh, currentUser }: I
               vendedor,
               supervisor,
               gerente,
-              area: "Vendas",
+              area,
               canal,
-              telefone: "Não cadastrado",
-              email: `${vendedor.toLowerCase().replace(/\s+/g, ".")}@ambev.com.br`,
+              telefone: hierarquiaTelefone,
+              email: hierarquiaEmail,
               status: "Ativo",
               unidadeId: rowUnitId
             });
           }
 
           // Motivos collection
-          if (motivoCodigo) {
+          if (motivoCodigo || motivoDescricao) {
             motivos.push({
               codigo: motivoCodigo,
-              descricao: motivoDescricao
+              descricao: motivoDescricao || ""
             });
           }
 
           // Historico collection
           historico.push({
             data: rowDate,
-            motoristaMatricula,
-            motoristaNome: motoristaNome || "Não Informado",
+            motoristaMatricula: motoristaMatricula || "",
+            motoristaNome: motoristaNome || "",
             motoristaTelefone,
             clienteCodigo,
             clienteRazaoSocial: clienteRazaoSocial || clienteNomeFantasia,
@@ -505,9 +600,9 @@ export default function DevolucoesImport({ unidades, onRefresh, currentUser }: I
             vendedor,
             supervisor,
             gerente,
-            areaResponsavel: "Vendas",
+            areaResponsavel: area,
             canal,
-            telefone: "Não cadastrado",
+            telefone,
             endereco,
             numeroNF,
             valorNF,
@@ -515,7 +610,8 @@ export default function DevolucoesImport({ unidades, onRefresh, currentUser }: I
             motivoDescricao,
             observacao,
             unidadeId: rowUnitId,
-            status: "Pendente"
+            status: "Pendente",
+            camposExtras
           });
         });
 
@@ -523,7 +619,7 @@ export default function DevolucoesImport({ unidades, onRefresh, currentUser }: I
         const uniqueClients = Array.from(new Map(clientes.map(item => [item.codigo, item])).values());
         const uniqueDrivers = Array.from(new Map(motoristas.map(item => [item.matricula, item])).values());
         const uniqueHierarchy = Array.from(new Map(hierarquia.map(item => [item.vendedor + "_" + item.unidadeId, item])).values());
-        const uniqueReasons = Array.from(new Map(motivos.map(item => [item.codigo, item])).values());
+        const uniqueReasons = Array.from(new Map(motivos.map(item => [item.codigo || item.descricao, item])).values());
 
         const payload = {
           clientes: uniqueClients,
@@ -593,6 +689,47 @@ export default function DevolucoesImport({ unidades, onRefresh, currentUser }: I
         duration: durationSecs
       });
 
+      // Layout Memorization Engine (Learn past layout mappings)
+      try {
+        const modelName = layoutName.trim() || "Modelo " + (file?.name ? file.name.replace(/\.[^/.]+$/, "") : "Planilha");
+        
+        const storedLayoutsStr = localStorage.getItem("ampla_devolucoes_learned_layouts") || "[]";
+        let storedLayouts = [];
+        try {
+          storedLayouts = JSON.parse(storedLayoutsStr);
+          if (!Array.isArray(storedLayouts)) {
+            storedLayouts = [];
+          }
+        } catch (e) {
+          storedLayouts = [];
+        }
+        
+        const updatedLayouts = [
+          { headers, mappings: detectedMappings, nome: modelName },
+          ...storedLayouts.filter((l: any) => l && JSON.stringify(l.headers) !== JSON.stringify(headers))
+        ].slice(0, 10);
+        
+        localStorage.setItem("ampla_devolucoes_learned_layouts", JSON.stringify(updatedLayouts));
+
+        // Save layout to server
+        await fetch("/api/devolucoes/modelos", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-user-email": currentUser?.email || ""
+          },
+          body: JSON.stringify({
+            nome: modelName,
+            headers,
+            mappings: detectedMappings
+          })
+        });
+
+        fetchModelos();
+      } catch (e) {
+        console.error("Error saving learned layout", e);
+      }
+
       setStatus({ type: "success", msg: "Importação realizada com sucesso! Os dados foram processados de forma inteligente." });
       onRefresh();
 
@@ -608,6 +745,9 @@ export default function DevolucoesImport({ unidades, onRefresh, currentUser }: I
       setIsLoading(false);
     }
   };
+
+  const recognizedCount = SYSTEM_FIELDS.filter(sf => detectedMappings[sf.key]).length;
+  const unmappedCount = SYSTEM_FIELDS.filter(sf => !detectedMappings[sf.key]).length;
 
   return (
     <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-6 space-y-6">
@@ -644,7 +784,7 @@ export default function DevolucoesImport({ unidades, onRefresh, currentUser }: I
             </div>
           </div>
           
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
             <div className="bg-slate-900/95 p-4 rounded-xl border border-slate-800/80 hover:border-slate-700 transition-colors">
               <div className="flex items-center gap-2 text-sky-400 mb-2">
                 <Users className="w-4 h-4" />
@@ -680,6 +820,23 @@ export default function DevolucoesImport({ unidades, onRefresh, currentUser }: I
             </div>
 
             <div className="bg-slate-900/95 p-4 rounded-xl border border-slate-800/80 hover:border-slate-700 transition-colors">
+              <div className="flex items-center gap-2 text-rose-400 mb-2">
+                <Users className="w-4 h-4 text-rose-400" />
+                <span className="text-[11px] font-bold uppercase tracking-wider font-mono">Hierarquia</span>
+              </div>
+              <div className="space-y-1">
+                <div className="text-xs text-slate-300 flex justify-between">
+                  <span>Importados:</span>
+                  <span className="font-bold text-slate-100">{importSummary.hierarquia?.created || 0}</span>
+                </div>
+                <div className="text-xs text-slate-400 flex justify-between">
+                  <span>Atualizados:</span>
+                  <span className="font-semibold">{importSummary.hierarquia?.updated || 0}</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-slate-900/95 p-4 rounded-xl border border-slate-800/80 hover:border-slate-700 transition-colors">
               <div className="flex items-center gap-2 text-amber-400 mb-2">
                 <Tag className="w-4 h-4" />
                 <span className="text-[11px] font-bold uppercase tracking-wider font-mono">Motivos</span>
@@ -690,8 +847,8 @@ export default function DevolucoesImport({ unidades, onRefresh, currentUser }: I
                   <span className="font-bold text-slate-100">{importSummary.motivos.created}</span>
                 </div>
                 <div className="text-xs text-slate-400 flex justify-between">
-                  <span>Ignorados:</span>
-                  <span className="font-semibold">{importSummary.ignoredRows || 0}</span>
+                  <span>Atualizados:</span>
+                  <span className="font-semibold">{importSummary.motivos.updated || 0}</span>
                 </div>
               </div>
             </div>
@@ -699,7 +856,7 @@ export default function DevolucoesImport({ unidades, onRefresh, currentUser }: I
             <div className="bg-slate-900/95 p-4 rounded-xl border border-slate-800/80 hover:border-slate-700 transition-colors">
               <div className="flex items-center gap-2 text-emerald-400 mb-2">
                 <CheckSquare className="w-4 h-4" />
-                <span className="text-[11px] font-bold uppercase tracking-wider font-mono">Histórico Devol.</span>
+                <span className="text-[11px] font-bold uppercase tracking-wider font-mono">Histórico DEV</span>
               </div>
               <div className="space-y-1">
                 <div className="text-xs text-slate-300 flex justify-between">
@@ -798,6 +955,15 @@ export default function DevolucoesImport({ unidades, onRefresh, currentUser }: I
       {/* Instant Preview after File Selection, No column mapping setup! */}
       {file && parsedData.length > 0 && !importSummary && (
         <div className="bg-slate-950/40 p-6 rounded-xl border border-slate-800 space-y-5">
+          {layoutLearnedMessage && (
+            <div className="bg-sky-500/10 border border-sky-500/20 p-4 rounded-xl flex items-center gap-3 text-sky-400 font-mono text-xs">
+              <Sparkles className="w-5 h-5 shrink-0 text-sky-400 animate-pulse" />
+              <div>
+                <strong className="block text-[11px] uppercase tracking-wider">Aprendizado Ativo Ampla</strong>
+                <span className="text-slate-300 mt-0.5 block">{layoutLearnedMessage}</span>
+              </div>
+            </div>
+          )}
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 bg-slate-900/25 p-4 rounded-xl border border-slate-850">
             <div className="flex items-center gap-3">
               <div className="p-3 bg-sky-500/10 rounded-lg border border-sky-500/20 text-sky-400 shrink-0">
@@ -848,6 +1014,144 @@ export default function DevolucoesImport({ unidades, onRefresh, currentUser }: I
               • Todos os campos não localizados serão preenchidos de forma tolerante (Ex: notas fiscais sem identificação receberão &quot;SEM-NF&quot; e valores zerados receberão R$ 0,00) para garantir que a importação nunca seja interrompida ou cancelada.
             </p>
           </div>
+
+          {/* Mapeamento de Colunas Toggle */}
+          <div className="bg-slate-900/30 border border-slate-850 rounded-xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+            <div>
+              <span className="text-xs font-bold text-slate-200 block">Correção e Mapeamento de Colunas</span>
+              <span className="text-[11px] text-slate-400 block mt-0.5">
+                Reconhecidas: <strong className="text-emerald-400">{recognizedCount}</strong> • Sem correspondência: <strong className="text-amber-400">{unmappedCount}</strong>
+              </span>
+            </div>
+            <button
+              onClick={() => setShowMappingPanel(!showMappingPanel)}
+              className="px-3.5 py-1.5 bg-slate-800 hover:bg-slate-750 text-slate-200 text-xs font-semibold rounded-lg transition-colors flex items-center gap-1.5 font-mono"
+            >
+              {showMappingPanel ? "Ocultar Mapeamento Detalhado" : "Ajustar Mapeamento Manual"}
+            </button>
+          </div>
+
+          {/* Interactive Mappings Box */}
+          {showMappingPanel && (
+            <div className="bg-slate-900/50 border border-slate-850 rounded-xl p-5 space-y-4">
+              <div className="bg-slate-950/40 p-4 rounded-xl border border-slate-850/70 space-y-3">
+                <span className="text-[11px] font-bold text-sky-400 uppercase tracking-wider block font-mono flex items-center gap-1.5">
+                  <Sparkles className="w-3.5 h-3.5" /> Memorização Inteligente de Modelos
+                </span>
+                <div className="flex flex-col sm:flex-row items-end gap-3">
+                  <div className="w-full sm:w-2/3">
+                    <label className="text-[10px] text-slate-400 block mb-1 font-sans">Nome do Layout / Modelo</label>
+                    <input
+                      type="text"
+                      placeholder="Ex: Heineken Goiânia - Modelo Geral, Relatório Devoluções Sul, etc."
+                      value={layoutName}
+                      onChange={(e) => {
+                        setLayoutName(e.target.value);
+                        setIsNewLayout(true);
+                      }}
+                      className="w-full text-xs p-2 bg-slate-900 border border-slate-800 rounded-lg text-slate-200 focus:border-sky-500 outline-none placeholder:text-slate-600 font-sans"
+                    />
+                  </div>
+                  <div className="w-full sm:w-1/3 flex items-end justify-start sm:justify-end">
+                    <button
+                      type="button"
+                      onClick={() => setShowAllFields(!showAllFields)}
+                      className={`w-full px-3 py-2 rounded-lg text-[11px] font-semibold border transition-all font-mono ${
+                        showAllFields 
+                          ? "bg-sky-500/10 text-sky-400 border-sky-500/20" 
+                          : "bg-slate-800 text-slate-300 border-slate-750 hover:bg-slate-700"
+                      }`}
+                    >
+                      {showAllFields ? "Mostrar apenas não mapeados" : "Mostrar todos os campos"}
+                    </button>
+                  </div>
+                </div>
+                <p className="text-[10px] text-slate-500 leading-relaxed font-sans">
+                  • <strong>Aprendizado Contínuo:</strong> Ao processar a planilha, o Sistema AMPLA salvará o layout acima com o nome especificado para automatizar correspondências futuras.
+                </p>
+              </div>
+
+              <div className="text-[11px] text-slate-400 leading-relaxed font-sans mb-1 bg-slate-950/30 p-3 rounded-lg border border-slate-850">
+                • <strong>Mapeamento Flexível:</strong> Se houver alguma coluna que o sistema não reconheceu de forma autônoma, use as caixas de seleção abaixo para informar a coluna correta de sua planilha. O preenchimento tolerante garantirá que os campos não preenchidos recebam valores vazios ou nulos sem travar.
+              </div>
+
+              <div className="space-y-5 max-h-[350px] overflow-y-auto pr-2 custom-scrollbar">
+                {["Devolução", "Clientes", "Motoristas", "Hierarquia Comercial", "Motivo Heineken", "Geral"].map(group => {
+                  const searchGroup = group === "Hierarquia Comercial" ? "Hierarquia" : group === "Motivo Heineken" ? "Motivo" : group;
+                  let groupFields = SYSTEM_FIELDS.filter(sf => sf.group === searchGroup || (searchGroup === "Geral" && sf.group === "Geral"));
+                  
+                  if (!showAllFields) {
+                    groupFields = groupFields.filter(field => !detectedMappings[field.key]);
+                  }
+                  
+                  if (groupFields.length === 0) return null;
+
+                  return (
+                    <div key={group} className="space-y-2">
+                      <h5 className="text-[10px] text-sky-400 uppercase tracking-wider font-bold border-b border-slate-800/60 pb-1 flex items-center justify-between">
+                        <span>{group}</span>
+                      </h5>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        {groupFields.map(field => {
+                          const isMapped = !!detectedMappings[field.key];
+                          const mappedValue = detectedMappings[field.key] || "";
+
+                          return (
+                            <div 
+                              key={field.key} 
+                              className={`p-2.5 rounded-lg border flex flex-col justify-between gap-1.5 transition-all ${
+                                isMapped 
+                                  ? "bg-slate-900/40 border-slate-800/80" 
+                                  : field.required 
+                                    ? "bg-rose-500/5 border-rose-500/20" 
+                                    : "bg-slate-900/10 border-slate-900"
+                              }`}
+                            >
+                              <div className="flex items-center justify-between">
+                                <span className="text-xs text-slate-300 font-sans font-medium flex items-center gap-1">
+                                  {field.label}
+                                  {field.required && <span className="text-rose-500">*</span>}
+                                </span>
+                                
+                                {isMapped ? (
+                                  <span className="text-[9px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-1.5 py-0.5 rounded flex items-center gap-0.5">
+                                    <Check className="w-2.5 h-2.5" /> Reconhecido
+                                  </span>
+                                ) : field.required ? (
+                                  <span className="text-[9px] bg-rose-500/15 text-rose-400 border border-rose-500/20 px-1.5 py-0.5 rounded flex items-center gap-0.5 font-bold animate-pulse">
+                                    <AlertCircle className="w-2.5 h-2.5" /> Obrigatório
+                                  </span>
+                                ) : (
+                                  <span className="text-[9px] bg-slate-800 text-slate-400 border border-slate-750 px-1.5 py-0.5 rounded">
+                                    Opcional
+                                  </span>
+                                )}
+                              </div>
+
+                              <select
+                                value={mappedValue}
+                                onChange={(e) => handleMappingChange(field.key, e.target.value)}
+                                className={`text-xs p-1.5 rounded-md border bg-slate-950 text-slate-200 outline-none w-full transition-all ${
+                                  isMapped 
+                                    ? "border-slate-850 hover:border-slate-700 focus:border-slate-650" 
+                                    : "border-rose-500/35 focus:border-rose-500"
+                                }`}
+                              >
+                                <option value="">-- Ignorar / Gravar Vazio --</option>
+                                {headers.map((h, hIdx) => (
+                                  <option key={`${h}-${hIdx}`} value={h}>{h}</option>
+                                ))}
+                              </select>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           {importProgress && (
             <div className="space-y-2 bg-slate-900/20 p-4 border border-slate-850 rounded-xl">
