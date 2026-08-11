@@ -3141,7 +3141,7 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
                       <div className="grid grid-cols-2 gap-3 bg-slate-950/45 p-3 rounded-xl border border-slate-850/80">
                         {/* Bloco 1: Veículo */}
                         <div className="flex items-start gap-2.5">
-                          <span className="text-xl leading-none mt-0.5">{getVehicleIcon(vObj?.perfil)}</span>
+                          <LucideTruck className="w-5 h-5 text-slate-400 mt-0.5 shrink-0" aria-label="Veículo" />
                           <div>
                             <span className="text-slate-500 block text-[9px] font-mono uppercase tracking-wider">Veículo</span>
                             <span className="text-slate-200 font-bold font-mono text-xs block">
@@ -3467,7 +3467,7 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
                         )}
                         {vObj?.perfil && (
                           <span className="inline-flex items-center gap-1 bg-slate-950/60 text-slate-350 px-2 py-1 rounded-lg border border-slate-850/80 text-[10px] font-mono">
-                            {getVehicleIcon(vObj.perfil)} {vObj.perfil}
+                            <LucideTruck className="w-3 h-3" /> {vObj.perfil}
                           </span>
                         )}
                       </div>
