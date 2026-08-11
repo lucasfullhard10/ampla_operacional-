@@ -44,7 +44,7 @@ const isVehicleBlocked = (v: any) => {
   return false;
 };
 
-const getVehicleIcon = (perfil?: string) => {
+function getVehicleIcon(perfil?: string) {
   switch (perfil) {
     case "Van":
     case "Utilitário":
