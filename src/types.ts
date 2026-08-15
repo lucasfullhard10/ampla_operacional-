@@ -233,6 +233,9 @@ export interface Rota {
   observacoes_operacionais?: string;
   ocorrencias?: OccurrenceEntry[];
   log_alteracoes?: ChangeLogEntry[];
+  reentrega_validada?: boolean;
+  reentregaValidada?: boolean;
+  status_validacao?: "VALIDADA" | "PENDENTE DE VALIDAÇÃO" | "N/A";
   
   // Entrega OFF specific fields
   clienteCodigo?: string;
@@ -499,6 +502,7 @@ export interface DevolucaoCliente {
   cidade: string;
   uf: string;
   telefone: string;
+  endereco?: string;
   canalVenda: string;
   vendedor: string;
   supervisor: string;
@@ -562,6 +566,7 @@ export interface DevolucaoRegistro {
   areaResponsavel: string;
   canal: string;
   telefone?: string; // Telefone do cliente (opcional)
+  telefoneCliente?: string;
   endereco: string;
   
   // Dados do documento fiscal e motivo
@@ -573,10 +578,25 @@ export interface DevolucaoRegistro {
   
   // Controle operacional e auditoria
   unidadeId: string;
-  status: "Pendente" | "Resolvida";
+  status: "Pendente" | "Resolvida" | "Cancelada" | "Aguardando Tratativa";
   criadoPor: string;
   criadoEm: string;
   alteradoPor?: string;
   alteradoEm?: string;
   ip?: string;
+
+  // Campos legados e enriquecidos retornados pelas telas de consulta/importação.
+  origem?: string;
+  dataOcorrido?: string;
+  dataLancamento?: string;
+  dataNF?: string;
+  unidadeNome?: string;
+  unidade?: string;
+  filial?: string;
+  clienteNome?: string;
+  resolvido?: "SIM" | "NÃO";
+  area?: string;
+  usuarioCadastro?: string;
+  dataCadastro?: string;
+  ultimaAtualizacao?: string;
 }

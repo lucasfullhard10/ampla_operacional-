@@ -258,6 +258,9 @@ export interface Rota {
   observacoes_operacionais?: string;
   ocorrencias?: OccurrenceEntry[];
   log_alteracoes?: ChangeLogEntry[];
+  reentrega_validada?: boolean;
+  reentregaValidada?: boolean;
+  status_validacao?: "VALIDADA" | "PENDENTE DE VALIDAÇÃO" | "N/A";
   
   // Entrega OFF specific fields
   clienteCodigo?: string;
