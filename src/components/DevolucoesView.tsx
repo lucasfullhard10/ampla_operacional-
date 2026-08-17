@@ -1,20 +1,18 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { lazy, Suspense, useState, useEffect, useMemo } from "react";
 import { 
   ArrowRightLeft, Plus, Search, Filter, RefreshCw, FileSpreadsheet, Download, 
   Database, Eye, Edit3, Trash2, Calendar, DollarSign, CheckCircle2, Clock, 
   AlertTriangle, XCircle, ArrowUpDown, ChevronLeft, ChevronRight, X
 } from "lucide-react";
-import * as XLSX from "xlsx";
 import { Unidade, DevolucaoRegistro, DevolucaoCliente, DevolucaoMotorista, DevolucaoMotivo } from "../types";
 
-// Import Modular Components
-import DevolucoesDashboard from "./devolucoes/DevolucoesDashboard";
-import DevolucoesRegistroModal from "./devolucoes/DevolucoesRegistroModal";
-import DevolucoesImportModal from "./devolucoes/DevolucoesImportModal";
-import DevolucoesBasesModal from "./devolucoes/DevolucoesBasesModal";
-import DevolucoesDetalhesModal from "./devolucoes/DevolucoesDetalhesModal";
-import DevolucoesDeleteModal from "./devolucoes/DevolucoesDeleteModal";
-import DevolucoesBulkDeleteModal from "./devolucoes/DevolucoesBulkDeleteModal";
+const DevolucoesDashboard = lazy(() => import("./devolucoes/DevolucoesDashboard"));
+const DevolucoesRegistroModal = lazy(() => import("./devolucoes/DevolucoesRegistroModal"));
+const DevolucoesImportModal = lazy(() => import("./devolucoes/DevolucoesImportModal"));
+const DevolucoesBasesModal = lazy(() => import("./devolucoes/DevolucoesBasesModal"));
+const DevolucoesDetalhesModal = lazy(() => import("./devolucoes/DevolucoesDetalhesModal"));
+const DevolucoesDeleteModal = lazy(() => import("./devolucoes/DevolucoesDeleteModal"));
+const DevolucoesBulkDeleteModal = lazy(() => import("./devolucoes/DevolucoesBulkDeleteModal"));
 
 interface DevolucoesViewProps {
   unidades: Unidade[];
@@ -327,7 +325,7 @@ export default function DevolucoesView({ unidades, currentUser, onRefresh }: Dev
   }, [filteredRecords, currentPage, pageSize]);
 
   // Export to Excel
-  const handleExportExcel = () => {
+  const handleExportExcel = async () => {
     if (filteredRecords.length === 0) {
       alert("Nenhum registro para exportar.");
       return;
@@ -354,6 +352,7 @@ export default function DevolucoesView({ unidades, currentUser, onRefresh }: Dev
       "Data Cadastro": r.dataCadastro || r.criadoEm
     }));
 
+    const XLSX = await import("xlsx");
     const worksheet = XLSX.utils.json_to_sheet(exportRows);
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, "Devoluções");
@@ -431,10 +430,12 @@ export default function DevolucoesView({ unidades, currentUser, onRefresh }: Dev
       </div>
 
       {/* 2. ÁREA 1: DASHBOARD DE INDICADORES (7 CARDS + 5 GRÁFICOS) */}
-      <DevolucoesDashboard 
-        registros={filteredRecords} 
-        unidades={unidades} 
-      />
+      <Suspense fallback={<div className="h-40 rounded-2xl bg-slate-900/60 animate-pulse" />}>
+        <DevolucoesDashboard
+          registros={filteredRecords}
+          unidades={unidades}
+        />
+      </Suspense>
 
       {/* 3. ÁREA 2: FILTROS DE PESQUISA */}
       <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-5 space-y-4 shadow-sm">
@@ -848,7 +849,8 @@ export default function DevolucoesView({ unidades, currentUser, onRefresh }: Dev
       </div>
 
       {/* MODALS */}
-      <DevolucoesRegistroModal
+      <Suspense fallback={null}>
+      {isRegistroModalOpen && <DevolucoesRegistroModal
         isOpen={isRegistroModalOpen}
         onClose={() => {
           setIsRegistroModalOpen(false);
@@ -862,9 +864,9 @@ export default function DevolucoesView({ unidades, currentUser, onRefresh }: Dev
         veiculos={veiculos}
         unidades={unidades}
         currentUser={currentUser}
-      />
+      />}
 
-      <DevolucoesImportModal
+      {isImportModalOpen && <DevolucoesImportModal
         isOpen={isImportModalOpen}
         onClose={() => setIsImportModalOpen(false)}
         onSuccess={loadModuleData}
@@ -872,9 +874,9 @@ export default function DevolucoesView({ unidades, currentUser, onRefresh }: Dev
         motoristas={motoristas}
         motivos={motivos}
         currentUser={currentUser}
-      />
+      />}
 
-      <DevolucoesBasesModal
+      {isBasesModalOpen && <DevolucoesBasesModal
         isOpen={isBasesModalOpen}
         onClose={() => setIsBasesModalOpen(false)}
         clientes={clientes}
@@ -883,18 +885,18 @@ export default function DevolucoesView({ unidades, currentUser, onRefresh }: Dev
         hierarquia={hierarquia}
         onRefresh={loadModuleData}
         currentUser={currentUser}
-      />
+      />}
 
-      <DevolucoesDetalhesModal
+      {isDetailsModalOpen && <DevolucoesDetalhesModal
         isOpen={isDetailsModalOpen}
         onClose={() => {
           setIsDetailsModalOpen(false);
           setSelectedRecord(null);
         }}
         record={selectedRecord}
-      />
+      />}
 
-      <DevolucoesDeleteModal
+      {isDeleteModalOpen && <DevolucoesDeleteModal
         isOpen={isDeleteModalOpen}
         onClose={() => {
           if (!isDeleting) {
@@ -905,9 +907,9 @@ export default function DevolucoesView({ unidades, currentUser, onRefresh }: Dev
         onConfirm={handleConfirmDelete}
         record={recordToDelete}
         isDeleting={isDeleting}
-      />
+      />}
 
-      <DevolucoesBulkDeleteModal
+      {isBulkDeleteModalOpen && <DevolucoesBulkDeleteModal
         isOpen={isBulkDeleteModalOpen}
         onClose={() => {
           if (!isDeleting) {
@@ -918,7 +920,8 @@ export default function DevolucoesView({ unidades, currentUser, onRefresh }: Dev
         unidades={unidades}
         allRecords={registros}
         isDeleting={isDeleting}
-      />
+      />}
+      </Suspense>
 
       {/* TOAST NOTIFICATION */}
       {toastMessage && (

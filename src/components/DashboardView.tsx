@@ -388,6 +388,38 @@ export default function DashboardView({
 
   return (
     <div className="space-y-6">
+
+      <button
+        type="button"
+        onClick={() => setGlobalActiveTab("alertas")}
+        className="w-full rounded-xl border border-slate-800 bg-slate-900/70 p-4 text-left transition hover:border-amber-500/30 hover:bg-slate-900"
+      >
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-3">
+            <div className={`flex h-11 w-11 items-center justify-center rounded-lg border ${cards.alertasCriticos > 0 ? "border-rose-500/25 bg-rose-500/10 text-rose-400" : "border-emerald-500/20 bg-emerald-500/10 text-emerald-400"}`}>
+              <ShieldAlert className="h-5 w-5" />
+            </div>
+            <div>
+              <h2 className="text-sm font-bold text-white">Conformidade de documentos</h2>
+              <p className="mt-0.5 text-xs text-slate-400">Mesma fonte oficial do Painel Alertas Ativos · janela preventiva de 40 dias</p>
+            </div>
+          </div>
+          <div className="grid grid-cols-3 gap-2 text-center font-mono">
+            <div className="min-w-20 rounded-lg border border-slate-800 bg-slate-950 px-3 py-2">
+              <span className="block text-lg font-bold text-white">{cards.alertasAtivos || 0}</span>
+              <span className="text-[9px] uppercase text-slate-500">Ativos</span>
+            </div>
+            <div className="min-w-20 rounded-lg border border-rose-500/15 bg-rose-500/5 px-3 py-2">
+              <span className="block text-lg font-bold text-rose-400">{cards.alertasCriticos || 0}</span>
+              <span className="text-[9px] uppercase text-slate-500">Críticos</span>
+            </div>
+            <div className="min-w-20 rounded-lg border border-amber-500/15 bg-amber-500/5 px-3 py-2">
+              <span className="block text-lg font-bold text-amber-400">{cards.alertasVencimentoProximo || 0}</span>
+              <span className="text-[9px] uppercase text-slate-500">Preventivos</span>
+            </div>
+          </div>
+        </div>
+      </button>
       
       {/* Header Controls */}
       <h1 className="sr-only">Painel de Monitoramento</h1>

@@ -28,7 +28,7 @@ export default function AlertasView({ alertas, onRefresh }: AlertasProps) {
           <div>
             <span className="text-slate-400 block uppercase">Atenções Logísticas (Proativos)</span>
             <span className="text-3xl font-bold text-amber-500 tracking-tight block mt-1">{warningCount}</span>
-            <span className="text-[10px] text-amber-500 mt-1 block">Vencimentos nos próximos 30 dias</span>
+            <span className="text-[10px] text-amber-500 mt-1 block">Vencimentos nos próximos 40 dias</span>
           </div>
           <AlertCircle className="w-8 h-8 text-amber-400 opacity-60" />
         </div>
@@ -69,13 +69,23 @@ export default function AlertasView({ alertas, onRefresh }: AlertasProps) {
                   <span className="px-1.5 py-0.5 rounded text-[9px] font-mono leading-none bg-slate-950 text-slate-400">
                     MÓDULO {a.tipo}
                   </span>
+                  {a.classificacao && (
+                    <span className="px-1.5 py-0.5 rounded text-[9px] font-mono font-bold leading-none bg-slate-800 text-slate-300">
+                      {a.classificacao.replaceAll("_", " ")}
+                    </span>
+                  )}
                   <span className="text-[10px] text-slate-500 font-mono flex items-center gap-1 ml-auto">
                     <Calendar className="w-3.5 h-3.5" /> {a.dataCriacao}
                   </span>
                 </div>
 
                 <p className="text-slate-200 mt-2 font-medium font-sans block first-letter:uppercase">{a.mensagem}</p>
-                <span className="text-[10px] text-slate-500 font-mono mt-1 block">Referência objeto ID: {a.refId}</span>
+                <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-[10px] text-slate-500 font-mono">
+                  <span>Referência: {a.refId}</span>
+                  {a.unidadeId && <span>Unidade: {a.unidadeId}</span>}
+                  {a.dataVencimento && <span>Vencimento: {a.dataVencimento.split("-").reverse().join("/")}</span>}
+                  {a.diasRestantes !== undefined && <span>Dias restantes: {a.diasRestantes}</span>}
+                </div>
               </div>
             </div>
           ))}

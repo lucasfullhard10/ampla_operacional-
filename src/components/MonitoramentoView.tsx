@@ -269,7 +269,7 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
     const lastEntry = h[h.length - 1];
 
     return {
-      saida: creationEntry ? creationEntry.hora : "08:10", // Real or typical creation fallback
+      saida: creationEntry ? creationEntry.hora : "--:--",
       carregamento: carregandoEntry ? carregandoEntry.hora : "--:--",
       rota: rotaEntry ? rotaEntry.hora : "--:--",
       atualizacao: lastEntry ? lastEntry.hora : "--:--",

@@ -185,7 +185,7 @@ CREATE POLICY "Permitir tudo para todos por simplicidade" ON ampla_database FOR 
                 </p>
                 <div className="space-y-1 pl-3 font-mono text-[10px] text-sky-400">
                   <div>• <span className="text-white font-bold select-all">SUPABASE_URL</span> = <span className="text-slate-500">Ex: https://xxxx.supabase.co</span></div>
-                  <div>• <span className="text-white font-bold select-all">SUPABASE_ANON_KEY</span> = <span className="text-slate-500">Ex: (sua anon ou service role key)</span></div>
+                  <div>• <span className="text-white font-bold select-all">SUPABASE_ANON_KEY</span> = <span className="text-slate-500">Use apenas a chave anon/publishable; nunca service_role</span></div>
                 </div>
               </div>
             )}

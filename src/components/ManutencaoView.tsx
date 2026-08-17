@@ -13,6 +13,13 @@ interface ManutencaoProps {
   currentUser: Usuario;
 }
 
+const getTodayIso = () => new Date().toISOString().split("T")[0];
+const getDefaultNextMaintenanceIso = () => {
+  const date = new Date();
+  date.setMonth(date.getMonth() + 3);
+  return date.toISOString().split("T")[0];
+};
+
 export default function ManutencaoView({ manutencoes, veiculos, onRefresh, currentUser }: ManutencaoProps) {
   const [searchTerm, setSearchTerm] = useState("");
   const [isAdding, setIsAdding] = useState(false);
@@ -29,7 +36,7 @@ export default function ManutencaoView({ manutencoes, veiculos, onRefresh, curre
   const [tipo, setTipo] = useState<"Preventiva" | "Corretiva">("Preventiva");
   const [categoria, setCategoria] = useState("Mecânica");
   const [data, setData] = useState(() => new Date().toISOString().split("T")[0]);
-  const [proximaManutencao, setProximaManutencao] = useState("2026-09-12");
+  const [proximaManutencao, setProximaManutencao] = useState(getDefaultNextMaintenanceIso);
   const [quilometragemAtual, setQuilometragemAtual] = useState<number>(0);
   const [proximaQuilometragem, setProximaQuilometragem] = useState<number>(0);
   const [valorManutencao, setValorManutencao] = useState<number>(0);
@@ -70,8 +77,8 @@ export default function ManutencaoView({ manutencoes, veiculos, onRefresh, curre
     setPlaca("");
     setTipo("Preventiva");
     setCategoria("Mecânica");
-    setData("2026-06-12");
-    setProximaManutencao("2026-09-12");
+    setData(getTodayIso());
+    setProximaManutencao(getDefaultNextMaintenanceIso());
     setQuilometragemAtual(0);
     setProximaQuilometragem(0);
     setValorManutencao(0);
@@ -168,6 +175,25 @@ export default function ManutencaoView({ manutencoes, veiculos, onRefresh, curre
     }
   };
 
+  const handlePhotoChange = (file?: File) => {
+    if (!file) {
+      setFotoUrl("");
+      return;
+    }
+    if (!file.type.startsWith("image/")) {
+      setNotification({ type: "error", message: "Selecione um arquivo de imagem válido." });
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setNotification({ type: "error", message: "A fotografia deve ter no máximo 5 MB." });
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => setFotoUrl(typeof reader.result === "string" ? reader.result : "");
+    reader.onerror = () => setNotification({ type: "error", message: "Não foi possível ler a fotografia selecionada." });
+    reader.readAsDataURL(file);
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!veiculoId || !observacao.trim()) {
@@ -192,7 +218,7 @@ export default function ManutencaoView({ manutencoes, veiculos, onRefresh, curre
       fornecedor,
       responsavel,
       observacao: observacao.trim(),
-      fotoUrl: fotoUrl || "https://images.unsplash.com/photo-1486006920555-c77dce18193b?q=80&w=1500&auto=format&fit=crop", // Stock photo
+      fotoUrl: fotoUrl || undefined,
       checklist: {
         oleo,
         filtro,
@@ -581,12 +607,13 @@ export default function ManutencaoView({ manutencoes, veiculos, onRefresh, curre
                 </div>
               </div>
 
-              {/* Photos upload mock */}
+              {/* Maintenance photo */}
               <div className="border-t border-slate-800 pt-2 space-y-1">
                 <span className="text-slate-400 block font-mono text-[10px] uppercase">Fotografia do Conserto / Danos</span>
                 <input
                   type="file"
-                  onChange={(e) => setFotoUrl(e.target.files?.[0]?.name ? "https://images.unsplash.com/photo-1486006920555-c77dce18193b?q=80&w=1500&auto=format&fit=crop" : "")}
+                  accept="image/*"
+                  onChange={(e) => handlePhotoChange(e.target.files?.[0])}
                   className="w-full text-slate-400 text-[10px]"
                 />
               </div>
@@ -639,15 +666,22 @@ export default function ManutencaoView({ manutencoes, veiculos, onRefresh, curre
                 >
                   {/* Photo representation */}
                   <div className="w-full md:w-36 h-28 bg-slate-950 rounded border border-slate-800 shrink-0 overflow-hidden relative">
-                    <img
-                      src={item.fotoUrl || "https://images.unsplash.com/photo-1486006920555-c77dce18193b?q=80&w=1500&auto=format&fit=crop"}
-                      alt="Peças" 
-                      referrerPolicy="no-referrer"
-                      className="w-full h-full object-cover"
-                    />
-                    <span className="absolute bottom-1 right-1 bg-black/70 px-1 py-0.5 rounded text-[8px] font-mono text-slate-350 border border-slate-800/50">
-                      Cópia Inspeção
-                    </span>
+                    {item.fotoUrl ? (
+                      <img
+                        src={item.fotoUrl}
+                        alt={`Registro da manutenção do veículo ${item.placa || item.veiculoId}`}
+                        className="w-full h-full object-cover"
+                      />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center text-slate-600">
+                        <Camera className="w-7 h-7" aria-hidden="true" />
+                      </div>
+                    )}
+                    {item.fotoUrl && (
+                      <span className="absolute bottom-1 right-1 bg-black/70 px-1 py-0.5 rounded text-[8px] font-mono text-slate-350 border border-slate-800/50">
+                        Cópia Inspeção
+                      </span>
+                    )}
                   </div>
 
                   {/* Descriptions */}

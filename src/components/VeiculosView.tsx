@@ -11,6 +11,7 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, PieChart, 
 import { Veiculo, Motorista, Unidade } from "../types";
 import { NotificationModal, ConfirmModal, NotificationType, ConfirmType } from "./NotificationModal";
 import SafeResponsiveContainer from "./SafeResponsiveContainer";
+import { openDocumentOrNotify } from "../lib/documents";
 
 interface VeiculosProps {
   veiculos: Veiculo[];
@@ -132,8 +133,14 @@ export default function VeiculosView({
   const [maintResponsavel, setMaintResponsavel] = useState("");
   const [isAddingMaint, setIsAddingMaint] = useState(false);
 
-  // Document view modal preview
-  const [previewDoc, setPreviewDoc] = useState<{ title: string; filename: string } | null>(null);
+  const handleVehicleFileRead = (event: React.ChangeEvent<HTMLInputElement>, setter: (value: string) => void) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => setter(typeof reader.result === "string" ? reader.result : "");
+    reader.onerror = () => setNotification({ type: "error", message: "Não foi possível ler o documento selecionado." });
+    reader.readAsDataURL(file);
+  };
 
   // Driver conflict details view state
   const [conflictData, setConflictData] = useState<{
@@ -307,7 +314,7 @@ export default function VeiculosView({
     };
 
     try {
-      const res = await fetch("/api/manutencoes", {
+      const res = await fetch("/api/manutencao", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -338,7 +345,7 @@ export default function VeiculosView({
   const handleDeleteMaint = async (maintId: string) => {
     if (!window.confirm("Deseja realmente excluir esta ordem de serviço/manutenção?")) return;
     try {
-      const res = await fetch(`/api/manutencoes/${maintId}`, {
+      const res = await fetch(`/api/manutencao/${maintId}`, {
         method: "DELETE",
         headers: {
           "x-user-email": userEmail
@@ -437,11 +444,11 @@ export default function VeiculosView({
       proximaManutencao,
       ultimaRevisao,
       documentacaoStatus,
-      documentoCRLVUrl: docCRLV || "CRLV_Atualizado_Assinado.pdf",
-      documentoCRVUrl: docCRV || "Recibo_Compra_Venda.pdf",
-      seguroUrl: docSeguro || "Apolice_Seguro_Completo.pdf",
-      licenciamentoUrl: docLicenciamento || "Comprovante_Licenciamento_Exerc.pdf",
-      fotoVeiculoUrl: docFoto || "Foto_Lateral_Veiculo.jpg",
+      documentoCRLVUrl: docCRLV || undefined,
+      documentoCRVUrl: docCRV || undefined,
+      seguroUrl: docSeguro || undefined,
+      licenciamentoUrl: docLicenciamento || undefined,
+      fotoVeiculoUrl: docFoto || undefined,
       transferDriver,
 
       // New Phase 10 fields
@@ -450,7 +457,7 @@ export default function VeiculosView({
       capacidade,
       antt,
       anttVencimento,
-      anttUrl: anttUrl || "antt_validacao.pdf",
+      anttUrl: anttUrl || undefined,
       documentacaoObservacoes
     };
 
@@ -1304,7 +1311,7 @@ export default function VeiculosView({
                                   {isCRLVExpired ? "Vencido" : "✓ Válido"}
                                 </span>
                                 <button
-                                  onClick={() => setPreviewDoc({ title: "Comprovante CRLV", filename: v.documentoCRLVUrl || "CRLV_Atualizado_Assinado.pdf" })}
+                                  onClick={() => openDocumentOrNotify(v.documentoCRLVUrl)}
                                   className="p-1.5 bg-slate-950 hover:bg-slate-800 text-sky-400 rounded transition border border-slate-800"
                                 >
                                   <Eye className="w-3.5 h-3.5" />
@@ -1323,7 +1330,7 @@ export default function VeiculosView({
                                   {isSegExpired ? "Vencido" : "✓ Ativo"}
                                 </span>
                                 <button
-                                  onClick={() => setPreviewDoc({ title: "Apólice de Seguro de Frota", filename: v.seguroUrl || "Apolice_Seguro_Completo.pdf" })}
+                                  onClick={() => openDocumentOrNotify(v.seguroUrl)}
                                   className="p-1.5 bg-slate-950 hover:bg-slate-800 text-sky-400 rounded transition border border-slate-800"
                                 >
                                   <Eye className="w-3.5 h-3.5" />
@@ -1342,7 +1349,7 @@ export default function VeiculosView({
                                   {isAnttExpired ? "Vencido" : "✓ Válido"}
                                 </span>
                                 <button
-                                  onClick={() => setPreviewDoc({ title: "Certificado ANTT do Veículo", filename: v.anttUrl || "antt_validacao.pdf" })}
+                                  onClick={() => openDocumentOrNotify(v.anttUrl)}
                                   className="p-1.5 bg-slate-950 hover:bg-slate-800 text-sky-400 rounded transition border border-slate-800"
                                 >
                                   <Eye className="w-3.5 h-3.5" />
@@ -1358,7 +1365,7 @@ export default function VeiculosView({
                               </div>
                               <div className="flex items-center gap-2">
                                 <button
-                                  onClick={() => setPreviewDoc({ title: "Título de Propriedade - CRV", filename: v.documentoCRVUrl || "Recibo_Compra_Venda.pdf" })}
+                                  onClick={() => openDocumentOrNotify(v.documentoCRVUrl)}
                                   className="p-1.5 bg-slate-950 hover:bg-slate-800 text-sky-400 rounded transition border border-slate-800"
                                 >
                                   <Eye className="w-3.5 h-3.5" />
@@ -2313,7 +2320,7 @@ export default function VeiculosView({
                             <input 
                               type="file" 
                               className="hidden" 
-                              onChange={(e) => setDocCRLV(e.target.files?.[0]?.name || "")} 
+                              onChange={(e) => handleVehicleFileRead(e, setDocCRLV)}
                             />
                           </label>
                         </div>
@@ -2335,7 +2342,7 @@ export default function VeiculosView({
                             <input 
                               type="file" 
                               className="hidden" 
-                              onChange={(e) => setDocCRV(e.target.files?.[0]?.name || "")} 
+                              onChange={(e) => handleVehicleFileRead(e, setDocCRV)}
                             />
                           </label>
                         </div>
@@ -2357,7 +2364,7 @@ export default function VeiculosView({
                             <input 
                               type="file" 
                               className="hidden" 
-                              onChange={(e) => setDocSeguro(e.target.files?.[0]?.name || "")} 
+                              onChange={(e) => handleVehicleFileRead(e, setDocSeguro)}
                             />
                           </label>
                         </div>
@@ -2379,7 +2386,7 @@ export default function VeiculosView({
                             <input 
                               type="file" 
                               className="hidden" 
-                              onChange={(e) => setDocLicenciamento(e.target.files?.[0]?.name || "")} 
+                              onChange={(e) => handleVehicleFileRead(e, setDocLicenciamento)}
                             />
                           </label>
                         </div>
@@ -2401,7 +2408,7 @@ export default function VeiculosView({
                             <input 
                               type="file" 
                               className="hidden" 
-                              onChange={(e) => setAnttUrl(e.target.files?.[0]?.name || "")} 
+                              onChange={(e) => handleVehicleFileRead(e, setAnttUrl)}
                             />
                           </label>
                         </div>
@@ -2425,7 +2432,7 @@ export default function VeiculosView({
                             <input 
                               type="file" 
                               className="hidden" 
-                              onChange={(e) => setDocFoto(e.target.files?.[0]?.name || "")} 
+                              onChange={(e) => handleVehicleFileRead(e, setDocFoto)}
                             />
                           </label>
                         </div>
@@ -2679,7 +2686,7 @@ export default function VeiculosView({
                           <div className="flex flex-wrap gap-1.5">
                             {/* CRLV */}
                             <button
-                              onClick={() => setPreviewDoc({ title: "Comprovante CRLV", filename: v.documentoCRLVUrl || "CRLV_Atualizado_Assinado.pdf" })}
+                              onClick={() => openDocumentOrNotify(v.documentoCRLVUrl)}
                               className="px-2 py-1 bg-slate-950 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 text-[9px] text-slate-300 rounded font-mono font-bold flex items-center gap-1 shrink-0 transition"
                               title="Visualizar CRLV do veículo"
                             >
@@ -2687,7 +2694,7 @@ export default function VeiculosView({
                             </button>
                             {/* CRV */}
                             <button
-                              onClick={() => setPreviewDoc({ title: "Título de Propriedade - CRV", filename: v.documentoCRVUrl || "Recibo_Compra_Venda.pdf" })}
+                              onClick={() => openDocumentOrNotify(v.documentoCRVUrl)}
                               className="px-2 py-1 bg-slate-950 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 text-[9px] text-slate-300 rounded font-mono font-bold flex items-center gap-1 shrink-0 transition"
                               title="Visualizar CRV de propriedade"
                             >
@@ -2695,7 +2702,7 @@ export default function VeiculosView({
                             </button>
                             {/* Seguro */}
                             <button
-                              onClick={() => setPreviewDoc({ title: "Apólice de Seguro de Frota", filename: v.seguroUrl || "Apolice_Seguro_Completo.pdf" })}
+                              onClick={() => openDocumentOrNotify(v.seguroUrl)}
                               className="px-2 py-1 bg-slate-950 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 text-[9px] text-slate-300 rounded font-mono font-bold flex items-center gap-1 shrink-0 transition"
                               title="Visualizar apólice de seguro"
                             >
@@ -2703,7 +2710,7 @@ export default function VeiculosView({
                             </button>
                             {/* Licenciamento */}
                             <button
-                              onClick={() => setPreviewDoc({ title: "Guia de Licenciamento Anual", filename: v.licenciamentoUrl || "Comprovante_Licenciamento_Exerc.pdf" })}
+                              onClick={() => openDocumentOrNotify(v.licenciamentoUrl)}
                               className="px-2 py-1 bg-slate-950 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 text-[9px] text-slate-300 rounded font-mono font-bold flex items-center gap-1 shrink-0 transition"
                               title="Visualizar Licenciamento"
                             >
@@ -2711,7 +2718,7 @@ export default function VeiculosView({
                             </button>
                             {/* Foto */}
                             <button
-                              onClick={() => setPreviewDoc({ title: "Registro Fotográfico Lateral", filename: v.fotoVeiculoUrl || "Foto_Lateral_Veiculo.jpg" })}
+                              onClick={() => openDocumentOrNotify(v.fotoVeiculoUrl)}
                               className="px-2 py-1 bg-slate-950 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 text-[9px] text-slate-300 rounded font-mono font-bold flex items-center gap-1 shrink-0 transition"
                               title="Visualizar foto lateral do veículo"
                             >
@@ -2910,63 +2917,6 @@ export default function VeiculosView({
 
           </div>
 
-        </div>
-      )}
-
-      {/* DETAILED ATTACHMENT FILE DOWNLOAD PREVIEW MODAL */}
-      {previewDoc && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fade-in">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-md overflow-hidden shadow-2xl">
-            {/* Header */}
-            <div className="bg-slate-950 px-5 py-4 border-b border-slate-850 flex justify-between items-center">
-              <h3 className="text-white text-xs font-bold font-mono tracking-wider uppercase flex items-center gap-1.5">
-                <FileText className="w-4 h-4 text-sky-400" /> Visualização de Documento Anexo
-              </h3>
-              <button
-                onClick={() => setPreviewDoc(null)}
-                className="text-slate-400 hover:text-white font-mono text-xs border border-slate-800 hover:bg-slate-850 px-2.5 py-1 rounded"
-              >
-                Fechar
-              </button>
-            </div>
-            {/* Content body */}
-            <div className="p-6 text-center space-y-4">
-              <div className="w-16 h-16 bg-sky-600/10 text-sky-400 rounded-full flex items-center justify-center mx-auto border border-sky-500/20">
-                <FileText className="w-8 h-8" />
-              </div>
-              <div className="space-y-1">
-                <h4 className="text-white text-sm font-bold tracking-tight">{previewDoc.title}</h4>
-                <p className="text-xs text-slate-500 font-mono mt-1 break-all bg-slate-955 p-2 rounded border border-slate-850 flex items-center justify-center gap-1">
-                  <Paperclip className="w-3.5 h-3.5 text-slate-400" /> {previewDoc.filename || "Anexo_Salvo_Banco.pdf"}
-                </p>
-              </div>
-              <p className="text-[11px] text-slate-400 leading-relaxed">
-                Este arquivo está gravado de forma persistente com integridade referencial ao veículo. Você pode realizar o download ou checar histórico.
-              </p>
-              
-              <div className="flex gap-2 pt-2">
-                <a
-                  href={`#download-${previewDoc.filename}`}
-                  onClick={(e) => {
-                    e.preventDefault();
-                    setNotification({
-                      type: "success",
-                      message: `Download iniciado para: ${previewDoc.filename}`
-                    });
-                  }}
-                  className="flex-1 py-2 bg-sky-600 hover:bg-sky-550 text-white font-semibold rounded-lg text-xs flex items-center justify-center gap-1 transition"
-                >
-                  <Download className="w-3.5 h-3.5" /> Baixar Cópia
-                </a>
-                <button
-                  onClick={() => setPreviewDoc(null)}
-                  className="flex-1 py-2 bg-slate-800 hover:bg-slate-750 text-slate-300 font-semibold rounded-lg text-xs transition"
-                >
-                  Ok, entendi
-                </button>
-              </div>
-            </div>
-          </div>
         </div>
       )}
 

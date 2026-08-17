@@ -6,6 +6,7 @@ export interface Usuario {
   unidadeId: string;
   status: "ativo" | "inativo";
   senha?: string;
+  senhaHash?: string;
   deveAlterarSenha?: boolean;
   supervisor?: string;
   unidadesPermitidas?: string[];
@@ -233,6 +234,18 @@ export interface Rota {
   observacoes_operacionais?: string;
   ocorrencias?: OccurrenceEntry[];
   log_alteracoes?: ChangeLogEntry[];
+
+  // Reentrega validation data shared by monitoring and closing workflows
+  reentrega_validada?: boolean;
+  reentregaValidada?: boolean;
+  status_validacao?: "VALIDADA" | "PENDENTE DE VALIDAÇÃO" | "N/A";
+  data_validacao?: string;
+  responsavel_validacao?: string;
+  observacoes_validacao?: string;
+  documento_validacao_url?: string;
+  documento_validacao_nome?: string;
+  documento_validacao_tipo?: string;
+  documento_validacao_data_upload?: string;
   
   // Entrega OFF specific fields
   clienteCodigo?: string;
@@ -390,12 +403,18 @@ export interface Auditoria {
 
 export interface Alerta {
   id: string;
-  tipo: "CNH" | "ASO" | "Licenciamento" | "Seguro" | "Manutenção";
+  tipo: string;
   refId: string;
   mensagem: string;
   severidade: "Crítica" | "Atenção";
   status: "Ativo" | "Resolvido";
   dataCriacao: string;
+  entidadeTipo?: "Pessoa" | "Veículo" | "Manutenção";
+  entidadeNome?: string;
+  unidadeId?: string;
+  dataVencimento?: string;
+  diasRestantes?: number;
+  classificacao?: "VENCIDO" | "VENCE_HOJE" | "VENCIMENTO_PROXIMO";
 }
 
 export interface ProcessoAnexo {
@@ -508,6 +527,7 @@ export interface DevolucaoCliente {
   dataCadastro: string;
   dataAtualizacao: string;
   unidadeId: string;
+  endereco?: string;
 }
 
 export interface DevolucaoMotorista {
@@ -573,10 +593,26 @@ export interface DevolucaoRegistro {
   
   // Controle operacional e auditoria
   unidadeId: string;
-  status: "Pendente" | "Resolvida";
+  status: "Aguardando Tratativa" | "Pendente" | "Resolvida" | "Cancelada";
   criadoPor: string;
   criadoEm: string;
   alteradoPor?: string;
   alteradoEm?: string;
   ip?: string;
+
+  // Legacy/import aliases kept explicit while records are normalized by the API
+  dataOcorrido?: string;
+  dataLancamento?: string;
+  dataNF?: string;
+  filial?: string;
+  unidade?: string;
+  unidadeNome?: string;
+  clienteNome?: string;
+  telefoneCliente?: string;
+  area?: string;
+  origem?: string;
+  resolvido?: "SIM" | "NÃO" | "NAO";
+  usuarioCadastro?: string;
+  dataCadastro?: string;
+  ultimaAtualizacao?: string;
 }

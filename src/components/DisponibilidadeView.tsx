@@ -8,17 +8,19 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, 
   LineChart, Line, AreaChart, Area
 } from "recharts";
-import { Veiculo, Motorista, Disponibilidade, Unidade } from "../types";
+import { Veiculo, Motorista, Disponibilidade, Unidade, Alerta } from "../types";
 import { NotificationModal, NotificationType } from "./NotificationModal";
 import SafeResponsiveContainer from "./SafeResponsiveContainer";
+import { calculateFleetAvailabilityMetrics } from "../lib/fleetAvailability";
 
 interface DisponibilidadeProps {
   veiculos: Veiculo[];
   motoristas: Motorista[];
   userEmail: string;
+  alertas: Alerta[];
 }
 
-export default function DisponibilidadeView({ veiculos, motoristas, userEmail }: DisponibilidadeProps) {
+export default function DisponibilidadeView({ veiculos, motoristas, userEmail, alertas }: DisponibilidadeProps) {
   // Notification Modal State
   const [notification, setNotification] = useState<NotificationType | null>(null);
 
@@ -147,113 +149,20 @@ export default function DisponibilidadeView({ veiculos, motoristas, userEmail }:
     return { status: "Disponível", icon: "🟢", color: "text-emerald-400", bgColor: "bg-emerald-500/10", borderColor: "border-emerald-500/20" };
   };
 
-  const getPreventiveAlerts = () => {
-    const alerts: { id: string; type: "Motorista" | "Veículo"; name: string; msg: string; daysLeft: number; severity: "Atenção" | "Crítica" }[] = [];
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-
-    const diffInDays = (d1: string) => {
-      const date1 = new Date(d1);
-      const diffTime = date1.getTime() - today.getTime();
-      return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-    };
-
-    motoristas.forEach(m => {
-      const isDriver = m.tipo === "Motorista" || !m.tipo;
-      if (isDriver && m.cnhVencimento) {
-        const days = diffInDays(m.cnhVencimento);
-        if (days >= 0 && days <= 15) {
-          alerts.push({
-            id: `alert-cnh-${m.id}`,
-            type: "Motorista",
-            name: m.nome,
-            msg: `CNH do condutor vence em ${days} dias (${m.cnhVencimento.split("-").reverse().join("/")})`,
-            daysLeft: days,
-            severity: days <= 7 ? "Crítica" : "Atenção"
-          });
-        }
-      }
-      if (m.asoVencimento) {
-        const days = diffInDays(m.asoVencimento);
-        if (days >= 0 && days <= 15) {
-          alerts.push({
-            id: `alert-aso-${m.id}`,
-            type: "Motorista",
-            name: m.nome,
-            msg: `ASO vence em ${days} dias (${m.asoVencimento.split("-").reverse().join("/")})`,
-            daysLeft: days,
-            severity: days <= 5 ? "Crítica" : "Atenção"
-          });
-        }
-      }
-    });
-
-    veiculos.forEach(v => {
-      if (v.licenciamentoVencimento) {
-        const days = diffInDays(v.licenciamentoVencimento);
-        if (days >= 0 && days <= 15) {
-          alerts.push({
-            id: `alert-lic-${v.id}`,
-            type: "Veículo",
-            name: v.placa,
-            msg: `CRLV do veículo vence em ${days} dias (${v.licenciamentoVencimento.split("-").reverse().join("/")})`,
-            daysLeft: days,
-            severity: days <= 7 ? "Crítica" : "Atenção"
-          });
-        }
-      }
-      if (v.seguroVencimento) {
-        const days = diffInDays(v.seguroVencimento);
-        if (days >= 0 && days <= 15) {
-          alerts.push({
-            id: `alert-seg-${v.id}`,
-            type: "Veículo",
-            name: v.placa,
-            msg: `Seguro vence em ${days} dias (${v.seguroVencimento.split("-").reverse().join("/")})`,
-            daysLeft: days,
-            severity: days <= 7 ? "Crítica" : "Atenção"
-          });
-        }
-      }
-    });
-
-    return alerts.sort((a, b) => a.daysLeft - b.daysLeft);
-  };
+  const getPreventiveAlerts = () => alertas
+    .filter((alert) => alert.entidadeTipo === "Pessoa" || alert.entidadeTipo === "Veículo")
+    .map((alert) => ({
+      id: alert.id,
+      type: alert.entidadeTipo === "Pessoa" ? "Motorista" as const : "Veículo" as const,
+      name: alert.entidadeNome || alert.refId,
+      msg: alert.mensagem,
+      daysLeft: alert.diasRestantes ?? 0,
+      severity: alert.severidade,
+    }));
 
   const getPreventiveAlertsForResource = (refId: string, type: "Pessoa" | "Veículo") => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-
-    const diffInDays = (d1: string) => {
-      const date1 = new Date(d1);
-      const diffTime = date1.getTime() - today.getTime();
-      return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-    };
-
-    if (type === "Pessoa") {
-      const m = motoristas.find(x => x.id === refId);
-      if (!m) return null;
-      if (m.cnhVencimento) {
-        const days = diffInDays(m.cnhVencimento);
-        if (days >= 0 && days <= 15) return { msg: `CNH vence em ${days} dias`, severity: days <= 7 ? "Crítica" : "Atenção" };
-      }
-      if (m.asoVencimento) {
-        const days = diffInDays(m.asoVencimento);
-        if (days >= 0 && days <= 15) return { msg: `ASO vence em ${days} dias`, severity: days <= 5 ? "Crítica" : "Atenção" };
-      }
-    } else {
-      const v = veiculos.find(x => x.id === refId);
-      if (!v) return null;
-      if (v.licenciamentoVencimento) {
-        const days = diffInDays(v.licenciamentoVencimento);
-        if (days >= 0 && days <= 15) return { msg: `CRLV vence em ${days} dias`, severity: days <= 7 ? "Crítica" : "Atenção" };
-      }
-      if (v.seguroVencimento) {
-        const days = diffInDays(v.seguroVencimento);
-        if (days >= 0 && days <= 15) return { msg: `Seguro vence em ${days} dias`, severity: days <= 7 ? "Crítica" : "Atenção" };
-      }
-    }
-    return null;
+    const alert = alertas.find((item) => item.entidadeTipo === type && item.refId === refId);
+    return alert ? { msg: alert.mensagem, severity: alert.severidade } : null;
   };
 
   const getFilteredYardResources = () => {
@@ -649,12 +558,11 @@ export default function DisponibilidadeView({ veiculos, motoristas, userEmail }:
   };
 
   // Calculations for Indicators
-  const countDisponibilizados = rawDisps.length;
-  const countRoteirizados = rawDisps.filter(d => d.roteirizado).length;
-  const countNaoRoteirizados = Math.max(0, countDisponibilizados - countRoteirizados);
-  const taxaAproveitamento = countDisponibilizados > 0 
-    ? Math.round((countRoteirizados / countDisponibilizados) * 100) 
-    : 0;
+  const fleetMetrics = calculateFleetAvailabilityMetrics(rawDisps, rotas);
+  const countDisponibilizados = fleetMetrics.disponibilizados;
+  const countRoteirizados = fleetMetrics.roteirizados;
+  const countNaoRoteirizados = fleetMetrics.ociosos;
+  const taxaAproveitamento = fleetMetrics.aproveitamento;
 
   // Monthly Report consolidator (Groups by YYYY-MM)
   const getMonthlyReport = () => {
