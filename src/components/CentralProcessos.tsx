@@ -12,6 +12,7 @@ import {
   ProcessoHistorico, ProcessoNotificacao, Usuario, Unidade 
 } from "../types";
 import { ConfirmModal, ConfirmType } from "./NotificationModal";
+import { downloadDocumentOrNotify } from "../lib/documents";
 
 interface CentralProcessosProps {
   currentUser: Usuario;
@@ -404,61 +405,8 @@ export default function CentralProcessos({ currentUser, unidades }: CentralProce
     }
   };
 
-  const dataURLtoBlob = (dataurl: string) => {
-    try {
-      const arr = dataurl.split(",");
-      const mimeMatch = arr[0].match(/:(.*?);/);
-      const mime = mimeMatch ? mimeMatch[1] : "";
-      const bstr = atob(arr[1]);
-      let n = bstr.length;
-      const u8arr = new Uint8Array(n);
-      while (n--) {
-        u8arr[n] = bstr.charCodeAt(n);
-      }
-      return new Blob([u8arr], { type: mime });
-    } catch (e) {
-      console.error("Error parsing base64 data url:", e);
-      return null;
-    }
-  };
-
   const handleDownloadAttachment = (anx: any) => {
-    if (!anx || !anx.url) return;
-    
-    // Check if it is a Base64 data URL
-    if (anx.url.startsWith("data:")) {
-      try {
-        const blob = dataURLtoBlob(anx.url);
-        if (!blob) {
-          window.open(anx.url, "_blank");
-          return;
-        }
-        const blobUrl = URL.createObjectURL(blob);
-        
-        // Setup temporary anchor link for download
-        const tempLink = document.createElement("a");
-        tempLink.href = blobUrl;
-        tempLink.download = anx.nome;
-        document.body.appendChild(tempLink);
-        tempLink.click();
-        
-        // Cleanup
-        document.body.removeChild(tempLink);
-        setTimeout(() => URL.revokeObjectURL(blobUrl), 200);
-      } catch (err) {
-        console.error("Erro ao processar anexo:", err);
-        window.open(anx.url, "_blank");
-      }
-    } else {
-      // Direct opening or fallback download
-      const tempLink = document.createElement("a");
-      tempLink.href = anx.url;
-      tempLink.target = "_blank";
-      tempLink.download = anx.nome;
-      document.body.appendChild(tempLink);
-      tempLink.click();
-      document.body.removeChild(tempLink);
-    }
+    downloadDocumentOrNotify(anx, anx?.nome);
   };
 
   // Submit Attachments

@@ -2,23 +2,83 @@ import "dotenv/config";
 import express from "express";
 import path from "path";
 import fs from "fs";
+import crypto from "crypto";
 import { createServer as createViteServer } from "vite";
 import { FileDatabase, Usuario, Motorista, Veiculo, Rota, NotaFiscal, Manutencao, UsuarioUnidadePermissao, Unidade, MovimentacaoFinanceira } from "./server/database";
+import { deduplicateAvailabilityRecords, isValidRouteForAvailability } from "./src/lib/fleetAvailability";
 
 async function startServer() {
   const app = express();
   const PORT = 3000;
+  const SESSION_COOKIE = "ampla_session";
+  const SESSION_TTL_MS = 8 * 60 * 60 * 1000;
+  const sessions = new Map<string, { userId: string; expiresAt: number }>();
+
+  const readCookie = (req: express.Request, name: string): string | null => {
+    const cookieHeader = req.headers.cookie || "";
+    for (const entry of cookieHeader.split(";")) {
+      const separator = entry.indexOf("=");
+      if (separator < 0) continue;
+      const key = entry.slice(0, separator).trim();
+      if (key === name) return decodeURIComponent(entry.slice(separator + 1).trim());
+    }
+    return null;
+  };
+
+  const issueSession = (res: express.Response, user: Usuario) => {
+    const token = crypto.randomBytes(32).toString("base64url");
+    sessions.set(token, { userId: user.id, expiresAt: Date.now() + SESSION_TTL_MS });
+    const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
+    res.setHeader("Set-Cookie", `${SESSION_COOKIE}=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${SESSION_TTL_MS / 1000}${secure}`);
+  };
+
+  const revokeSession = (req: express.Request, res: express.Response) => {
+    const token = readCookie(req, SESSION_COOKIE);
+    if (token) sessions.delete(token);
+    const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
+    res.setHeader("Set-Cookie", `${SESSION_COOKIE}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0${secure}`);
+  };
+
+  const hashPassword = (password: string): string => {
+    const salt = crypto.randomBytes(16);
+    const hash = crypto.scryptSync(password, salt, 64);
+    return `scrypt$${salt.toString("base64")}$${hash.toString("base64")}`;
+  };
+
+  const verifyPassword = (password: string, user: Usuario): boolean => {
+    if (user.senhaHash) {
+      const [algorithm, saltValue, hashValue] = user.senhaHash.split("$");
+      if (algorithm !== "scrypt" || !saltValue || !hashValue) return false;
+      const expected = Buffer.from(hashValue, "base64");
+      const actual = crypto.scryptSync(password, Buffer.from(saltValue, "base64"), expected.length);
+      return expected.length === actual.length && crypto.timingSafeEqual(expected, actual);
+    }
+    if (!user.senha) return false;
+    const expected = Buffer.from(user.senha);
+    const actual = Buffer.from(password);
+    return expected.length === actual.length && crypto.timingSafeEqual(expected, actual);
+  };
 
   // Initialize and bootstrap database connection
   try {
-    await FileDatabase.bootstrap();
+    await FileDatabase.bootstrap(true);
     console.log("[FileDatabase] Bootstrapping accomplished.");
   } catch (err) {
     console.error("[FileDatabase] Error during database bootstrapping:", err);
   }
 
+  // Railway-safe in-process schedule: refreshes dynamic expiration alerts even without record edits.
+  const alertRefreshTimer = setInterval(() => {
+    try {
+      FileDatabase.getFull();
+    } catch (err) {
+      console.error("[AlertScheduler] Failed to refresh expiration alerts:", err);
+    }
+  }, 15 * 60 * 1000);
+  alertRefreshTimer.unref();
+
   // Middleware
-  app.use(express.json({ limit: "50mb" }));
+  app.use(express.json({ limit: "12mb" }));
 
   // Critical Supabase Live-Sync and Write-Verification Middleware
   app.use("/api", async (req, res, next) => {
@@ -31,7 +91,26 @@ async function startServer() {
       console.error("[Middleware] Live reload from Supabase failed:", err);
     }
 
-    // 2. Wrap res.json and res.send to wait for any pending writes to complete
+    // 2. Require an authenticated server-side session for protected endpoints.
+    const publicPaths = new Set(["/auth/login", "/auth/unidades"]);
+    if (!publicPaths.has(req.path)) {
+      const token = readCookie(req, SESSION_COOKIE);
+      const session = token ? sessions.get(token) : undefined;
+      if (!session || session.expiresAt <= Date.now()) {
+        if (token) sessions.delete(token);
+        return res.status(401).json({ success: false, message: "Sessão expirada ou não autenticada." });
+      }
+      const users = (FileDatabase.get("usuarios") as Usuario[]) || [];
+      const authenticatedUser = users.find(user => user.id === session.userId && user.status === "ativo");
+      if (!authenticatedUser) {
+        sessions.delete(token!);
+        return res.status(401).json({ success: false, message: "Usuário da sessão não está ativo." });
+      }
+      session.expiresAt = Date.now() + SESSION_TTL_MS;
+      (req as express.Request & { authenticatedUser?: Usuario }).authenticatedUser = authenticatedUser;
+    }
+
+    // 3. Wrap res.json and res.send to wait for any pending writes to complete
     const originalJson = res.json;
     const originalSend = res.send;
 
@@ -149,29 +228,11 @@ async function startServer() {
     FileDatabase.logAudit(username, action, details, unitName, ip);
   };
 
-  // Helper to get active user from request headers
+  // Helper to get the active user validated by the session middleware
   const getRequestUser = (req: express.Request): Usuario => {
-    const emailHeader = (req.headers["x-user-email"] as string || "").trim();
-    const users = (FileDatabase.get("usuarios") as Usuario[]) || [];
-    if (emailHeader) {
-      const found = users.find(u => 
-        (u.email && u.email.toLowerCase() === emailHeader.toLowerCase()) || 
-        (u.id && u.id.toLowerCase() === emailHeader.toLowerCase())
-      );
-      if (found) return found;
-    }
-    const adminUser = users.find(u => u.perfil === "admin_master" || u.tipo_usuario === "MASTER") || users[0];
-    if (adminUser) return adminUser;
-
-    return {
-      id: "u-master",
-      nome: "Master",
-      email: emailHeader || "master@empresa.com",
-      perfil: "admin_master",
-      unidadeId: "Todas",
-      status: "ativo",
-      ativo: true
-    } as unknown as Usuario;
+    const user = (req as express.Request & { authenticatedUser?: Usuario }).authenticatedUser;
+    if (!user) throw new Error("Protected API route reached without an authenticated session");
+    return user;
   };
 
   // Helper to get authorized units for user
@@ -265,8 +326,9 @@ async function startServer() {
     const activePerms = permissoes
       .filter(p => p.usuario_id === user.id && p.ativo)
       .map(p => p.unidade_id);
+    const { senha: _senha, senhaHash: _senhaHash, ...safeUser } = user;
     return {
-      ...user,
+      ...safeUser,
       unidadesPermitidas: activePerms
     };
   };
@@ -295,7 +357,7 @@ async function startServer() {
       
       const user = getRequestUser(req);
       
-      await FileDatabase.bootstrap(); // reloads / forces sync
+      await FileDatabase.bootstrap(true); // explicit manual refresh
       logAudit(req, user?.nome || "Sistema", "SYNC_DATABASE", `Sincronização manual com o Supabase efetuada`);
       
       res.json({
@@ -318,93 +380,50 @@ async function startServer() {
 
   app.post("/api/auth/login", (req, res) => {
     const { email, password, googleUser } = req.body;
-    console.log(`\n[Auth DIAGNOSTICS] Login attempt received for '${email}'`);
     const users = FileDatabase.get("usuarios");
-    console.log(`[Auth DIAGNOSTICS] Loaded ${users ? users.length : 0} users from cached database.`);
 
     if (googleUser) {
-      console.log(`[Auth DIAGNOSTICS] OAuth Google Login flow triggered for email: ${googleUser.email}`);
-      // Simulate Google Login
-      let user = users.find((u) => u.email.toLowerCase() === googleUser.email.toLowerCase() || u.id.toLowerCase() === googleUser.email.toLowerCase());
-      if (!user) {
-        console.log(`[Auth DIAGNOSTICS] Google user not found in the database. Auto-creating a new operator account.`);
-        // Create auto operator
-        user = {
-          id: `usr-${googleUser.email.split('@')[0]}`,
-          email: googleUser.email,
-          nome: googleUser.name || "Usuário Google",
-          perfil: "operador",
-          unidadeId: "Todas",
-          status: "ativo",
-          deveAlterarSenha: false
-        };
-        FileDatabase.add("usuarios", user, "oauth-system");
-      }
-      logApiAction(user.email, "AUTH_GOOGLE_SUCCESS", "Login via Google OAuth efetuado");
-      console.log(`[Auth DIAGNOSTICS] Google OAuth Successful for user: ${user.nome} (Profile: ${user.perfil})`);
-      return res.json({ success: true, user: getUserWithPerms(user) });
+      return res.status(501).json({
+        success: false,
+        message: "Login Google desativado: configure um provedor OAuth real antes de habilitar este fluxo."
+      });
     }
 
-    // Traditional Credential login
-    console.log(`[Auth DIAGNOSTICS] Looking up user by email or ID match for credentials...`);
-    let user = users.find((u) => u.email.toLowerCase() === email?.toLowerCase() || u.id.toLowerCase() === email?.toLowerCase());
-    
-    if (!user && email) {
-      console.log(`[Auth DIAGNOSTICS] User '${email}' not found. Auto-creating a new master/admin account dynamically.`);
-      const namePart = email.split('@')[0].split('.')[0];
-      const secondPart = email.split('@')[0].split('.')[1] || "";
-      const formattedName = (namePart.charAt(0).toUpperCase() + namePart.slice(1)) + 
-                            (secondPart ? " " + secondPart.charAt(0).toUpperCase() + secondPart.slice(1) : "");
-      
-      user = {
-        id: `usr-${email.toLowerCase().replace(/[^a-z0-9]/g, "-")}`,
-        email: email,
-        nome: formattedName,
-        perfil: "admin_master",
-        unidadeId: "Todas",
-        status: "ativo",
-        senha: password || "MasterPassword",
-        deveAlterarSenha: false
-      };
-      
-      users.push(user);
-      FileDatabase.set("usuarios", users);
-      console.log(`[Auth DIAGNOSTICS] Created user on-the-fly:`, user);
+    if (typeof email !== "string" || typeof password !== "string" || !email.trim() || !password) {
+      return res.status(400).json({ success: false, message: "Informe usuário e senha." });
     }
+
+    const user = users.find((candidate) =>
+      candidate.email.toLowerCase() === email.trim().toLowerCase() ||
+      candidate.id.toLowerCase() === email.trim().toLowerCase()
+    );
 
     if (user) {
-      console.log(`[Auth DIAGNOSTICS] User match found! Nome: ${user.nome}, Profile: ${user.perfil}, Status: ${user.status}, Needs PW Change: ${user.deveAlterarSenha}`);
-      
       if (user.status === "inativo") {
-        console.warn(`[Auth DIAGNOSTICS] Login rejected: target account is inactive/suspended.`);
         return res.status(403).json({ success: false, message: "Esta conta está suspensa ou inativa. Entre em contato com a Administração Master." });
       }
 
-      if (user.senha && user.senha !== password) {
-        console.warn(`[Auth DIAGNOSTICS] Login rejected: incorrect password. Provided: "${password}", Stored: "${user.senha}"`);
-        return res.status(401).json({ success: false, message: "Senha incorreta." });
+      if (!verifyPassword(password, user)) {
+        return res.status(401).json({ success: false, message: "E-mail ou credenciais inválidas." });
       }
 
+      // Transparently migrate legacy plaintext passwords after a valid login.
+      if (!user.senhaHash) {
+        user.senhaHash = hashPassword(password);
+        delete user.senha;
+        FileDatabase.set("usuarios", users);
+      }
+
+      issueSession(res, user);
       if (user.deveAlterarSenha) {
         logApiAction(user.email, "AUTH_PWD_PENDING_CHANGE", "Logado com sucesso, necessita alterar a senha padrão");
         logAudit(req, user.nome, "LOGIN", `Login padrão efetuado (necessita redefinir senha)`, user.unidadeId);
-        console.log(`[Auth DIAGNOSTICS] Login successful (pending required password change) for ${user.nome}`);
         return res.json({ success: true, user: getUserWithPerms(user), forcePasswordReset: true });
       }
 
       logApiAction(user.email, "AUTH_PWD_SUCCESS", "Login tradicional efetuado");
       logAudit(req, user.nome, "LOGIN", `Efetuou login com sucesso no sistema. Tipo: ${user.tipo_usuario || "MASTER"}`, user.unidadeId);
-      console.log(`[Auth DIAGNOSTICS] Login successful! Session granted for ${user.nome}`);
       return res.json({ success: true, user: getUserWithPerms(user) });
-    }
-
-    console.warn(`[Auth DIAGNOSTICS] Login failed: No user found matching identifier "${email}". Available users in cached database:`);
-    if (users && users.length > 0) {
-      users.forEach(u => {
-        console.log(` - ID: ${u.id} | Email: ${u.email} | Nome: ${u.nome}`);
-      });
-    } else {
-      console.warn(`[Auth DIAGNOSTICS] WARNING: The "usuarios" table is completely empty! Please check your local JSON database.json or Supabase table.`);
     }
 
     return res.status(401).json({ success: false, message: "E-mail ou credenciais inválidas" });
@@ -413,12 +432,20 @@ async function startServer() {
   // Change Password endpoint for first log-in
   app.post("/api/auth/change-password", (req, res) => {
     const { email, newPassword } = req.body;
+    const authenticatedUser = getRequestUser(req);
+    if (typeof newPassword !== "string" || newPassword.length < 8) {
+      return res.status(400).json({ success: false, message: "A nova senha deve possuir pelo menos 8 caracteres." });
+    }
+    if (authenticatedUser.email.toLowerCase() !== String(email || "").toLowerCase()) {
+      return res.status(403).json({ success: false, message: "Não é permitido alterar a senha de outro usuário." });
+    }
     const users = FileDatabase.get("usuarios");
     const userIdx = users.findIndex(u => u.email.toLowerCase() === email?.toLowerCase() || u.id.toLowerCase() === email?.toLowerCase());
 
     if (userIdx !== -1) {
       const user = users[userIdx];
-      user.senha = newPassword;
+      user.senhaHash = hashPassword(newPassword);
+      delete user.senha;
       user.deveAlterarSenha = false;
       users[userIdx] = user;
       FileDatabase.set("usuarios", users);
@@ -435,6 +462,7 @@ async function startServer() {
     if (user) {
       logAudit(req, user.nome, "LOGOUT", "Efetuou logout do sistema", user.unidadeId);
     }
+    revokeSession(req, res);
     res.json({ success: true });
   });
 
@@ -465,6 +493,7 @@ async function startServer() {
     const descargas = FileDatabase.get("descargas") || [];
     const nfs = FileDatabase.get("notas_fiscais") || [];
     const unidades = FileDatabase.get("unidades") || [];
+    const activeAlerts = FileDatabase.get("alertas");
 
     // Force unit isolation for non-master users or respect selected context
     const activeHeaderUnit = getRequestUnitContext(req, user);
@@ -481,6 +510,7 @@ async function startServer() {
     const filteredRotasUnit = rotas.filter(filterUnit);
     const filteredMotoristas = motoristas.filter(filterUnit);
     const filteredVeiculos = veiculos.filter(filterUnit);
+    const filteredAlerts = activeAlerts.filter((alert) => filteredUnitId === "Todas" || alert.unidadeId === filteredUnitId);
 
     // ----------------------------------------------------
     // TEMPORAL FILTER RESOLUTION
@@ -569,8 +599,8 @@ async function startServer() {
           prevEnd = dEnd.toISOString().split("T")[0];
         }
       } catch (e) {
-        prevStart = "2026-06-01";
-        prevEnd = "2026-06-07";
+        prevStart = "0000-01-01";
+        prevEnd = "0000-01-01";
       }
       return { start: prevStart, end: prevEnd };
     };
@@ -604,7 +634,7 @@ async function startServer() {
         totalEntregasCount += r.totalEntregas;
         entreguesCount += r.entregues;
         devolucoesCount += r.devolucoes;
-        pendentesCount += (r.totalEntregas - r.entregues - r.devolucoes);
+        pendentesCount += Math.max(0, r.totalEntregas - r.entregues - r.devolucoes);
 
         if (r.tipo === "Reentrega") reentregasCount++;
         if (r.tipo === "Recarga") recargasCount++;
@@ -666,15 +696,21 @@ async function startServer() {
     const veiculosIndisponiveis = filteredVeiculos.filter(v => v.status === "Bloqueado").length;
 
     // Availability KPI records
-    const mDisps = disponibilidade.map((item: any) => {
-      const isRoteirizado = rotas.some(r => r.veiculoId === item.veiculoId && r.data === item.data);
+    const mDisps = deduplicateAvailabilityRecords(disponibilidade.map((item: any) => {
+      const unitId = item.unidadeId || item.unidade || "un-go";
+      const isRoteirizado = rotas.some(r =>
+        isValidRouteForAvailability(r) &&
+        r.veiculoId === item.veiculoId &&
+        r.data === item.data &&
+        (!r.unidadeId || r.unidadeId === unitId)
+      );
       return {
         ...item,
         roteirizado: isRoteirizado,
         status_disponibilidade: isRoteirizado ? "ROTEIRIZADO" : "NÃO ROTEIRIZADO",
-        unidadeId: item.unidadeId || item.unidade || "un-go",
+        unidadeId: unitId,
       };
-    });
+    }));
 
     const filteredMDisps = mDisps.filter(filterUnit);
 
@@ -705,12 +741,6 @@ async function startServer() {
     });
 
     const sortedDatesStr = Object.keys(dailyGroup).sort().slice(-7);
-    if (sortedDatesStr.length === 0) {
-      sortedDatesStr.push("2026-06-11", "2026-06-12");
-      dailyGroup["2026-06-11"] = { disp: 4, rot: 3 };
-      dailyGroup["2026-06-12"] = { disp: 5, rot: 4 };
-    }
-
     const aproveitamentoDiario = sortedDatesStr.map((dStr) => {
       const g = dailyGroup[dStr] || { disp: 0, rot: 0 };
       const rate = g.disp > 0 ? Math.round((g.rot / g.disp) * 100) : 0;
@@ -735,7 +765,7 @@ async function startServer() {
     });
     const monthNames = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
     if (!monthlyGroup[activeMonth]) {
-      monthlyGroup[activeMonth] = { disp: disponibilizadosMes || 6, rot: roteirizadosMes || 5 };
+      monthlyGroup[activeMonth] = { disp: disponibilizadosMes, rot: roteirizadosMes };
     }
     const aproveitamentoMensalMap = Object.keys(monthlyGroup).sort().map((mKey) => {
       const g = monthlyGroup[mKey];
@@ -754,7 +784,7 @@ async function startServer() {
       if (d.roteirizado) yearlyGroup[yearKey].rot++;
     });
     if (!yearlyGroup[activeYear]) {
-      yearlyGroup[activeYear] = { disp: filteredMDisps.length || 10, rot: filteredMDisps.filter(d => d.roteirizado).length || 8 };
+      yearlyGroup[activeYear] = { disp: 0, rot: 0 };
     }
     const aproveitamentoAnualMap = Object.keys(yearlyGroup).sort().map((yKey) => {
       const g = yearlyGroup[yKey];
@@ -1089,6 +1119,9 @@ async function startServer() {
         motoristasPendentes: penMot,
         motoristasBloqueados: bloqMot,
         motoristasConformidade: rateCompliance,
+        alertasAtivos: filteredAlerts.length,
+        alertasCriticos: filteredAlerts.filter((alert) => alert.severidade === "Crítica").length,
+        alertasVencimentoProximo: filteredAlerts.filter((alert) => alert.severidade === "Atenção").length,
         viagensEmRota: currentStats.viagensEmRota,
         viagensEmCarregamento: currentStats.viagensEmCarregamento,
         viagensAgDescarga: currentStats.viagensAgDescarga,
@@ -1144,7 +1177,8 @@ async function startServer() {
         maiorDevedor: Math.abs(maxDevedorVal),
         maiorDevedorNome: maxDevedorNome,
         mediaPorColaborador
-      }
+      },
+      alertas: filteredAlerts
     });
   });
 
@@ -1217,7 +1251,7 @@ async function startServer() {
       perfil: "admin_unidade",
       unidadeId: unitId,
       status: "ativo",
-      senha: tempPassword,
+      senhaHash: hashPassword(tempPassword),
       deveAlterarSenha: true,
       supervisor: supervisorName,
       unidade_id: unitId,
@@ -1244,7 +1278,11 @@ async function startServer() {
     FileDatabase.set("estoque_epi", db.estoque_epi);
 
     logAudit(req, user.nome, "CADASTRO_UNIDADE", `Criou Unidade Comercial ${nome} (Código: ${codigo})`, unitId);
-    res.json({ success: true, added, generatedUser: generatedSupervisor });
+    res.json({
+      success: true,
+      added,
+      generatedUser: { ...getUserWithPerms(generatedSupervisor), senha: tempPassword }
+    });
   });
 
   app.put("/api/unidades/:id", (req, res) => {
@@ -1305,7 +1343,7 @@ async function startServer() {
             perfil: "admin_unidade",
             unidadeId: id,
             status: "ativo",
-            senha: tempPassword,
+            senhaHash: hashPassword(tempPassword),
             deveAlterarSenha: true,
             supervisor: finalSupervisor,
             unidade_id: id,
@@ -1371,8 +1409,9 @@ async function startServer() {
         const activePerms = permissoes
           .filter(p => p.usuario_id === u.id && p.ativo)
           .map(p => p.unidade_id);
+        const { senha: _senha, senhaHash: _senhaHash, ...safeUser } = u;
         return {
-          ...u,
+          ...safeUser,
           unidadesPermitidas: activePerms
         };
       });
@@ -1383,8 +1422,9 @@ async function startServer() {
       const activePerms = permissoes
         .filter(p => p.usuario_id === u.id && p.ativo)
         .map(p => p.unidade_id);
+      const { senha: _senha, senhaHash: _senhaHash, ...safeUser } = u;
       return {
-        ...u,
+        ...safeUser,
         unidadesPermitidas: activePerms
       };
     });
@@ -1396,7 +1436,7 @@ async function startServer() {
     if (!user) return res.status(401).json({ error: "Não autorizado" });
     const usuarios = FileDatabase.get("usuarios") as Usuario[];
     const activeUsers = usuarios.filter(u => u.status !== "inativo");
-    res.json(activeUsers);
+    res.json(activeUsers.map(getUserWithPerms));
   });
 
   app.post("/api/usuarios", (req, res) => {
@@ -1430,7 +1470,7 @@ async function startServer() {
       perfil: calculatedPerfil,
       unidadeId: unidade_id, // Unidade principal de referência
       status: status || "ativo",
-      senha: senha,
+      senhaHash: hashPassword(senha),
       deveAlterarSenha: false,
       
       // New compliance fields
@@ -1459,7 +1499,7 @@ async function startServer() {
     }
 
     logAudit(req, user.nome, "CADASTRO_USUARIO", `Cadastrou usuário: ${newUser.nome} (${newUser.email}) - Tipo: ${tipo_usuario}`, user.unidadeId);
-    res.json({ success: true, user: newUser });
+    res.json({ success: true, user: getUserWithPerms(newUser) });
   });
 
   app.put("/api/usuarios/:id", (req, res) => {
@@ -1500,7 +1540,10 @@ async function startServer() {
       updatedFields.unidadeId = unidade_id;
     }
     if (status) updatedFields.status = status;
-    if (senha) updatedFields.senha = senha;
+    if (senha) {
+      updatedFields.senhaHash = hashPassword(senha);
+      updatedFields.senha = undefined;
+    }
     if (cpf !== undefined) updatedFields.cpf = cpf;
     if (telefone !== undefined) updatedFields.telefone = telefone;
     if (cargo !== undefined) updatedFields.cargo = cargo;
@@ -2334,7 +2377,7 @@ async function startServer() {
       let mappedList = list.map((item) => {
         const formDate = item.data_disponibilidade || item.data || "";
         const vehicleId = item.veiculo_id || item.veiculoId || "";
-        const isRoteirizado = rotas.some(r => r.veiculoId === vehicleId && r.data === formDate);
+      const isRoteirizado = rotas.some(r => isValidRouteForAvailability(r) && r.veiculoId === vehicleId && r.data === formDate && (!r.unidadeId || r.unidadeId === (item.unidade_id || item.unidadeId || item.unidade || "un-go")));
         const uid = item.unidade_id || item.unidadeId || item.unidade || "un-go";
         return {
           id: item.id,
@@ -2419,7 +2462,7 @@ async function startServer() {
         mappedList = mappedList.filter(x => x.motoristaId === motoristaId);
       }
 
-      res.json(mappedList);
+      res.json(deduplicateAvailabilityRecords(mappedList));
     } catch (err: any) {
       console.error("[/api/disponibilidade] Error:", err);
       res.status(500).json({ error: err.message || "Erro interno do servidor" });
@@ -2949,108 +2992,12 @@ async function startServer() {
         filtered = filtered.filter((r: any) => r.unidadeId === activeUnit);
       }
 
-      // If contas_a_receber is completely empty, let's auto-generate some realistic ones from existing closed DTs!
-      if (list.length === 0) {
-        const fechamentos = FileDatabase.get("fechamentos_dt") || [];
-        const nfs = FileDatabase.get("notas_fiscais") || [];
-        const rotas = FileDatabase.get("rotas") || [];
-        const motoristas = FileDatabase.get("motoristas") || [];
-        const veiculos = FileDatabase.get("veiculos") || [];
-
-        const clients = ["Heineken", "Ambev", "Coca-Cola Femsa", "Nestlé", "Kabin", "Pepsico", "Unilever"];
-        const generated: any[] = [];
-
-        fechamentos.forEach((f: any, idx: number) => {
-          const associatedRoute = rotas.find((r: any) => r.dt === f.dt);
-          const associatedNf = nfs.find((nf: any) => nf.dtId === f.id || nf.dtId === `DT-${f.dt}` || nf.dtId === f.dt);
-          
-          let clientName = associatedNf?.cliente || clients[idx % clients.length];
-          const driverObj = motoristas.find((m: any) => m.id === f.motoristaId);
-          const vehicleObj = veiculos.find((v: any) => v.id === f.veiculoId);
-
-          const frete = f.freteValor !== undefined ? Number(f.freteValor) : 1850.00;
-          const ped = f.pedagios !== undefined ? Number(f.pedagios) : 120.00;
-          const diar = f.diariasBonificacoes !== undefined ? Number(f.diariasBonificacoes) : 0;
-          const acresc = f.outrosCreditos !== undefined ? Number(f.outrosCreditos) : 0;
-          const tot = frete + ped + diar + acresc;
-
-          const deliveryDate = f.dataFechamento || "2026-06-19";
-          const dParts = deliveryDate.split("-");
-          let dueDate = deliveryDate;
-          if (dParts.length === 3) {
-            const d = new Date(Number(dParts[0]), Number(dParts[1]) - 1, Number(dParts[2]));
-            d.setDate(d.getDate() + 30);
-            dueDate = d.toISOString().split("T")[0];
-          }
-
-          let st: "A Receber" | "Recebido" | "Parcial" | "Vencido" | "Cancelado" | "Em Contestação" = "A Receber";
-          if (idx % 3 === 0) {
-            st = "Recebido";
-          } else if (idx % 4 === 0) {
-            st = "Parcial";
-          } else {
-            const todayStr = new Date().toISOString().split("T")[0];
-            if (dueDate < todayStr) {
-              st = "Vencido";
-            }
-          }
-
-          const newTitle = {
-            id: `REC-${f.dt || Math.floor(100000 + Math.random() * 900000)}`,
-            dt: f.dt,
-            cliente: clientName,
-            veiculoId: f.veiculoId || (vehicleObj?.placa || "AAA-0000"),
-            motoristaId: driverObj?.nome || f.motoristaId || "Motorista não identificado",
-            origem: "Goiânia - Matriz",
-            destino: "Anápolis - DF",
-            valorFrete: frete,
-            valorPedagiosReembolsaveis: ped,
-            valorDiarias: diar,
-            outrosAcrescimos: acresc,
-            valorTotal: tot,
-            dataEntrega: deliveryDate,
-            dataVencimento: dueDate,
-            status: st,
-            responsavel: f.usuarioResponsavel || "Sistema",
-            observacoes: `Gerado automaticamente a partir do faturamento da DT ${f.dt}`,
-            unidadeId: f.unidadeId || "un-go",
-            dataRecebimento: st === "Recebido" ? dueDate : (st === "Parcial" ? dueDate : undefined),
-            valorRecebido: st === "Recebido" ? tot : (st === "Parcial" ? Math.round(tot * 0.4) : undefined),
-            formaRecebimento: st === "Recebido" || st === "Parcial" ? "PIX" : undefined,
-            observacaoBaixa: st === "Recebido" || st === "Parcial" ? "Baixa automática de teste" : undefined,
-            historicoBaixas: st === "Recebido" ? [
-              {
-                data: dueDate,
-                valor: tot,
-                forma: "PIX",
-                observacao: "Baixa automática integral",
-                usuario: "financeiro@ampla.com"
-              }
-            ] : (st === "Parcial" ? [
-              {
-                data: dueDate,
-                valor: Math.round(tot * 0.4),
-                forma: "PIX",
-                observacao: "Baixa parcial de 40%",
-                usuario: "financeiro@ampla.com"
-              }
-            ] : [])
-          };
-          generated.push(newTitle);
-        });
-
-        if (generated.length > 0) {
-          FileDatabase.set("contas_a_receber" as any, generated);
-          filtered = activeUnit === "Todas" ? generated : generated.filter((r: any) => r.unidadeId === activeUnit);
-        }
-      }
-
       const fechamentos = FileDatabase.get("fechamentos_dt") || [];
       const enriched = filtered.map((r: any) => {
         const f = fechamentos.find((cl: any) => cl.dt === r.dt);
         
         // Receitas
-        const valorFrete = r.valorFrete !== undefined ? Number(r.valorFrete) : (f?.freteValor !== undefined ? Number(f.freteValor) : 1850.00);
+        const valorFrete = r.valorFrete !== undefined ? Number(r.valorFrete) : (f?.freteValor !== undefined ? Number(f.freteValor) : 0);
         const valorDisponibilidade = r.valorDisponibilidade !== undefined ? Number(r.valorDisponibilidade) : (f?.disponibilidadeValor !== undefined ? Number(f.disponibilidadeValor) : 0);
         const valorDescarga = r.valorDescarga !== undefined ? Number(r.valorDescarga) : (f?.houveReciboDescarga === "Sim" ? Number(f?.descargaValor || 0) : 0);
         const valorReentrega = r.valorReentrega !== undefined ? Number(r.valorReentrega) : (f?.reentregaValor !== undefined ? Number(f.reentregaValor) : 0);
@@ -3323,72 +3270,6 @@ async function startServer() {
       let filtered = [...list];
       if (activeUnit !== "Todas") {
         filtered = filtered.filter((r: any) => r.unidadeId === activeUnit);
-      }
-
-      // If contas_a_pagar is completely empty, auto-generate realistic ones from existing closed DTs (not Frota Própria)!
-      if (list.length === 0) {
-        const fechamentos = FileDatabase.get("fechamentos_dt") || [];
-        const rotas = FileDatabase.get("rotas") || [];
-        const motoristas = FileDatabase.get("motoristas") || [];
-        const veiculos = FileDatabase.get("veiculos") || [];
-        const generated: any[] = [];
-
-        fechamentos.forEach((f: any, idx: number) => {
-          const associatedRoute = rotas.find((r: any) => r.dt === f.dt);
-          const associatedVeiculo = veiculos.find((v: any) => v.id === f.veiculoId || v.placa === f.veiculoId);
-          
-          // Only create for third-party or aggregated vehicles
-          if (associatedVeiculo && associatedVeiculo.tipo === "Frota Própria") {
-            return;
-          }
-
-          const driverObj = motoristas.find((m: any) => m.id === f.motoristaId);
-          const driverName = driverObj?.nome || f.motoristaId || "Motorista";
-
-          const fretePagar = f.freteValor !== undefined ? Number(f.freteValor) : 1850.00;
-          const disp = f.disponibilidadeValor !== undefined ? Number(f.disponibilidadeValor) : 0.00;
-          const diar = f.diariasBonificacoes !== undefined ? Number(f.diariasBonificacoes) : 0.00;
-          const adiantamentosVal = f.adiantamentos !== undefined ? Number(f.adiantamentos) : 250.00;
-          const valDescontos = f.multasDescontos !== undefined ? Number(f.multasDescontos) : 0.00;
-          const payTotal = (fretePagar + disp + diar) - (adiantamentosVal + valDescontos);
-
-          const dateStr = f.dataAcerto || new Date().toISOString().split("T")[0];
-          let dueDate = dateStr;
-          try {
-            const d = new Date(dateStr + "T12:00:00");
-            d.setDate(d.getDate() + 15);
-            dueDate = d.toISOString().split("T")[0];
-          } catch (e) {}
-
-          const payableObj = {
-            id: `PAG-${f.dt}-${1000 + idx}`,
-            dt: f.dt,
-            cliente: "Heineken",
-            motoristaId: f.motoristaId || "mot-1",
-            motoristaNome: driverName,
-            veiculoId: f.veiculoId || "AAA-0000",
-            unidadeId: f.unidadeId || "un-go",
-            valorFrete: fretePagar,
-            valorDisponibilidade: disp,
-            valorDiarias: diar,
-            adiantamentos: adiantamentosVal,
-            multasDescontos: valDescontos,
-            valorTotal: payTotal,
-            status: "A Pagar",
-            dataGeracao: dateStr,
-            dataVencimento: dueDate,
-            responsavel: "sistema@ampla.com.br",
-            observacoes: `Gerado automaticamente a partir do acerto de viagem da DT ${f.dt}`,
-            historicoBaixas: []
-          };
-
-          generated.push(payableObj);
-        });
-
-        if (generated.length > 0) {
-          FileDatabase.set("contas_a_pagar" as any, generated);
-          filtered = activeUnit !== "Todas" ? generated.filter((r: any) => r.unidadeId === activeUnit) : generated;
-        }
       }
 
       res.json(filtered);
@@ -4598,18 +4479,7 @@ async function startServer() {
     if (!user) return res.status(401).json({ error: "Não autorizado" });
     const alerts = FileDatabase.get("alertas");
     const activeUnit = getRequestUnitContext(req, user);
-    if (activeUnit === "Todas") return res.json(alerts);
-    
-    // Filter alerts by looking at driver or vehicle's unit
-    const filteredAlerts = alerts.filter(alert => {
-      if (alert.tipo === "CNH" || alert.tipo === "ASO") {
-        const mot = FileDatabase.get("motoristas").find(m => m.id === alert.refId);
-        return mot ? mot.unidadeId === activeUnit : false;
-      }
-      const veic = FileDatabase.get("veiculos").find(v => v.id === alert.refId);
-      return veic ? veic.unidadeId === activeUnit : false;
-    });
-    res.json(filteredAlerts);
+    res.json(activeUnit === "Todas" ? alerts : alerts.filter((alert) => alert.unidadeId === activeUnit));
   });
 
   // ----------------------------------------------------
@@ -4713,8 +4583,8 @@ async function startServer() {
 
       // Perform updates
       const updatedFields: any = {};
-      if (urlProp) {
-        updatedFields[urlProp] = novoArquivo || `${documentoTipo.toLowerCase()}_renovado.pdf`;
+      if (urlProp && typeof novoArquivo === "string" && novoArquivo.trim()) {
+        updatedFields[urlProp] = novoArquivo.trim();
       }
       if (validadeProp && novaValidade) {
         updatedFields[validadeProp] = novaValidade;
@@ -4739,7 +4609,7 @@ async function startServer() {
         dataTroca: `${dateStr} ${timeStr}`,
         usuarioResponsavel: user.nome || user.email,
         arquivoAntigo,
-        arquivoNovo: novoArquivo || `${documentoTipo.toLowerCase()}_renovado.pdf`,
+        arquivoNovo: (typeof novoArquivo === "string" && novoArquivo.trim()) ? novoArquivo.trim() : arquivoAntigo,
         validadeAnterior,
         novaValidade: novaValidade || "Nenhuma",
         motivo: motivo || ""
@@ -6973,18 +6843,30 @@ async function startServer() {
   });
 
   // ----------------------------------------------------
-  // MOCK FILE UPLOAD TO ENHANCE REAL-WORLD FEEL
+  // DOCUMENT UPLOAD (data URL storage used by the current persistence model)
   // ----------------------------------------------------
   app.post("/api/upload-document", (req, res) => {
     const { base64Data, filename, filetype } = req.body;
-    // Returns a beautiful permanent mockup URL or localized Base64 reference
-    // Since we want standard previews, we'll store the object and synthesize an active download link
-    const simulatedUrl = base64Data || `https://images.unsplash.com/photo-1586528116311-ad8dd3c8310d?q=80&w=1500&auto=format&fit=crop`;
+    if (typeof base64Data !== "string" || typeof filename !== "string" || !filename.trim()) {
+      return res.status(400).json({ success: false, message: "Arquivo e nome são obrigatórios." });
+    }
+    const match = base64Data.match(/^data:([^;]+);base64,([A-Za-z0-9+/=\r\n]+)$/);
+    if (!match) {
+      return res.status(400).json({ success: false, message: "Conteúdo do arquivo inválido." });
+    }
+    const detectedType = match[1];
+    if (filetype && filetype !== detectedType) {
+      return res.status(400).json({ success: false, message: "O tipo declarado não corresponde ao arquivo enviado." });
+    }
+    const sizeBytes = Buffer.byteLength(match[2], "base64");
+    if (sizeBytes > 8 * 1024 * 1024) {
+      return res.status(413).json({ success: false, message: "O arquivo excede o limite de 8 MB." });
+    }
     res.json({
       success: true,
-      url: simulatedUrl,
-      filename,
-      metadata: { uploadedAt: new Date().toISOString(), size: "2.4 MB" }
+      url: base64Data,
+      filename: filename.trim(),
+      metadata: { uploadedAt: new Date().toISOString(), sizeBytes, filetype: detectedType }
     });
   });
 
@@ -7030,6 +6912,8 @@ async function startServer() {
     const rates = getStandardRates(veiculo.perfil);
 
     dts.forEach((f: any) => {
+      const movementDate = f.dataFechamento || f.data;
+      if (!movementDate) return;
       // Use custom freteValor if available, otherwise fallback to standard rates
       const freteVal = f.freteValor !== undefined && f.freteValor !== null ? Number(f.freteValor) : rates.frete;
       const dispVal = f.disponibilidadeValor !== undefined && f.disponibilidadeValor !== null ? Number(f.disponibilidadeValor) : rates.disp;
@@ -7038,7 +6922,7 @@ async function startServer() {
       autoFretes.push({
         id: `auto-frete-${f.id || f.dt}`,
         veiculoId,
-        data: f.dataFechamento || f.data || "2026-06-19",
+        data: movementDate,
         hora: f.horaFechamento || f.hora || "12:00:00",
         tipo: "Crédito" as const,
         origem: "Frete",
@@ -7046,14 +6930,14 @@ async function startServer() {
         observacao: `Frete DT ${f.dt || "N/A"}`,
         usuario: f.usuarioResponsavel || "Sistema",
         dtId: f.dt,
-        criadoEm: f.criadoEm || `${f.dataFechamento || "2026-06-19"}T12:00:00.000Z`
+        criadoEm: f.criadoEm || `${movementDate}T12:00:00.000Z`
       });
 
       // Disponibilidade Credit
       autoDisps.push({
         id: `auto-disp-${f.id || f.dt}`,
         veiculoId,
-        data: f.dataFechamento || f.data || "2026-06-19",
+        data: movementDate,
         hora: f.horaFechamento || f.hora || "12:05:00",
         tipo: "Crédito" as const,
         origem: "Disponibilidade",
@@ -7061,7 +6945,7 @@ async function startServer() {
         observacao: `Disponibilidade DT ${f.dt || "N/A"}`,
         usuario: f.usuarioResponsavel || "Sistema",
         dtId: f.dt,
-        criadoEm: f.criadoEm || `${f.dataFechamento || "2026-06-19"}T12:05:00.000Z`
+        criadoEm: f.criadoEm || `${movementDate}T12:05:00.000Z`
       });
 
       // Diárias / Bonificações (Crédito)
@@ -7069,7 +6953,7 @@ async function startServer() {
         autoFretes.push({
           id: `auto-diarias-bonif-${f.id || f.dt}`,
           veiculoId,
-          data: f.dataFechamento || f.data || "2026-06-19",
+          data: movementDate,
           hora: f.horaFechamento || f.hora || "12:06:00",
           tipo: "Crédito" as const,
           origem: "Bonificação",
@@ -7077,7 +6961,7 @@ async function startServer() {
           observacao: `Diárias / Bonificações DT ${f.dt || "N/A"}`,
           usuario: f.usuarioResponsavel || "Sistema",
           dtId: f.dt,
-          criadoEm: f.criadoEm || `${f.dataFechamento || "2026-06-19"}T12:06:00.000Z`
+          criadoEm: f.criadoEm || `${movementDate}T12:06:00.000Z`
         });
       }
 
@@ -7086,7 +6970,7 @@ async function startServer() {
         autoFretes.push({
           id: `auto-outros-cred-${f.id || f.dt}`,
           veiculoId,
-          data: f.dataFechamento || f.data || "2026-06-19",
+          data: movementDate,
           hora: f.horaFechamento || f.hora || "12:07:00",
           tipo: "Crédito" as const,
           origem: "Outros Créditos",
@@ -7094,7 +6978,7 @@ async function startServer() {
           observacao: `Outros Créditos DT ${f.dt || "N/A"}`,
           usuario: f.usuarioResponsavel || "Sistema",
           dtId: f.dt,
-          criadoEm: f.criadoEm || `${f.dataFechamento || "2026-06-19"}T12:07:00.000Z`
+          criadoEm: f.criadoEm || `${movementDate}T12:07:00.000Z`
         });
       }
 
@@ -7103,7 +6987,7 @@ async function startServer() {
         autoFretes.push({
           id: `auto-adiantamentos-${f.id || f.dt}`,
           veiculoId,
-          data: f.dataFechamento || f.data || "2026-06-19",
+          data: movementDate,
           hora: f.horaFechamento || f.hora || "12:08:00",
           tipo: "Débito" as const,
           origem: "Adiantamento",
@@ -7111,7 +6995,7 @@ async function startServer() {
           observacao: `Adiantamento de viagem DT ${f.dt || "N/A"}`,
           usuario: f.usuarioResponsavel || "Sistema",
           dtId: f.dt,
-          criadoEm: f.criadoEm || `${f.dataFechamento || "2026-06-19"}T12:08:00.000Z`
+          criadoEm: f.criadoEm || `${movementDate}T12:08:00.000Z`
         });
       }
 
@@ -7120,7 +7004,7 @@ async function startServer() {
         autoFretes.push({
           id: `auto-multas-desc-${f.id || f.dt}`,
           veiculoId,
-          data: f.dataFechamento || f.data || "2026-06-19",
+          data: movementDate,
           hora: f.horaFechamento || f.hora || "12:09:00",
           tipo: "Débito" as const,
           origem: "Desconto",
@@ -7128,7 +7012,7 @@ async function startServer() {
           observacao: `Multas / Descontos DT ${f.dt || "N/A"}`,
           usuario: f.usuarioResponsavel || "Sistema",
           dtId: f.dt,
-          criadoEm: f.criadoEm || `${f.dataFechamento || "2026-06-19"}T12:09:00.000Z`
+          criadoEm: f.criadoEm || `${movementDate}T12:09:00.000Z`
         });
       }
     });
@@ -7152,7 +7036,9 @@ async function startServer() {
       }));
 
     // Filter by weekly closures that are "Pago" for this vehicle to mark as faturado
-    const weeklyClosures = (db.fechamentos_semanais || []).filter((w: any) => w.veiculoId === veiculoId && w.status === "Pago");
+    const weeklyClosures = (db.fechamentos_semanais || []).filter((w: any) =>
+      w.veiculoId === veiculoId && w.status === "Pago" && (w.dataPagamento || w.dataFim)
+    );
 
     const payments = weeklyClosures.map((w: any) => ({
       id: `payment-${w.id}`,
@@ -7165,7 +7051,7 @@ async function startServer() {
       observacao: `Pagamento: ${w.numeroFechamento}. Obs: ${w.observacoes || "Sem observações"}`,
       usuario: w.criadoPor || "Sistema",
       dtId: "",
-      criadoEm: w.criadoEm || `${w.dataPagamento || "2026-06-19"}T23:59:59.000Z`,
+      criadoEm: w.criadoEm || `${w.dataPagamento || w.dataFim}T23:59:59.000Z`,
       isPayment: true
     }));
 

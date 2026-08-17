@@ -10,6 +10,7 @@ import { Rota, Veiculo, Motorista, Unidade } from "../types";
 import { NotificationModal, ConfirmModal, NotificationType, ConfirmType } from "./NotificationModal";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, PieChart, Pie, Cell } from "recharts";
 import SafeResponsiveContainer from "./SafeResponsiveContainer";
+import { downloadDocumentOrNotify, getDocumentReference, notifyDocumentUnavailable, openDocumentOrNotify } from "../lib/documents";
 
 interface FechamentoDtProps {
   rotas: Rota[];
@@ -119,21 +120,13 @@ export default function FechamentoDtView({
     dt: string;
   }>>([]);
 
-  const base64ToBlob = (base64: string): Blob => {
-    const parts = base64.split(";base64,");
-    const contentType = parts[0].split(":")[1];
-    const raw = window.atob(parts[1]);
-    const rawLength = raw.length;
-    const uInt8Array = new Uint8Array(rawLength);
-    for (let i = 0; i < rawLength; ++i) {
-      uInt8Array[i] = raw.charCodeAt(i);
-    }
-    return new Blob([uInt8Array], { type: contentType });
-  };
-
   const handleViewAttachment = async (anx: any) => {
     try {
-      let fileUrl = anx.url;
+      let fileUrl = getDocumentReference(anx);
+      if (!fileUrl) {
+        notifyDocumentUnavailable();
+        return;
+      }
       if (fileUrl && fileUrl.startsWith("/api/")) {
         const res = await fetch(fileUrl, {
           headers: {
@@ -149,28 +142,7 @@ export default function FechamentoDtView({
         }
       }
 
-      if (fileUrl && fileUrl.startsWith("data:")) {
-        try {
-          const blob = base64ToBlob(fileUrl);
-          const blobUrl = URL.createObjectURL(blob);
-          window.open(blobUrl, "_blank");
-        } catch (blobErr) {
-          console.error("Blob conversion failed, falling back to iframe write", blobErr);
-          const w = window.open();
-          if (w) {
-            w.document.write(`<iframe src="${fileUrl}" style="border:none; width:100%; height:100%;" title="${anx.nome}"></iframe>`);
-          } else {
-            const tempLink = document.createElement("a");
-            tempLink.href = fileUrl;
-            tempLink.target = "_blank";
-            document.body.appendChild(tempLink);
-            tempLink.click();
-            document.body.removeChild(tempLink);
-          }
-        }
-      } else if (fileUrl) {
-        window.open(fileUrl, "_blank");
-      }
+      openDocumentOrNotify(fileUrl);
     } catch (err: any) {
       console.error(err);
       setNotification({ type: "error", message: `Erro ao visualizar documento: ${err.message}` });
@@ -179,7 +151,11 @@ export default function FechamentoDtView({
 
   const handleDownloadAttachment = async (anx: any) => {
     try {
-      let fileUrl = anx.url;
+      let fileUrl = getDocumentReference(anx);
+      if (!fileUrl) {
+        notifyDocumentUnavailable();
+        return;
+      }
       if (fileUrl && fileUrl.startsWith("/api/")) {
         const res = await fetch(fileUrl, {
           headers: {
@@ -195,23 +171,7 @@ export default function FechamentoDtView({
         }
       }
 
-      if (fileUrl) {
-        let finalUrl = fileUrl;
-        if (fileUrl.startsWith("data:")) {
-          try {
-            const blob = base64ToBlob(fileUrl);
-            finalUrl = URL.createObjectURL(blob);
-          } catch (blobErr) {
-            console.error("Blob conversion failed for download", blobErr);
-          }
-        }
-        const tempLink = document.createElement("a");
-        tempLink.href = finalUrl;
-        tempLink.download = anx.nome;
-        document.body.appendChild(tempLink);
-        tempLink.click();
-        document.body.removeChild(tempLink);
-      }
+      downloadDocumentOrNotify(fileUrl, anx?.nome);
     } catch (err: any) {
       console.error(err);
       setNotification({ type: "error", message: `Erro ao baixar documento: ${err.message}` });

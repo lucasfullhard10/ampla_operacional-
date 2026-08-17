@@ -2,6 +2,13 @@ import "dotenv/config";
 import fs from "fs";
 import path from "path";
 import { createClient } from "@supabase/supabase-js";
+import {
+  classifyExpirationDays,
+  differenceInOperationalCalendarDays,
+  EXPIRATION_ALERT_WINDOW_DAYS,
+  formatCalendarDateBr,
+  getOperationalDateString,
+} from "../shared/documentExpiration.ts";
 
 // Ensure data folder exists
 const DATA_DIR = path.join(process.cwd(), "data");
@@ -37,6 +44,7 @@ export interface Usuario {
   unidadeId: string; // "Todas" or specific unit ID
   status: "ativo" | "inativo";
   senha?: string;
+  senhaHash?: string;
   deveAlterarSenha?: boolean;
   supervisor?: string;
   unidadesPermitidas?: string[];
@@ -258,6 +266,18 @@ export interface Rota {
   observacoes_operacionais?: string;
   ocorrencias?: OccurrenceEntry[];
   log_alteracoes?: ChangeLogEntry[];
+
+  // Reentrega validation fields used by monitoring and closing workflows
+  reentrega_validada?: boolean;
+  reentregaValidada?: boolean;
+  status_validacao?: "VALIDADA" | "PENDENTE DE VALIDAÇÃO" | "N/A";
+  data_validacao?: string;
+  responsavel_validacao?: string;
+  observacoes_validacao?: string;
+  documento_validacao_url?: string;
+  documento_validacao_nome?: string;
+  documento_validacao_tipo?: string;
+  documento_validacao_data_upload?: string;
   
   // Entrega OFF specific fields
   clienteCodigo?: string;
@@ -412,12 +432,18 @@ export interface Auditoria {
 
 export interface Alerta {
   id: string;
-  tipo: "CNH" | "ASO" | "Licenciamento" | "Seguro" | "Manutenção";
+  tipo: string;
   refId: string; // ID of the driver, vehicle, etc.
   mensagem: string;
   severidade: "Crítica" | "Atenção";
   status: "Ativo" | "Resolvido";
   dataCriacao: string;
+  entidadeTipo?: "Pessoa" | "Veículo" | "Manutenção";
+  entidadeNome?: string;
+  unidadeId?: string;
+  dataVencimento?: string;
+  diasRestantes?: number;
+  classificacao?: "VENCIDO" | "VENCE_HOJE" | "VENCIMENTO_PROXIMO";
 }
 
 export interface UsuarioUnidadePermissao {
@@ -613,12 +639,23 @@ export const DEFAULT_COLUMNS: ProcessoColuna[] = [
   { id: "cancelado", nome: "❌ Cancelado", ordem: 7 }
 ];
 
+const initialAdminEmail = process.env.INITIAL_ADMIN_EMAIL?.trim();
+const initialAdminPassword = process.env.INITIAL_ADMIN_PASSWORD;
+const initialUsers: Usuario[] = initialAdminEmail && initialAdminPassword
+  ? [{
+      id: `usr-${initialAdminEmail.toLowerCase().replace(/[^a-z0-9]/g, "-")}`,
+      email: initialAdminEmail,
+      nome: "Administrador inicial",
+      perfil: "admin_master",
+      unidadeId: "Todas",
+      status: "ativo",
+      senha: initialAdminPassword,
+      deveAlterarSenha: true,
+    }]
+  : [];
+
 const INITIAL_DATABASE: DatabaseSchema = {
-  usuarios: [
-    { id: "usr-lucas-amplalog", email: "Lucas.amplalog", nome: "Lucas (Master)", perfil: "admin_master", unidadeId: "Todas", status: "ativo", senha: "Lucas.amplalog2026", deveAlterarSenha: false },
-    { id: "usr-lucas", email: "lucas.miranda", nome: "Lucas Miranda", perfil: "admin_master", unidadeId: "Todas", status: "ativo", senha: "MasterPassword", deveAlterarSenha: false },
-    { id: "usr-atupirama", email: "adciadsetatupirama@gmail.com", nome: "Supervisor Geral", perfil: "admin_master", unidadeId: "Todas", status: "ativo", senha: "Atupirama@2026", deveAlterarSenha: false },
-  ],
+  usuarios: initialUsers,
   unidades: DEFAULT_UNIDADES,
   motoristas: [],
   veiculos: [],
@@ -671,6 +708,9 @@ export class FileDatabase {
   private static isSupabaseConnected: boolean = false;
   private static connectionError: string | null = null;
   private static schemaVariant: "new" | "old" = "old";
+  private static bootstrapPromise: Promise<void> | null = null;
+  private static lastBootstrapAt = 0;
+  private static readonly BOOTSTRAP_TTL_MS = 10_000;
   public static pendingWrites: Promise<void>[] = [];
 
   public static isSupabaseConfigured(): boolean {
@@ -685,7 +725,24 @@ export class FileDatabase {
     };
   }
 
-  public static async bootstrap(): Promise<void> {
+  public static async bootstrap(force = false): Promise<void> {
+    if (!force && this.cache && Date.now() - this.lastBootstrapAt < this.BOOTSTRAP_TTL_MS) {
+      return;
+    }
+    if (this.bootstrapPromise) {
+      return this.bootstrapPromise;
+    }
+
+    this.bootstrapPromise = this.bootstrapInternal();
+    try {
+      await this.bootstrapPromise;
+      this.lastBootstrapAt = Date.now();
+    } finally {
+      this.bootstrapPromise = null;
+    }
+  }
+
+  private static async bootstrapInternal(): Promise<void> {
     console.log("[FileDatabase DIAGNOSTICS] bootstrap() started.");
     console.log("[FileDatabase DIAGNOSTICS] Local File cache base load initiated.");
     // 1. Always load the local file database as our base cache
@@ -1001,27 +1058,8 @@ export class FileDatabase {
         updated = true;
       }
  
-      // Ensure "Gabriela" user exists for CDA MINAS GERAIS
       if (!schema.usuarios) {
         schema.usuarios = [];
-      }
-      if (!schema.usuarios.some((u: any) => u.email?.toLowerCase() === "gabriela" || u.id === "usr-Gabriela")) {
-        schema.usuarios.push({
-          id: "usr-Gabriela",
-          email: "Gabriela",
-          nome: "Gabriela (CDA MINAS GERAIS)",
-          perfil: "admin_unidade",
-          unidadeId: "un-cda-minas-gerais-4650",
-          unidade_id: "un-cda-minas-gerais-4650",
-          status: "ativo",
-          senha: "Gabriela@2026",
-          deveAlterarSenha: false,
-          tipo_usuario: "SUPERVISOR",
-          cargo: "Supervisor de Filial",
-          cpf: "",
-          telefone: ""
-        });
-        updated = true;
       }
       
       // Backfill old entregas_off records
@@ -1394,24 +1432,13 @@ export class FileDatabase {
 
 
   public static computeDriverStatus(m: Motorista): "LIBERADO" | "PENDENTE" | "BLOQUEADO" {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-
     const isMotorista = m.tipo === "Motorista" || !m.tipo;
 
-    const diffInDays = (d1: string) => {
-      const date1 = new Date(d1);
-      const d1Midnight = new Date(date1.getFullYear(), date1.getMonth(), date1.getDate());
-      const todayMidnight = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-      const diffTime = d1Midnight.getTime() - todayMidnight.getTime();
-      return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-    };
-
-    const cnhDays = (isMotorista && m.cnhVencimento) ? diffInDays(m.cnhVencimento) : null;
-    const asoDays = m.asoVencimento ? diffInDays(m.asoVencimento) : null;
-    const toxDays = (isMotorista && m.toxicologicoVencimento) ? diffInDays(m.toxicologicoVencimento) : null;
-    const moppDays = (isMotorista && m.moppVencimento) ? diffInDays(m.moppVencimento) : null;
-    const intDays = m.integracaoVencimento ? diffInDays(m.integracaoVencimento) : null;
+    const cnhDays = (isMotorista && m.cnhVencimento) ? differenceInOperationalCalendarDays(m.cnhVencimento) : null;
+    const asoDays = m.asoVencimento ? differenceInOperationalCalendarDays(m.asoVencimento) : null;
+    const toxDays = (isMotorista && m.toxicologicoVencimento) ? differenceInOperationalCalendarDays(m.toxicologicoVencimento) : null;
+    const moppDays = (isMotorista && m.moppVencimento) ? differenceInOperationalCalendarDays(m.moppVencimento) : null;
+    const intDays = m.integracaoVencimento ? differenceInOperationalCalendarDays(m.integracaoVencimento) : null;
 
     const isCnhExpired = cnhDays !== null && cnhDays < 0;
     const isAsoExpired = asoDays !== null && asoDays < 0;
@@ -1495,244 +1522,152 @@ export class FileDatabase {
     return statusObj;
   }
 
-  // Check expirations and append alerts dynamically
-  public static recalculateAlerts(db: DatabaseSchema) {
-    const now = new Date();
-    const alertList: Alerta[] = [];
+  // Single source of truth for all expiration alerts.
+  public static recalculateAlerts(db: DatabaseSchema, referenceDate = new Date()) {
+    const alertsById = new Map<string, Alerta>();
+    const dataCriacao = getOperationalDateString(referenceDate);
 
-    // Helper to calc difference in days
-    const diffInDays = (d1: string) => {
-      const date1 = new Date(d1);
-      const diffTime = date1.getTime() - now.getTime();
-      return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    const slugify = (value: string) =>
+      value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+
+    const addExpirationAlert = ({
+      entityType,
+      entityId,
+      entityName,
+      unitId,
+      documentType,
+      expirationDate,
+      warningWindowDays = EXPIRATION_ALERT_WINDOW_DAYS,
+    }: {
+      entityType: "Pessoa" | "Veículo" | "Manutenção";
+      entityId: string;
+      entityName: string;
+      unitId?: string;
+      documentType: string;
+      expirationDate?: string;
+      warningWindowDays?: number;
+    }) => {
+      const daysRemaining = differenceInOperationalCalendarDays(expirationDate, referenceDate);
+      if (daysRemaining === null || daysRemaining > warningWindowDays) return;
+
+      const classification = classifyExpirationDays(daysRemaining);
+      const expirationDateBr = formatCalendarDateBr(expirationDate);
+      const isCritical = classification === "VENCIDO" || classification === "VENCE_HOJE";
+      const dayLabel = Math.abs(daysRemaining) === 1 ? "dia" : "dias";
+      const message = classification === "VENCIDO"
+        ? `${documentType} de ${entityName} venceu há ${Math.abs(daysRemaining)} ${dayLabel} (${expirationDateBr})`
+        : classification === "VENCE_HOJE"
+          ? `${documentType} de ${entityName} vence hoje (${expirationDateBr})`
+          : `${documentType} de ${entityName} vence em ${daysRemaining} ${dayLabel} (${expirationDateBr})`;
+
+      const id = `al-${slugify(entityType)}-${slugify(entityId)}-${slugify(documentType)}-${expirationDate}`;
+      alertsById.set(id, {
+        id,
+        tipo: documentType,
+        refId: entityId,
+        mensagem: message,
+        severidade: isCritical ? "Crítica" : "Atenção",
+        status: "Ativo",
+        dataCriacao,
+        entidadeTipo: entityType,
+        entidadeNome: entityName,
+        unidadeId: unitId,
+        dataVencimento: expirationDate,
+        diasRestantes: daysRemaining,
+        classificacao: classification === "REGULAR" ? undefined : classification,
+      });
     };
 
-    // Evaluate motoristas: CNH, ASO, Toxicológico, MOPP, Integração
-    db.motoristas.forEach((mot) => {
-      // Set computed statusFinal automatically
-      mot.statusFinal = FileDatabase.computeDriverStatus(mot);
+    const personDocuments: Array<{
+      documentType: string;
+      expirationField: keyof Motorista;
+      onlyDrivers?: boolean;
+    }> = [
+      { documentType: "CNH", expirationField: "cnhVencimento", onlyDrivers: true },
+      { documentType: "ASO", expirationField: "asoVencimento" },
+      { documentType: "Integração", expirationField: "integracaoVencimento" },
+      { documentType: "Pesquisa GR", expirationField: "pesquisaVencimento" },
+      { documentType: "MOPP", expirationField: "moppVencimento", onlyDrivers: true },
+      { documentType: "Toxicológico", expirationField: "toxicologicoVencimento", onlyDrivers: true },
+      { documentType: "Ficha EPI", expirationField: "fichaEpiVencimento" },
+      { documentType: "Documento Pessoal", expirationField: "documentoPessoalVencimento" },
+      { documentType: "Comprovante", expirationField: "comprovanteVencimento" },
+      { documentType: "Foto", expirationField: "fotoVencimento" },
+    ];
 
-      const isMotorista = mot.tipo === "Motorista" || !mot.tipo;
+    db.motoristas.forEach((person) => {
+      person.statusFinal = FileDatabase.computeDriverStatus(person);
+      const isDriver = person.tipo === "Motorista" || !person.tipo;
+      const roleLabel = isDriver ? "motorista" : "profissional";
 
-      // CNH (only for motoristas)
-      if (isMotorista && mot.cnhVencimento) {
-        const cnhDays = diffInDays(mot.cnhVencimento);
-        if (cnhDays < 0) {
-          alertList.push({
-            id: `al-cnh-v-${mot.id}`,
-            tipo: "CNH",
-            refId: mot.id,
-            mensagem: `CNH do motorista ${mot.nome} está VENCIDA (${mot.cnhVencimento})`,
-            severidade: "Crítica",
-            status: "Ativo",
-            dataCriacao: now.toISOString().split("T")[0],
-          });
-        } else if (cnhDays <= 30) {
-          alertList.push({
-            id: `al-cnh-w-${mot.id}`,
-            tipo: "CNH",
-            refId: mot.id,
-            mensagem: `CNH do motorista ${mot.nome} vence em ${cnhDays} dias (${mot.cnhVencimento})`,
-            severidade: "Atenção",
-            status: "Ativo",
-            dataCriacao: now.toISOString().split("T")[0],
-          });
-        }
-      }
+      personDocuments.forEach((definition) => {
+        if (definition.onlyDrivers && !isDriver) return;
+        addExpirationAlert({
+          entityType: "Pessoa",
+          entityId: person.id,
+          entityName: `${roleLabel} ${person.nome}`,
+          unitId: person.unidadeId,
+          documentType: definition.documentType,
+          expirationDate: person[definition.expirationField] as string | undefined,
+        });
+      });
 
-      // ASO (all roles)
-      if (mot.asoVencimento) {
-        const asoDays = diffInDays(mot.asoVencimento);
-        if (asoDays < 0) {
-          alertList.push({
-            id: `al-aso-v-${mot.id}`,
-            tipo: "ASO",
-            refId: mot.id,
-            mensagem: `ASO do profissional ${mot.nome} está VENCIDO (${mot.asoVencimento})`,
-            severidade: "Crítica",
-            status: "Ativo",
-            dataCriacao: now.toISOString().split("T")[0],
-          });
-        } else if (asoDays <= 15) {
-          alertList.push({
-            id: `al-aso-w-${mot.id}`,
-            tipo: "ASO",
-            refId: mot.id,
-            mensagem: `ASO do profissional ${mot.nome} vence em ${asoDays} dias (${mot.asoVencimento})`,
-            severidade: "Atenção",
-            status: "Ativo",
-            dataCriacao: now.toISOString().split("T")[0],
-          });
-        }
-      }
-
-      // Toxicológico (only for motoristas)
-      if (isMotorista && mot.toxicologicoVencimento) {
-        const toxDays = diffInDays(mot.toxicologicoVencimento);
-        if (toxDays < 0) {
-          alertList.push({
-            id: `al-tox-v-${mot.id}`,
-            tipo: "CNH",
-            refId: mot.id,
-            mensagem: `Exame Toxicológico do motorista ${mot.nome} está VENCIDO (${mot.toxicologicoVencimento})`,
-            severidade: "Crítica",
-            status: "Ativo",
-            dataCriacao: now.toISOString().split("T")[0],
-          });
-        } else if (toxDays <= 30) {
-          alertList.push({
-            id: `al-tox-w-${mot.id}`,
-            tipo: "CNH",
-            refId: mot.id,
-            mensagem: `Exame Toxicológico do motorista ${mot.nome} vence em ${toxDays} dias (${mot.toxicologicoVencimento})`,
-            severidade: "Atenção",
-            status: "Ativo",
-            dataCriacao: now.toISOString().split("T")[0],
-          });
-        }
-      }
-
-      // Curso MOPP (only for motoristas)
-      if (isMotorista && mot.moppVencimento) {
-        const moppDays = diffInDays(mot.moppVencimento);
-        if (moppDays < 0) {
-          alertList.push({
-            id: `al-mopp-v-${mot.id}`,
-            tipo: "CNH",
-            refId: mot.id,
-            mensagem: `Curso MOPP do motorista ${mot.nome} está VENCIDO (${mot.moppVencimento})`,
-            severidade: "Crítica",
-            status: "Ativo",
-            dataCriacao: now.toISOString().split("T")[0],
-          });
-        } else if (moppDays <= 30) {
-          alertList.push({
-            id: `al-mopp-w-${mot.id}`,
-            tipo: "CNH",
-            refId: mot.id,
-            mensagem: `Curso MOPP do motorista ${mot.nome} vence em ${moppDays} dias (${mot.moppVencimento})`,
-            severidade: "Atenção",
-            status: "Ativo",
-            dataCriacao: now.toISOString().split("T")[0],
-          });
-        }
-      }
-
-      // Integração
-      if (mot.integracaoVencimento) {
-        const intDays = diffInDays(mot.integracaoVencimento);
-        if (intDays < 0) {
-          alertList.push({
-            id: `al-int-v-${mot.id}`,
-            tipo: "CNH",
-            refId: mot.id,
-            mensagem: `Integração do profissional ${mot.nome} está VENCIDA (${mot.integracaoVencimento})`,
-            severidade: "Crítica",
-            status: "Ativo",
-            dataCriacao: now.toISOString().split("T")[0],
-          });
-        } else if (intDays <= 15) {
-          alertList.push({
-            id: `al-int-w-${mot.id}`,
-            tipo: "CNH",
-            refId: mot.id,
-            mensagem: `Integração do profissional ${mot.nome} vence em ${intDays} dias (${mot.integracaoVencimento})`,
-            severidade: "Atenção",
-            status: "Ativo",
-            dataCriacao: now.toISOString().split("T")[0],
-          });
-        }
-      }
-
-      // Pesquisa GR status check
-      if (mot.pesquisa === "Reprovada") {
-        alertList.push({
-          id: `al-pesq-rep-${mot.id}`,
-          tipo: "CNH",
-          refId: mot.id,
-          mensagem: `Pesquisa GR de ${mot.nome} foi REPROVADA!`,
+      if (person.pesquisa === "Reprovada") {
+        const id = `al-pessoa-${slugify(person.id)}-pesquisa-gr-reprovada`;
+        alertsById.set(id, {
+          id,
+          tipo: "Pesquisa GR",
+          refId: person.id,
+          mensagem: `Pesquisa GR de ${person.nome} foi reprovada`,
           severidade: "Crítica",
           status: "Ativo",
-          dataCriacao: now.toISOString().split("T")[0],
+          dataCriacao,
+          entidadeTipo: "Pessoa",
+          entidadeNome: person.nome,
+          unidadeId: person.unidadeId,
         });
       }
     });
 
-    // Evaluate veiculos: Licenciamento, Seguro, Manutencao
-    db.veiculos.forEach((v) => {
-      const licDays = diffInDays(v.licenciamentoVencimento);
-      if (licDays < 0) {
-        alertList.push({
-          id: `al-lic-v-${v.placa}`,
-          tipo: "Licenciamento",
-          refId: v.placa,
-          mensagem: `Licenciamento do veículo ${v.placa} (${v.modelo}) está VENCID0 (${v.licenciamentoVencimento})`,
-          severidade: "Crítica",
-          status: "Ativo",
-          dataCriacao: now.toISOString().split("T")[0],
-        });
-      } else if (licDays <= 30) {
-        alertList.push({
-          id: `al-lic-w-${v.placa}`,
-          tipo: "Licenciamento",
-          refId: v.placa,
-          mensagem: `Licenciamento do veículo ${v.placa} vence em ${licDays} dias (${v.licenciamentoVencimento})`,
-          severidade: "Atenção",
-          status: "Ativo",
-          dataCriacao: now.toISOString().split("T")[0],
-        });
-      }
+    const vehicleDocuments: Array<{
+      documentType: string;
+      expirationField: keyof Veiculo;
+    }> = [
+      { documentType: "Licenciamento", expirationField: "licenciamentoVencimento" },
+      { documentType: "Seguro", expirationField: "seguroVencimento" },
+      { documentType: "ANTT", expirationField: "anttVencimento" },
+    ];
 
-      const segDays = diffInDays(v.seguroVencimento);
-      if (segDays < 0) {
-        alertList.push({
-          id: `al-seg-v-${v.placa}`,
-          tipo: "Seguro",
-          refId: v.placa,
-          mensagem: `Seguro do veículo ${v.placa} está VENCIDO (${v.seguroVencimento})`,
-          severidade: "Crítica",
-          status: "Ativo",
-          dataCriacao: now.toISOString().split("T")[0],
+    db.veiculos.forEach((vehicle) => {
+      vehicleDocuments.forEach((definition) => {
+        addExpirationAlert({
+          entityType: "Veículo",
+          entityId: vehicle.id,
+          entityName: `veículo ${vehicle.placa}${vehicle.modelo ? ` (${vehicle.modelo})` : ""}`,
+          unitId: vehicle.unidadeId,
+          documentType: definition.documentType,
+          expirationDate: vehicle[definition.expirationField] as string | undefined,
         });
-      } else if (segDays <= 30) {
-        alertList.push({
-          id: `al-seg-w-${v.placa}`,
-          tipo: "Seguro",
-          refId: v.placa,
-          mensagem: `Seguro do veículo ${v.placa} vence em ${segDays} dias (${v.seguroVencimento})`,
-          severidade: "Atenção",
-          status: "Ativo",
-          dataCriacao: now.toISOString().split("T")[0],
-        });
-      }
+      });
     });
 
-    // Evaluate Manutencao
-    db.manutencoes.forEach((m) => {
-      const manDays = diffInDays(m.proximaManutencao);
-      if (manDays < 0) {
-        alertList.push({
-          id: `al-man-v-${m.id}`,
-          tipo: "Manutenção",
-          refId: m.veiculoId,
-          mensagem: `Próxima manutenção programada para o veículo ${m.veiculoId} está ATRASADA desde ${m.proximaManutencao}`,
-          severidade: "Crítica",
-          status: "Ativo",
-          dataCriacao: now.toISOString().split("T")[0],
-        });
-      } else if (manDays <= 7) {
-        alertList.push({
-          id: `al-man-w-${m.id}`,
-          tipo: "Manutenção",
-          refId: m.veiculoId,
-          mensagem: `Manutenção programada para o veículo ${m.veiculoId} vence em ${manDays} dias (${m.proximaManutencao})`,
-          severidade: "Atenção",
-          status: "Ativo",
-          dataCriacao: now.toISOString().split("T")[0],
-        });
-      }
+    // Existing maintenance alerts remain operational, with their original seven-day preventive window.
+    db.manutencoes.forEach((maintenance) => {
+      addExpirationAlert({
+        entityType: "Manutenção",
+        entityId: maintenance.id,
+        entityName: `veículo ${maintenance.veiculoId}`,
+        unitId: maintenance.unidadeId,
+        documentType: "Manutenção",
+        expirationDate: maintenance.proximaManutencao,
+        warningWindowDays: 7,
+      });
     });
 
-    db.alertas = alertList;
+    db.alertas = Array.from(alertsById.values()).sort((left, right) => {
+      const severityOrder = left.severidade === right.severidade ? 0 : left.severidade === "Crítica" ? -1 : 1;
+      if (severityOrder !== 0) return severityOrder;
+      return (left.diasRestantes ?? Number.MAX_SAFE_INTEGER) - (right.diasRestantes ?? Number.MAX_SAFE_INTEGER);
+    });
   }
 }

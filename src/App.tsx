@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { lazy, Suspense, useState, useEffect } from "react";
 import { 
   Building, Truck, Users, Calendar, Layers, Navigation, DollarSign, Hammer, 
   Archive, AlertTriangle, Shield, LogOut, LayoutDashboard, Menu, X, Bell, ShieldAlert,
@@ -8,29 +8,32 @@ import {
 
 import { Unidade, Motorista, Veiculo, Rota, Descarga, Manutencao, Abastecimento, EstoqueEpi, MovimentacaoEpi, Alerta, Auditoria, Usuario } from "./types";
 
-// Component imports
-import DashboardView from "./components/DashboardView";
-import UnidadesView from "./components/UnidadesView";
-import VeiculosView from "./components/VeiculosView";
-import MotoristasView from "./components/MotoristasView";
-import DisponibilidadeView from "./components/DisponibilidadeView";
-import MonitoramentoView from "./components/MonitoramentoView";
-import FechamentoDtView from "./components/FechamentoDtView";
-import NoShowView from "./components/NoShowView";
-import DescargasView from "./components/DescargasView";
-import FinanceiroPessoasView from "./components/FinanceiroPessoasView";
-import RecebimentosView from "./components/RecebimentosView";
-import ManutencaoView from "./components/ManutencaoView";
-import EpiView from "./components/EpiView";
-import AlertasView from "./components/AlertasView";
-import AuditoriaView from "./components/AuditoriaView";
-import MasterUsuariosView from "./components/MasterUsuariosView";
-import MasterPermissoesView from "./components/MasterPermissoesView";
-import MasterUnidadesView from "./components/MasterUnidadesView";
-import CentralProcessos from "./components/CentralProcessos";
 import DatabaseSettingsModal from "./components/DatabaseSettingsModal";
-import CentralDocumentosView from "./components/CentralDocumentosView";
-import DevolucoesView from "./components/DevolucoesView";
+import DocumentNotificationCenter from "./components/DocumentNotificationCenter";
+
+// Route-level code splitting keeps charts, XLSX and large operational screens
+// out of the login and shell bundle until the user actually opens each module.
+const DashboardView = lazy(() => import("./components/DashboardView"));
+const UnidadesView = lazy(() => import("./components/UnidadesView"));
+const VeiculosView = lazy(() => import("./components/VeiculosView"));
+const MotoristasView = lazy(() => import("./components/MotoristasView"));
+const DisponibilidadeView = lazy(() => import("./components/DisponibilidadeView"));
+const MonitoramentoView = lazy(() => import("./components/MonitoramentoView"));
+const FechamentoDtView = lazy(() => import("./components/FechamentoDtView"));
+const NoShowView = lazy(() => import("./components/NoShowView"));
+const DescargasView = lazy(() => import("./components/DescargasView"));
+const FinanceiroPessoasView = lazy(() => import("./components/FinanceiroPessoasView"));
+const RecebimentosView = lazy(() => import("./components/RecebimentosView"));
+const ManutencaoView = lazy(() => import("./components/ManutencaoView"));
+const EpiView = lazy(() => import("./components/EpiView"));
+const AlertasView = lazy(() => import("./components/AlertasView"));
+const AuditoriaView = lazy(() => import("./components/AuditoriaView"));
+const MasterUsuariosView = lazy(() => import("./components/MasterUsuariosView"));
+const MasterPermissoesView = lazy(() => import("./components/MasterPermissoesView"));
+const MasterUnidadesView = lazy(() => import("./components/MasterUnidadesView"));
+const CentralProcessos = lazy(() => import("./components/CentralProcessos"));
+const CentralDocumentosView = lazy(() => import("./components/CentralDocumentosView"));
+const DevolucoesView = lazy(() => import("./components/DevolucoesView"));
 
 const TAB_TITLES: Record<string, string> = {
   dashboard: "Dashboard Operativo",
@@ -201,6 +204,10 @@ export default function App() {
       const safeFetchJson = async (url: string) => {
         try {
           const res = await fetch(url, { headers });
+          if (res.status === 401) {
+            setCurrentUser(null);
+            return null;
+          }
           if (!res.ok) return null;
           const ct = res.headers.get("content-type");
           if (!ct || !ct.includes("application/json")) return null;
@@ -210,7 +217,42 @@ export default function App() {
         }
       };
 
-      const dataUnidades = await safeFetchJson("/api/unidades");
+      const [
+        dataUnidades,
+        dataMotoristas,
+        dataVeiculos,
+        dataDisps,
+        dataRotas,
+        dataDescargas,
+        dataManutencao,
+        dataAbastecimentos,
+        dataEpiEstoque,
+        dataEpiMovs,
+        dataAlertas,
+        dataAudit,
+        dataVales,
+        dataClosures,
+        dataNoShows,
+        dataStatus,
+      ] = await Promise.all([
+        safeFetchJson("/api/unidades"),
+        safeFetchJson("/api/motoristas"),
+        safeFetchJson("/api/veiculos"),
+        safeFetchJson("/api/disponibilidade"),
+        safeFetchJson("/api/rotas"),
+        safeFetchJson("/api/descargas"),
+        safeFetchJson("/api/manutencao"),
+        safeFetchJson("/api/abastecimentos"),
+        safeFetchJson("/api/epi-estoque"),
+        safeFetchJson("/api/epi-movimentacoes"),
+        safeFetchJson("/api/alertas"),
+        safeFetchJson("/api/auditoria"),
+        safeFetchJson("/api/vales"),
+        safeFetchJson("/api/fechamentos_dt"),
+        safeFetchJson("/api/noshows"),
+        safeFetchJson("/api/database/status"),
+      ]);
+
       if (dataUnidades) {
         setUnidades(dataUnidades);
         // Also keep the login options synchronized dynamically
@@ -224,49 +266,34 @@ export default function App() {
         }
       }
 
-      const dataMotoristas = await safeFetchJson("/api/motoristas");
       if (dataMotoristas) setMotoristas(dataMotoristas);
 
-      const dataVeiculos = await safeFetchJson("/api/veiculos");
       if (dataVeiculos) setVeiculos(dataVeiculos);
 
-      const dataDisps = await safeFetchJson("/api/disponibilidade");
       if (dataDisps) setDisps(dataDisps);
 
-      const dataRotas = await safeFetchJson("/api/rotas");
       if (dataRotas) setRotas(dataRotas);
 
-      const dataDescargas = await safeFetchJson("/api/descargas");
       if (dataDescargas) setDescargasList(dataDescargas);
 
-      const dataManutencao = await safeFetchJson("/api/manutencao");
       if (dataManutencao) setManutencoes(dataManutencao);
 
-      const dataAbastecimentos = await safeFetchJson("/api/abastecimentos");
       if (dataAbastecimentos) setAbastecimentos(dataAbastecimentos);
 
-      const dataEpiEstoque = await safeFetchJson("/api/epi-estoque");
       if (dataEpiEstoque) setEstoqueEpi(dataEpiEstoque);
 
-      const dataEpiMovs = await safeFetchJson("/api/epi-movimentacoes");
       if (dataEpiMovs) setMovimentacoesEpi(dataEpiMovs);
 
-      const dataAlertas = await safeFetchJson("/api/alertas");
       if (dataAlertas) setAlertas(dataAlertas);
 
-      const dataAudit = await safeFetchJson("/api/auditoria");
       if (dataAudit) setAuditorios(dataAudit);
 
-      const dataVales = await safeFetchJson("/api/vales");
       if (dataVales) setVales(dataVales);
 
-      const dataClosures = await safeFetchJson("/api/fechamentos_dt");
       if (dataClosures) setFechamentosDt(dataClosures);
 
-      const dataNoShows = await safeFetchJson("/api/noshows");
       if (dataNoShows) setNoShows(dataNoShows);
 
-      const dataStatus = await safeFetchJson("/api/database/status");
       if (dataStatus) setDbStatus(dataStatus);
     } catch (e) {
       console.warn("Fracasso temporário no sincronismo de dados em segundo plano:", e);
@@ -277,7 +304,7 @@ export default function App() {
     if (currentUser) {
       loadGlobalData();
       // Periodically refresh alerts to catch upcoming events
-      const interval = setInterval(loadGlobalData, 15000);
+      const interval = setInterval(loadGlobalData, 60000);
       return () => clearInterval(interval);
     }
   }, [currentUser, selectedUnit]);
@@ -411,8 +438,8 @@ export default function App() {
     e.preventDefault();
     setLoginError("");
     
-    if (newPasswordValue.length < 4) {
-      setLoginError("A nova senha deve possuir pelo menos 4 caracteres.");
+    if (newPasswordValue.length < 8) {
+      setLoginError("A nova senha deve possuir pelo menos 8 caracteres.");
       return;
     }
     if (newPasswordValue !== confirmPasswordValue) {
@@ -1006,7 +1033,11 @@ export default function App() {
 
           {/* ACTIVE CONTENT VIEW WINDOW */}
           <section className="flex-1 overflow-y-auto p-6 space-y-6 bg-slate-850">
-            
+            <Suspense fallback={(
+              <div className="min-h-[280px] flex items-center justify-center text-sm text-slate-400 font-mono">
+                Carregando módulo operacional...
+              </div>
+            )}>
             {activeTab === "dashboard" && (
               <DashboardView 
                 unidades={unidades}
@@ -1078,6 +1109,7 @@ export default function App() {
                 veiculos={veiculos}
                 motoristas={motoristas}
                 userEmail={currentUser.email}
+                alertas={alertas}
               />
             )}
 
@@ -1209,7 +1241,7 @@ export default function App() {
                 userEmail={currentUser.email}
               />
             )}
-
+            </Suspense>
           </section>
 
           {/* Humble Global Footer */}
@@ -1228,6 +1260,7 @@ export default function App() {
           onClose={() => setDbModalOpen(false)} 
           currentUser={currentUser} 
         />
+        <DocumentNotificationCenter />
 
       </div>
     </ErrorBoundary>

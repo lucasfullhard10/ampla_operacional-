@@ -5,6 +5,8 @@ import {
   FolderCheck, Users, HelpCircle, FileCheck2, FileX
 } from "lucide-react";
 import { Motorista, Unidade, DocumentoHistorico } from "../types";
+import { openDocumentOrNotify } from "../lib/documents";
+import { differenceInOperationalCalendarDays } from "../../shared/documentExpiration";
 
 interface CentralDocumentosViewProps {
   motoristas: Motorista[];
@@ -76,14 +78,8 @@ export default function CentralDocumentosView({ motoristas, unidades, onRefresh,
 
   // Helper to calculate remaining days
   const getDaysDiff = (validadeDateStr?: string) => {
-    if (!validadeDateStr || validadeDateStr === "Pendente") return undefined;
-    const expiry = new Date(validadeDateStr);
-    if (isNaN(expiry.getTime())) return undefined;
-    
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const diffTime = expiry.getTime() - today.getTime();
-    return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    const days = differenceInOperationalCalendarDays(validadeDateStr);
+    return days === null ? undefined : days;
   };
 
   // Compile all documents across all people
@@ -126,7 +122,7 @@ export default function CentralDocumentosView({ motoristas, unidades, onRefresh,
             computedStatus = "Vencido";
           } else if (remaining <= 15) {
             computedStatus = "Grave";
-          } else if (remaining <= 30) {
+          } else if (remaining <= 40) {
             computedStatus = "Atenção";
           } else {
             computedStatus = "Regular";
@@ -271,33 +267,7 @@ export default function CentralDocumentosView({ motoristas, unidades, onRefresh,
     }
   };
 
-  const handleViewFile = (url?: string, filename?: string) => {
-    if (!url) return;
-    
-    if (url.startsWith("data:")) {
-      try {
-        const parts = url.split(";base64,");
-        const contentType = parts[0].split(":")[1];
-        const raw = window.atob(parts[1]);
-        const rawLength = raw.length;
-        const uInt8Array = new Uint8Array(rawLength);
-        for (let i = 0; i < rawLength; ++i) {
-          uInt8Array[i] = raw.charCodeAt(i);
-        }
-        const blob = new Blob([uInt8Array], { type: contentType });
-        const blobUrl = URL.createObjectURL(blob);
-        window.open(blobUrl, "_blank");
-      } catch (e) {
-        console.error("Blob conversion failed, falling back to writing to a new window", e);
-        const w = window.open();
-        if (w) {
-          w.document.write(`<iframe src="${url}" style="border:none; width:100%; height:100%;" title="${filename || 'Documento'}"></iframe>`);
-        }
-      }
-    } else {
-      window.open(url, "_blank");
-    }
-  };
+  const handleViewFile = (url?: string, _filename?: string) => openDocumentOrNotify(url);
 
   // Renew Submit Action
   const handleRenewSubmit = async (e: React.FormEvent) => {
@@ -657,7 +627,7 @@ export default function CentralDocumentosView({ motoristas, unidades, onRefresh,
                         doc.diasRestantes <= 0 ? (
                           <span className="text-rose-500 font-bold">Vencido</span>
                         ) : (
-                          <span className={`${doc.diasRestantes <= 15 ? "text-orange-400 font-bold" : doc.diasRestantes <= 30 ? "text-amber-400 font-bold" : "text-emerald-400"}`}>
+                          <span className={`${doc.diasRestantes <= 15 ? "text-orange-400 font-bold" : doc.diasRestantes <= 40 ? "text-amber-400 font-bold" : "text-emerald-400"}`}>
                             {doc.diasRestantes} dias
                           </span>
                         )
@@ -674,24 +644,14 @@ export default function CentralDocumentosView({ motoristas, unidades, onRefresh,
                     {/* Action Panel */}
                     <td className="p-3 text-right space-x-1.5">
                       {/* View document */}
-                      {doc.arquivoUrl ? (
-                        <button 
+                      <button
                           type="button"
                           onClick={() => handleViewFile(doc.arquivoUrl, `${doc.pessoaNome}_${doc.documentoTipo}`)}
                           className="inline-flex items-center justify-center p-1.5 bg-slate-800 hover:bg-slate-700 rounded text-sky-400 transition cursor-pointer"
                           title="Visualizar Documento"
                         >
                           <Eye className="w-3.5 h-3.5" />
-                        </button>
-                      ) : (
-                        <button 
-                          disabled 
-                          className="inline-flex items-center justify-center p-1.5 bg-slate-900/50 rounded text-slate-600 cursor-not-allowed"
-                          title="Arquivo indisponível"
-                        >
-                          <Eye className="w-3.5 h-3.5" />
-                        </button>
-                      )}
+                      </button>
 
                       {/* Renew document */}
                       <button
@@ -980,15 +940,14 @@ export default function CentralDocumentosView({ motoristas, unidades, onRefresh,
 
                             <div className="flex justify-between items-center bg-sky-950/20 p-2 rounded border border-sky-900/10">
                               <span className="text-[9px] text-sky-400 font-mono">Arquivo Novo:</span>
-                              <a 
-                                href={log.arquivoNovo} 
-                                target="_blank" 
-                                rel="noreferrer"
+                              <button
+                                type="button"
+                                onClick={() => handleViewFile(log.arquivoNovo, `${log.pessoaNome}_${log.documentoTipo}`)}
                                 className="text-[10px] text-sky-400 underline hover:text-sky-300 font-mono truncate max-w-[200px]"
                                 title={log.arquivoNovo}
                               >
                                 {log.arquivoNovo && log.arquivoNovo.includes("/") ? log.arquivoNovo.split("/").pop() : log.arquivoNovo}
-                              </a>
+                              </button>
                             </div>
                           </div>
 

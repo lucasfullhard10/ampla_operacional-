@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import { Motorista, Unidade, Veiculo } from "../types";
 import { NotificationModal, ConfirmModal, NotificationType, ConfirmType } from "./NotificationModal";
+import { openDocumentOrNotify } from "../lib/documents";
 
 interface MotoristasProps {
   motoristas: Motorista[];
@@ -77,33 +78,7 @@ export default function MotoristasView({ motoristas, unidades, veiculos, onRefre
     }
   };
 
-  const handleViewFile = (url?: string, filename?: string) => {
-    if (!url) return;
-    
-    if (url.startsWith("data:")) {
-      try {
-        const parts = url.split(";base64,");
-        const contentType = parts[0].split(":")[1];
-        const raw = window.atob(parts[1]);
-        const rawLength = raw.length;
-        const uInt8Array = new Uint8Array(rawLength);
-        for (let i = 0; i < rawLength; ++i) {
-          uInt8Array[i] = raw.charCodeAt(i);
-        }
-        const blob = new Blob([uInt8Array], { type: contentType });
-        const blobUrl = URL.createObjectURL(blob);
-        window.open(blobUrl, "_blank");
-      } catch (e) {
-        console.error("Blob conversion failed, falling back to writing to a new window", e);
-        const w = window.open();
-        if (w) {
-          w.document.write(`<iframe src="${url}" style="border:none; width:100%; height:100%;" title="${filename || 'Documento'}"></iframe>`);
-        }
-      }
-    } else {
-      window.open(url, "_blank");
-    }
-  };
+  const handleViewFile = (url?: string, _filename?: string) => openDocumentOrNotify(url);
 
   const getBloqueioMotivo = (m: Motorista) => {
     if (m.statusFinal !== "BLOQUEADO") return null;
@@ -267,11 +242,11 @@ export default function MotoristasView({ motoristas, unidades, veiculos, onRefre
       pesquisa,
       aso,
       fichaEpi,
-      cnhDocumentoUrl: cnhFile || "Simulacao_CNH_Digital.pdf",
-      asoDocumentoUrl: asoFile || "Simulacao_Atestado_ASO.pdf",
+      cnhDocumentoUrl: cnhFile || undefined,
+      asoDocumentoUrl: asoFile || undefined,
       integracaoData: integracaoData || undefined,
       integracaoVencimento: integracaoVencimento || undefined,
-      integracaoDocumentoUrl: integracaoFile || "Simulacao_Integracao.pdf",
+      integracaoDocumentoUrl: integracaoFile || undefined,
       tipo,
       motoristaPreferencialId: (tipo === "Ajudante Fixo" || tipo === "Ajudante Geral") ? (motoristasVinculadosIds[0] || undefined) : undefined,
       motoristasVinculadosIds: (tipo === "Ajudante Fixo" || tipo === "Ajudante Geral") ? motoristasVinculadosIds : [],
@@ -1104,16 +1079,14 @@ export default function MotoristasView({ motoristas, unidades, veiculos, onRefre
                             <span>Vencimento CNH:</span>
                             <div className="flex items-center gap-1.5">
                               <span className="text-slate-200">{m.cnhVencimento}</span>
-                              {m.cnhDocumentoUrl && (
-                                <button
+                              <button
                                   type="button"
                                   onClick={() => handleViewFile(m.cnhDocumentoUrl, `${m.nome}_CNH`)}
                                   className="p-0.5 bg-slate-900 hover:bg-slate-800 text-sky-400 hover:text-sky-300 rounded border border-slate-800 transition cursor-pointer"
                                   title="Visualizar CNH"
                                 >
                                   <Eye className="w-3.5 h-3.5" />
-                                </button>
-                              )}
+                              </button>
                             </div>
                           </div>
                         )}
@@ -1121,16 +1094,14 @@ export default function MotoristasView({ motoristas, unidades, veiculos, onRefre
                           <span>Vencimento ASO:</span>
                           <div className="flex items-center gap-1.5">
                             <span className="text-slate-200">{formatarDataBr(m.asoVencimento)}</span>
-                            {m.asoDocumentoUrl && (
-                              <button
+                            <button
                                 type="button"
                                 onClick={() => handleViewFile(m.asoDocumentoUrl, `${m.nome}_ASO`)}
                                 className="p-0.5 bg-slate-900 hover:bg-slate-800 text-sky-400 hover:text-sky-300 rounded border border-slate-800 transition cursor-pointer"
                                 title="Visualizar ASO"
                               >
                                 <Eye className="w-3.5 h-3.5" />
-                              </button>
-                            )}
+                            </button>
                           </div>
                         </div>
 
@@ -1138,16 +1109,14 @@ export default function MotoristasView({ motoristas, unidades, veiculos, onRefre
                           <span>Vencimento Integração:</span>
                           <div className="flex items-center gap-1.5">
                             <span className="text-slate-200">{m.integracaoVencimento ? formatarDataBr(m.integracaoVencimento) : "Nenhum"}</span>
-                            {m.integracaoDocumentoUrl && (
-                              <button
+                            <button
                                 type="button"
                                 onClick={() => handleViewFile(m.integracaoDocumentoUrl, `${m.nome}_Integracao`)}
                                 className="p-0.5 bg-slate-900 hover:bg-slate-800 text-sky-400 hover:text-sky-300 rounded border border-slate-800 transition cursor-pointer"
                                 title="Visualizar Integração"
                               >
                                 <Eye className="w-3.5 h-3.5" />
-                              </button>
-                            )}
+                            </button>
                           </div>
                         </div>
 
@@ -1290,15 +1259,13 @@ export default function MotoristasView({ motoristas, unidades, veiculos, onRefre
                             {m.integracao === "Feito" ? (
                               <div className="flex items-center justify-center gap-1">
                                 <span className="px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 font-mono text-[9px]">Feito</span>
-                                {m.integracaoDocumentoUrl && (
-                                  <button
+                                <button
                                     onClick={() => handleViewFile(m.integracaoDocumentoUrl, `${m.nome}_Integracao`)}
                                     className="p-0.5 text-sky-400 hover:text-sky-300 hover:bg-slate-800 rounded transition cursor-pointer"
                                     title="Visualizar Comprovante de Integração"
                                   >
                                     <Eye className="w-3 h-3" />
-                                  </button>
-                                )}
+                                </button>
                               </div>
                             ) : (
                               <span className="px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-500 font-mono text-[9px]">Pendente</span>
@@ -1315,15 +1282,13 @@ export default function MotoristasView({ motoristas, unidades, veiculos, onRefre
                             {m.aso === "Feito" ? (
                               <div className="flex items-center justify-center gap-1">
                                 <span className="px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 font-mono text-[9px]">Feito</span>
-                                {m.asoDocumentoUrl && (
-                                  <button
+                                <button
                                     onClick={() => handleViewFile(m.asoDocumentoUrl, `${m.nome}_ASO`)}
                                     className="p-0.5 text-sky-400 hover:text-sky-300 hover:bg-slate-800 rounded transition cursor-pointer"
                                     title="Visualizar Comprovante ASO"
                                   >
                                     <Eye className="w-3 h-3" />
-                                  </button>
-                                )}
+                                </button>
                               </div>
                             ) : (
                               <span className="px-1.5 py-0.5 rounded bg-rose-500/10 text-rose-400 font-mono text-[9px]">Pendente</span>
@@ -1359,15 +1324,13 @@ export default function MotoristasView({ motoristas, unidades, veiculos, onRefre
                           </td>
                           <td className="p-3 text-right">
                             <div className="flex justify-end gap-1.5">
-                              {m.cnhDocumentoUrl && (
-                                <button
+                              <button
                                   onClick={() => handleViewFile(m.cnhDocumentoUrl, `${m.nome}_CNH`)}
                                   className="p-1 text-sky-400 hover:text-white rounded border border-slate-800 bg-slate-950 transition cursor-pointer"
                                   title="Visualizar CNH"
                                 >
                                   <Eye className="w-3.5 h-3.5" />
-                                </button>
-                              )}
+                              </button>
                               <button
                                 onClick={() => handleEditInit(m)}
                                 className="p-1 text-slate-400 hover:text-white rounded border border-slate-800 bg-slate-950 transition cursor-pointer"
