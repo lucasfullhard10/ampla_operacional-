@@ -175,6 +175,7 @@ export interface Veiculo {
   proximaManutencao?: string;
   ultimaRevisao?: string;
   documentacaoStatus?: "Completa" | "Pendente";
+  /** Campo legado/preferencial; o vínculo atual oficial é exclusivamente motoristaId. */
   motoristaPreferencialId?: string;
   identificador_unico_financeiro?: string;
   statusFinanceiro?: string;
@@ -903,8 +904,7 @@ export class FileDatabase {
     const promise = (async () => {
       if (!supabase) return;
       if (!this.isSupabaseConnected) {
-        // Skip attempting Supabase writes if we are in local offline mode
-        return;
+        throw new Error(this.connectionError || "Supabase configurado, porém indisponível para persistência.");
       }
       try {
         const payload = this.schemaVariant === "new"
@@ -952,7 +952,7 @@ export class FileDatabase {
           if (!recoverySucceeded) {
             this.isSupabaseConnected = false;
             this.connectionError = error.message;
-            console.log(`[FileDatabase] Gracefully falling back to local file storage only for key '${key}' due to Supabase write restriction.`);
+            throw new Error(`Falha ao persistir '${key}' no Supabase: ${error.message}`);
           }
         } else {
           this.isSupabaseConnected = true;
@@ -962,6 +962,7 @@ export class FileDatabase {
         console.log(`[FileDatabase] Async write exception for key '${key}':`, err.message || err);
         this.isSupabaseConnected = false;
         this.connectionError = err.message || String(err);
+        throw err;
       }
     })();
 

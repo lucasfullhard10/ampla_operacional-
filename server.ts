@@ -6,6 +6,7 @@ import crypto from "crypto";
 import { createServer as createViteServer } from "vite";
 import { FileDatabase, Usuario, Motorista, Veiculo, Rota, NotaFiscal, Manutencao, UsuarioUnidadePermissao, Unidade, MovimentacaoFinanceira } from "./server/database";
 import { deduplicateAvailabilityRecords, isValidRouteForAvailability } from "./src/lib/fleetAvailability";
+import { normalizeDriverId, resolveVehicleDriverLink } from "./shared/vehicleDriverLink";
 
 async function startServer() {
   const app = express();
@@ -13,6 +14,12 @@ async function startServer() {
   const SESSION_COOKIE = "ampla_session";
   const SESSION_TTL_MS = 8 * 60 * 60 * 1000;
   const sessions = new Map<string, { userId: string; expiresAt: number }>();
+
+  const validateOfficialVehicleDriver = (vehicle: Partial<Veiculo>) => {
+    const link = resolveVehicleDriverLink(vehicle, FileDatabase.get("motoristas"));
+    if (link.status === "linked" || link.status === "none") return null;
+    return link.message;
+  };
 
   const readCookie = (req: express.Request, name: string): string | null => {
     const cookieHeader = req.headers.cookie || "";
@@ -2031,6 +2038,12 @@ async function startServer() {
         item.unidadeId = firstUnitId;
       }
 
+      item.motoristaId = normalizeDriverId(item.motoristaId);
+      const invalidDriverMessage = validateOfficialVehicleDriver(item);
+      if (invalidDriverMessage) {
+        return res.status(400).json({ success: false, errorField: "motoristaId", message: invalidDriverMessage });
+      }
+
       // Mandatory motorista vehicle check (backend side)
       if (item.motoristaId) {
         const driver = FileDatabase.get("motoristas").find(m => m.id === item.motoristaId);
@@ -2191,6 +2204,17 @@ async function startServer() {
         item.unidadeId = current.unidadeId || "un-go";
       }
 
+      const effectiveVehicle = {
+        ...current,
+        ...item,
+        motoristaId: item.motoristaId !== undefined ? normalizeDriverId(item.motoristaId) : normalizeDriverId(current.motoristaId)
+      };
+      item.motoristaId = effectiveVehicle.motoristaId;
+      const invalidDriverMessage = validateOfficialVehicleDriver(effectiveVehicle);
+      if (invalidDriverMessage) {
+        return res.status(400).json({ success: false, errorField: "motoristaId", message: invalidDriverMessage });
+      }
+
       // Mandatory motorista vehicle check (backend side)
       if (item.motoristaId) {
         const driver = FileDatabase.get("motoristas").find(m => m.id === item.motoristaId);
@@ -2265,6 +2289,10 @@ async function startServer() {
       if (!current) {
         return res.status(404).json({ success: false, error: "Veículo não encontrado" });
       }
+
+      if (user.perfil !== "admin_master" && current.unidadeId !== user.unidadeId) {
+        return res.status(403).json({ success: false, error: "Usuário sem permissão para esta unidade" });
+      }
       
       const motoristaId = current.motoristaId;
       let motoristaNome = "Motorista";
@@ -2274,9 +2302,7 @@ async function startServer() {
       }
       
       const oldPlaca = current.placa;
-      current.motoristaId = ""; // Remover motorista
-      
-      const updated = FileDatabase.update("veiculos", current.id, current, user.email);
+      const updated = FileDatabase.update("veiculos", current.id, { motoristaId: "" }, user.email);
       
       FileDatabase.logAudit(
         user.email,
@@ -2387,8 +2413,8 @@ async function startServer() {
           unidade: uid,
           veiculoId: vehicleId,
           veiculo_id: vehicleId,
-          motoristaId: item.motorista_id || item.motoristaId || "",
-          motorista_id: item.motorista_id || item.motoristaId || "",
+          motoristaId: normalizeDriverId(item.motorista_id ?? item.motoristaId),
+          motorista_id: normalizeDriverId(item.motorista_id ?? item.motoristaId),
           prioridade: item.prioridade || "Média",
           roteirizado: isRoteirizado,
           status_disponibilidade: isRoteirizado ? "ROTEIRIZADO" : "NÃO ROTEIRIZADO",
@@ -2479,6 +2505,28 @@ async function startServer() {
       return res.status(400).json({ error: "Payload deve ser uma lista" });
     }
 
+    const vehicles = FileDatabase.get("veiculos");
+    const drivers = FileDatabase.get("motoristas");
+    for (const item of disps) {
+      const unitId = user.perfil !== "admin_master" ? user.unidadeId : (item.unidadeId || item.unidade_id || item.unidade || ((FileDatabase.get("unidades") as any[])[0]?.id || "un-go"));
+      const vehicleId = item.veiculoId || item.veiculo_id;
+      const vehicle = vehicles.find(v => v.id === vehicleId);
+      if (!vehicle) {
+        return res.status(400).json({ error: `Veículo da disponibilidade não encontrado: ${vehicleId || "ID ausente"}` });
+      }
+      if (vehicle.unidadeId !== unitId) {
+        return res.status(400).json({ error: `O veículo ${vehicle.placa} não pertence à unidade informada.` });
+      }
+
+      const operationalDriverId = normalizeDriverId(item.motoristaId ?? item.motorista_id);
+      if (operationalDriverId) {
+        const driver = drivers.find(m => m.id === operationalDriverId);
+        if (!driver) return res.status(400).json({ error: "Motorista da escala operacional não encontrado." });
+        if (driver.tipo && driver.tipo !== "Motorista") return res.status(400).json({ error: "O cadastro selecionado na escala operacional não é de motorista." });
+        if (driver.unidadeId !== unitId) return res.status(400).json({ error: "O motorista da escala operacional pertence a outra unidade." });
+      }
+    }
+
     let current = (FileDatabase.get("disponibilidade") || []) as any[];
     let currentDiaria = (FileDatabase.get("disponibilidade_diaria") || []) as any[];
     const rotas = FileDatabase.get("rotas") || [];
@@ -2499,6 +2547,7 @@ async function startServer() {
       const uId = user.perfil !== "admin_master" ? user.unidadeId : (item.unidadeId || item.unidade_id || item.unidade || ((FileDatabase.get("unidades") as any[])[0]?.id || "un-go"));
       const formDate = item.data || item.data_disponibilidade;
       const isRoteirizado = rotas.some(r => r.veiculoId === item.veiculoId && r.data === formDate);
+      const operationalDriverId = normalizeDriverId(item.motoristaId ?? item.motorista_id);
 
       const dbRecord = {
         id: item.id || `disp-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
@@ -2508,8 +2557,8 @@ async function startServer() {
         unidade: uId,
         veiculoId: item.veiculoId || item.veiculo_id,
         veiculo_id: item.veiculoId || item.veiculo_id,
-        motoristaId: item.motoristaId || item.motorista_id,
-        motorista_id: item.motoristaId || item.motorista_id,
+        motoristaId: operationalDriverId,
+        motorista_id: operationalDriverId,
         prioridade: item.prioridade || "Média",
         roteirizado: isRoteirizado,
         status_disponibilidade: isRoteirizado ? "ROTEIRIZADO" : "NÃO ROTEIRIZADO",
@@ -2546,6 +2595,21 @@ async function startServer() {
     const { id } = req.params;
     const fields = req.body; 
 
+    if (fields.motoristaId !== undefined || fields.motorista_id !== undefined) {
+      const currentAvailability = FileDatabase.get("disponibilidade").find(d => d.id === id) as any;
+      if (!currentAvailability) return res.status(404).json({ error: "Disponibilidade não encontrada" });
+      const operationalDriverId = normalizeDriverId(fields.motoristaId ?? fields.motorista_id);
+      if (operationalDriverId) {
+        const driver = FileDatabase.get("motoristas").find(m => m.id === operationalDriverId);
+        const unitId = currentAvailability.unidadeId || currentAvailability.unidade;
+        if (!driver) return res.status(400).json({ error: "Motorista da escala operacional não encontrado." });
+        if (driver.tipo && driver.tipo !== "Motorista") return res.status(400).json({ error: "O cadastro selecionado não é de motorista." });
+        if (driver.unidadeId !== unitId) return res.status(400).json({ error: "O motorista da escala operacional pertence a outra unidade." });
+      }
+      fields.motoristaId = operationalDriverId;
+      fields.motorista_id = operationalDriverId;
+    }
+
     // Sync snake_case too if applicable
     if (fields.motivoOciosidade !== undefined) {
       fields.motivo_ociosidade = fields.motivoOciosidade;
@@ -2556,7 +2620,9 @@ async function startServer() {
       // Sync to duplicate in daily schema if present
       const fieldsDiaria: any = {};
       if (fields.prioridade) fieldsDiaria.prioridade = fields.prioridade;
-      if (fields.motoristaId || fields.motorista_id) fieldsDiaria.motorista_id = fields.motoristaId || fields.motorista_id;
+      if (fields.motoristaId !== undefined || fields.motorista_id !== undefined) {
+        fieldsDiaria.motorista_id = normalizeDriverId(fields.motoristaId ?? fields.motorista_id);
+      }
       fieldsDiaria.updated_at = new Date().toISOString();
       FileDatabase.update("disponibilidade_diaria", id, fieldsDiaria, user.email);
       res.json({ success: true, item: updated });
@@ -7121,7 +7187,7 @@ async function startServer() {
         const saldo = creditos - debitos;
 
         // Find current driver if any
-        const motorista = motoristas.find((m: any) => m.id === v.motoristaId || m.id === v.motoristaPreferencialId);
+        const driverLink = resolveVehicleDriverLink(v, motoristas);
         
         return {
           id: v.id,
@@ -7131,7 +7197,8 @@ async function startServer() {
           modelo: v.modelo,
           marca: v.marca,
           unidadeId: v.unidadeId,
-          motoristaNome: motorista ? motorista.nome : "Sem Motorista Vinculado",
+          motoristaNome: driverLink.message,
+          motoristaVinculoStatus: driverLink.status,
           statusFinanceiro: v.statusFinanceiro || "Ativo",
           dataCriacaoContaFinanceira: v.dataCriacaoContaFinanceira || "2026-06-15",
           saldo,
@@ -7168,12 +7235,11 @@ async function startServer() {
       
       const enriched = closures.map((c: any) => {
         const veiculo = db.veiculos.find((v: any) => v.id === c.veiculoId);
-        const motorista = veiculo ? db.motoristas.find((m: any) => m.id === veiculo.motoristaId || m.id === veiculo.motoristaPreferencialId) : null;
         return {
           ...c,
           veiculoModelo: veiculo ? veiculo.modelo : "N/A",
           veiculoPlaca: veiculo ? veiculo.placa : c.placa || "N/A",
-          motoristaNome: motorista ? motorista.nome : "Sem Motorista"
+          motoristaNome: c.motoristaNome || "Não registrado no fechamento"
         };
       });
 
@@ -7201,7 +7267,7 @@ async function startServer() {
       const debitos = activeMovements.filter(mov => mov.tipo === "Débito").reduce((acc, mov) => acc + Number(mov.valor || 0), 0);
       const saldo = creditos - debitos;
 
-      const motorista = db.motoristas.find((m: any) => m.id === veiculo.motoristaId || m.id === veiculo.motoristaPreferencialId);
+      const driverLink = resolveVehicleDriverLink(veiculo, db.motoristas);
       const weeklyClosures = (db.fechamentos_semanais || []).filter((w: any) => w.veiculoId === id);
 
       res.json({
@@ -7213,7 +7279,8 @@ async function startServer() {
           modelo: veiculo.modelo,
           marca: veiculo.marca,
           unidadeId: veiculo.unidadeId,
-          motoristaNome: motorista ? motorista.nome : "Sem Motorista Vinculado",
+          motoristaNome: driverLink.message,
+          motoristaVinculoStatus: driverLink.status,
           statusFinanceiro: veiculo.statusFinanceiro || "Ativo",
           dataCriacaoContaFinanceira: veiculo.dataCriacaoContaFinanceira || "2026-06-15",
           saldo,
@@ -7270,6 +7337,7 @@ async function startServer() {
       const db = FileDatabase.getFull();
       const veiculo = db.veiculos.find((v: any) => v.id === id);
       if (!veiculo) return res.status(404).json({ error: "Veículo não encontrado" });
+      const driverLink = resolveVehicleDriverLink(veiculo, db.motoristas);
 
       if (!db.fechamentos_semanais) {
         db.fechamentos_semanais = [];
@@ -7291,6 +7359,8 @@ async function startServer() {
         id: `fs-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
         veiculoId: id,
         placa: veiculo.placa,
+        motoristaId: driverLink.status === "linked" ? driverLink.driverId : "",
+        motoristaNome: driverLink.status === "linked" ? driverLink.message : "Nenhum motorista vinculado",
         dataInicio,
         dataFim,
         receitasFretes: Number(receitasFretes || 0),

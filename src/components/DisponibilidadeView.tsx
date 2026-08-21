@@ -12,6 +12,8 @@ import { Veiculo, Motorista, Disponibilidade, Unidade, Alerta } from "../types";
 import { NotificationModal, NotificationType } from "./NotificationModal";
 import SafeResponsiveContainer from "./SafeResponsiveContainer";
 import { calculateFleetAvailabilityMetrics } from "../lib/fleetAvailability";
+import { VehicleDriverLink } from "./VehicleDriverLink";
+import { getAvailabilityOperationalDriverId, resolveVehicleDriverLink } from "../../shared/vehicleDriverLink";
 
 interface DisponibilidadeProps {
   veiculos: Veiculo[];
@@ -345,10 +347,12 @@ export default function DisponibilidadeView({ veiculos, motoristas, userEmail, a
             newState[v.id] = {
               isAvailable: !!match,
               priority: match ? match.prioridade : "Média",
-              driverId: match ? match.motoristaId : (v.motoristaId || ""),
+              driverId: getAvailabilityOperationalDriverId(v, motoristas, match),
             };
           });
           setFormState(newState);
+          setEditingDriverRows({});
+          setHasUnsavedChanges(false);
 
           // Build helper availability state
           const hState: Record<string, boolean> = {};
@@ -1519,6 +1523,16 @@ export default function DisponibilidadeView({ veiculos, motoristas, userEmail, a
                             </div>
                           )}
 
+                          {!isPerson && (() => {
+                            const vehicle = veiculos.find(v => v.id === res.id);
+                            return vehicle ? (
+                              <div className="rounded-lg border border-slate-800 bg-slate-950/70 p-2 text-[10px]">
+                                <span className="mb-1 block font-mono uppercase tracking-wider text-slate-500">Motorista vinculado ao veículo</span>
+                                <VehicleDriverLink vehicle={vehicle} drivers={motoristas} compact />
+                              </div>
+                            ) : null;
+                          })()}
+
                           {/* If in DT route or scheduled, show active DT ID */}
                           {(op.status === "Em Rota" || op.status === "Escalado") && (
                             <div className="bg-slate-950 p-2 rounded-lg border border-slate-800 space-y-1">
@@ -1566,28 +1580,15 @@ export default function DisponibilidadeView({ veiculos, motoristas, userEmail, a
                                 onChange={() => {
                                   if (isPerson) {
                                     if (isDriver) {
-                                      // Find vehicle that has this driver assigned, or the vehicle they are fixed to
+                                      // Somente relações explícitas por ID podem localizar o veículo.
                                       const targetVeh = veiculos.find(v => v.motoristaId === res.id) || veiculos.find(v => formState[v.id]?.driverId === res.id);
                                       if (targetVeh) {
                                         handleToggleAvailable(targetVeh.id);
                                       } else {
-                                        const firstUnassignedVeh = veiculos.find(v => !formState[v.id]?.isAvailable);
-                                        if (firstUnassignedVeh) {
-                                          setFormState(prev => ({
-                                            ...prev,
-                                            [firstUnassignedVeh.id]: {
-                                              isAvailable: true,
-                                              priority: "Média",
-                                              driverId: res.id
-                                            }
-                                          }));
-                                          setHasUnsavedChanges(true);
-                                        } else {
-                                          setNotification({
-                                            type: "error",
-                                            message: "Para disponibilizar este motorista, é necessário declarar a disponibilidade de um veículo e associá-lo."
-                                          });
-                                        }
+                                        setNotification({
+                                          type: "error",
+                                          message: "Este motorista não possui vínculo nem escala operacional. Selecione um veículo e use ‘Alterar escala operacional’."
+                                        });
                                       }
                                     } else {
                                       handleToggleHelper(res.id);
@@ -1679,7 +1680,7 @@ export default function DisponibilidadeView({ veiculos, motoristas, userEmail, a
                     <th className="py-3 px-4">Modelo e Configuração</th>
                     <th className="py-3 px-4">Filial Origem</th>
                     <th className="py-3 px-4">Prioridade de Alocação</th>
-                    <th className="py-3 px-4">Motorista Escalado / Vinculado</th>
+                    <th className="py-3 px-4">Vínculo atual e escala operacional</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-850">
@@ -1687,6 +1688,8 @@ export default function DisponibilidadeView({ veiculos, motoristas, userEmail, a
                     const sVal = formState[v.id] || { isAvailable: false, priority: "Média", driverId: "" };
                     const libDrivers = motoristas.filter(m => m.unidadeId === v.unidadeId && (m.tipo === "Motorista" || !m.tipo));
                     const motObj = motoristas.find(m => m.id === sVal.driverId);
+                    const officialLink = resolveVehicleDriverLink(v, motoristas);
+                    const operationalDriverInvalid = !!sVal.driverId && (!motObj || motObj.unidadeId !== v.unidadeId || (motObj.tipo && motObj.tipo !== "Motorista"));
                     const uName = units.find(u => u.id === v.unidadeId)?.nome || v.unidadeId;
 
                     return (
@@ -1751,46 +1754,64 @@ export default function DisponibilidadeView({ veiculos, motoristas, userEmail, a
                           )}
                         </td>
 
-                        {/* Client scaling: Motorista: Renato [ALTERAR MOTORISTA] */}
+                        {/* Vínculo atual e escala operacional são conceitos independentes. */}
                         <td className="py-3.5 px-4">
-                          {sVal.isAvailable ? (
-                            <div className="flex flex-col gap-1.5 max-w-[240px]">
-                              <div className="flex items-center gap-1.5 text-xs text-slate-300">
-                                <span className="font-mono text-slate-450 select-none">Motorista:</span>
-                                <span className="font-bold text-slate-100">{motObj ? motObj.nome : "Renato"}</span>
-                              </div>
-                              <button
-                                type="button"
-                                onClick={() => setEditingDriverRows(prev => ({ ...prev, [v.id]: !prev[v.id] }))}
-                                className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-[10px] text-sky-400 font-bold font-mono rounded transition border border-slate-700 w-max inline-flex items-center gap-1"
-                              >
-                                {editingDriverRows[v.id] ? "✓ CONCLUIR" : "ALTERAR MOTORISTA"}
-                              </button>
-                              
-                              {editingDriverRows[v.id] && (
-                                <select
-                                  value={sVal.driverId}
-                                  onChange={(e) => handleDriverChange(v.id, e.target.value)}
-                                  className="bg-slate-950 border border-slate-800 rounded px-2 py-1 text-white text-xs focus:ring-1 focus:ring-sky-500 focus:outline-none w-full mt-1 font-sans cursor-help"
-                                >
-                                  <option value="">Nenhum Escalado (Ocioso)</option>
-                                  {libDrivers.map(m => (
-                                    <option 
-                                      key={m.id} 
-                                      value={m.id}
-                                      disabled={m.statusFinal === "BLOQUEADO" || m.statusFinal === "PENDENTE"}
-                                      title={m.statusFinal === "BLOQUEADO" ? m.motivoBloqueio : m.statusFinal === "PENDENTE" ? "Pendente em agregamento" : undefined}
-                                      className={m.statusFinal === "BLOQUEADO" ? "text-rose-500 line-through" : m.statusFinal === "PENDENTE" ? "text-amber-500 font-semibold" : "text-white"}
-                                    >
-                                      {m.nome} {m.statusFinal === "BLOQUEADO" ? `(🔴 BLOQUEADO)` : m.statusFinal === "PENDENTE" ? `(🟡 PENDENTE)` : ""}
-                                    </option>
-                                  ))}
-                                </select>
-                              )}
+                          <div className="flex max-w-[280px] flex-col gap-2">
+                            <div className="rounded border border-slate-800 bg-slate-950/50 p-2 text-xs">
+                              <span className="mb-1 block font-mono text-[9px] uppercase tracking-wider text-slate-500">Motorista vinculado ao veículo</span>
+                              <VehicleDriverLink vehicle={v} drivers={motoristas} compact />
                             </div>
-                          ) : (
-                            <span className="text-slate-550 italic">Desabilitado</span>
-                          )}
+
+                            {sVal.isAvailable ? (
+                              <div className="flex flex-col gap-1.5">
+                                <div className="text-xs text-slate-300">
+                                  <span className="block font-mono text-[9px] uppercase tracking-wider text-slate-500">Motorista escalado nesta disponibilidade</span>
+                                  <span className={`font-bold ${operationalDriverInvalid ? "text-amber-400" : motObj ? "text-slate-100" : "text-slate-500 italic"}`}>
+                                    {operationalDriverInvalid
+                                      ? "Escala inválida — motorista não encontrado ou incompatível"
+                                      : motObj
+                                        ? motObj.nome
+                                        : "Nenhum motorista escalado"}
+                                  </span>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => setEditingDriverRows(prev => ({ ...prev, [v.id]: !prev[v.id] }))}
+                                  className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-[10px] text-sky-400 font-bold font-mono rounded transition border border-slate-700 w-max inline-flex items-center gap-1"
+                                >
+                                  {editingDriverRows[v.id] ? "✓ CONCLUIR" : "ALTERAR ESCALA OPERACIONAL"}
+                                </button>
+
+                                {editingDriverRows[v.id] && (
+                                  <>
+                                    <select
+                                      value={sVal.driverId}
+                                      onChange={(e) => handleDriverChange(v.id, e.target.value)}
+                                      className="bg-slate-950 border border-slate-800 rounded px-2 py-1 text-white text-xs focus:ring-1 focus:ring-sky-500 focus:outline-none w-full mt-1 font-sans"
+                                    >
+                                      <option value="">Nenhum motorista escalado</option>
+                                      {libDrivers.map(m => (
+                                        <option
+                                          key={m.id}
+                                          value={m.id}
+                                          disabled={m.statusFinal === "BLOQUEADO" || m.statusFinal === "PENDENTE"}
+                                        >
+                                          {m.nome} ({m.statusFinal})
+                                        </option>
+                                      ))}
+                                    </select>
+                                    <span className="text-[9px] leading-snug text-slate-500">Esta escolha vale somente para a disponibilidade e não altera o vínculo permanente do veículo.</span>
+                                  </>
+                                )}
+                              </div>
+                            ) : (
+                              <span className="text-[10px] italic text-slate-550">Sem escala operacional nesta data.</span>
+                            )}
+
+                            {officialLink.status !== "linked" && officialLink.status !== "none" && (
+                              <span className="text-[9px] text-amber-500">Corrija o ID no cadastro administrativo do veículo.</span>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     );
@@ -2490,7 +2511,7 @@ export default function DisponibilidadeView({ veiculos, motoristas, userEmail, a
                                 </div>
                               </td>
                               <td className="py-3 px-4 text-slate-200">
-                                {mot ? mot.nome : "Motorista Padrão"}
+                                {mot ? mot.nome : "Sem motorista escalado"}
                               </td>
                               <td className="py-3 px-4 text-center">
                                 <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${

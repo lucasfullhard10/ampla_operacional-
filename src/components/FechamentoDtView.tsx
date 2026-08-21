@@ -522,7 +522,7 @@ export default function FechamentoDtView({
           dt: closedMatch.dt,
           data: closedMatch.dataFechamento || new Date().toISOString().split("T")[0],
           veiculoId: closedMatch.veiculoId || veiculos[0]?.id || "",
-          motoristaId: closedMatch.motoristaId || motoristas[0]?.id || "",
+          motoristaId: closedMatch.motoristaId || "",
           unidadeId: closedMatch.unidadeId || "un-go",
           status: "Finalizada",
           status_viagem: closedMatch.statusFechamento || "Finalizada",
