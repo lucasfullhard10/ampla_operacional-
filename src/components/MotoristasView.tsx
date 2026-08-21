@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import { Motorista, Unidade, Veiculo } from "../types";
 import { NotificationModal, ConfirmModal, NotificationType, ConfirmType } from "./NotificationModal";
+import { resolveVehicleDriverLink } from "../../shared/vehicleDriverLink";
 import { openDocumentOrNotify } from "../lib/documents";
 
 interface MotoristasProps {
@@ -366,6 +367,15 @@ export default function MotoristasView({ motoristas, unidades, veiculos, onRefre
   const bloqueadasCount = motoristas.filter(m => m.statusConformidade === "BLOQUEADO" || m.statusFinal === "BLOQUEADO").length;
   const compliancePercent = totalCount > 0 ? Math.round((aptasCount / totalCount) * 100) : 100;
 
+  const linkedVehicleByDriverId = useMemo(() => {
+    const result = new Map<string, Veiculo>();
+    veiculos.forEach(vehicle => {
+      const link = resolveVehicleDriverLink(vehicle, motoristas);
+      if (link.status === "linked") result.set(link.driverId, vehicle);
+    });
+    return result;
+  }, [veiculos, motoristas]);
+
   // Filter & Sort Logic
   const processedList = useMemo(() => {
     let list = [...motoristas];
@@ -401,7 +411,7 @@ export default function MotoristasView({ motoristas, unidades, veiculos, onRefre
     if (filterVeiculo.trim() !== "") {
       const q = filterVeiculo.toLowerCase();
       list = list.filter(m => {
-        const matchingVeic = veiculos.find(v => v.motoristaId === m.id);
+        const matchingVeic = linkedVehicleByDriverId.get(m.id);
         if (!matchingVeic) return false;
         return (
           matchingVeic.placa.toLowerCase().includes(q) ||
@@ -437,7 +447,7 @@ export default function MotoristasView({ motoristas, unidades, veiculos, onRefre
     });
 
     return list;
-  }, [motoristas, veiculos, unidades, filterNome, filterCPF, filterUnidade, filterStatus, filterVeiculo, filterTipo, sortBy, sortOrder]);
+  }, [motoristas, linkedVehicleByDriverId, unidades, filterNome, filterCPF, filterUnidade, filterStatus, filterVeiculo, filterTipo, sortBy, sortOrder]);
 
   const toggleSort = (field: "nome" | "unidade" | "status" | "id") => {
     if (sortBy === field) {
@@ -976,7 +986,7 @@ export default function MotoristasView({ motoristas, unidades, veiculos, onRefre
                 const baseName = unidades.find((u) => u.id === m.unidadeId)?.nome || "Não alocado";
                 
                 // Find driver's current vehicle
-                const driverVeic = veiculos.find(v => v.motoristaId === m.id);
+                const driverVeic = linkedVehicleByDriverId.get(m.id);
                 const veiculoStr = driverVeic ? `${driverVeic.placa} (${driverVeic.modelo})` : "Nenhum";
 
                 return (
@@ -1201,7 +1211,7 @@ export default function MotoristasView({ motoristas, unidades, veiculos, onRefre
                   <tbody className="divide-y divide-slate-850">
                     {processedList.map((m) => {
                       const baseName = unidades.find((u) => u.id === m.unidadeId)?.nome || "Não alocado";
-                      const driverVeic = veiculos.find(v => v.motoristaId === m.id);
+                      const driverVeic = linkedVehicleByDriverId.get(m.id);
                       const veiculoStr = driverVeic ? `${driverVeic.placa}` : "Nenhum";
                       const t = m.tipo || "Motorista";
 

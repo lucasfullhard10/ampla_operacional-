@@ -142,6 +142,7 @@ export interface Veiculo {
   proximaManutencao?: string;
   ultimaRevisao?: string;
   documentacaoStatus?: "Completa" | "Pendente";
+  /** Campo legado/preferencial; nunca representa o vínculo atual do veículo. */
   motoristaPreferencialId?: string;
   identificador_unico_financeiro?: string;
   statusFinanceiro?: string;

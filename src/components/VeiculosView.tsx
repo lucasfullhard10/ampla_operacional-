@@ -12,6 +12,8 @@ import { Veiculo, Motorista, Unidade } from "../types";
 import { NotificationModal, ConfirmModal, NotificationType, ConfirmType } from "./NotificationModal";
 import SafeResponsiveContainer from "./SafeResponsiveContainer";
 import { openDocumentOrNotify } from "../lib/documents";
+import { VehicleDriverLink } from "./VehicleDriverLink";
+import { resolveVehicleDriverLink } from "../../shared/vehicleDriverLink";
 
 interface VeiculosProps {
   veiculos: Veiculo[];
@@ -366,14 +368,14 @@ export default function VeiculosView({
     e.preventDefault();
     if (!selectedVehicleForDetails) return;
     const v = veiculos.find(x => x.id === selectedVehicleForDetails.id) || selectedVehicleForDetails;
-    const driver = motoristas.find(m => m.id === v.motoristaId);
+    const driverLink = resolveVehicleDriverLink(v, motoristas);
     
     const payload = {
       veiculoId: v.id,
       placa: v.placa,
       data: refuelData,
-      motoristaId: v.motoristaId || "",
-      motoristaNome: driver ? driver.nome : "N/A",
+      motoristaId: driverLink.status === "linked" ? driverLink.driverId : "",
+      motoristaNome: driverLink.status === "linked" ? driverLink.message : "N/A",
       litros: Number(refuelLitros || 0),
       valor: Number(refuelValor || 0),
       posto: refuelPosto || "Posto Credenciado",
@@ -517,6 +519,7 @@ export default function VeiculosView({
         }
       });
       if (res.ok) {
+        const response = await res.json();
         setNotification({
           type: "success",
           message: "Motorista removido e liberado imediatamente com sucesso no banco de dados."
@@ -524,6 +527,11 @@ export default function VeiculosView({
         if (veiculoId === editingId) {
           setMotoristaId("");
         }
+        setSelectedVehicleForDetails(current =>
+          current?.id === veiculoId
+            ? { ...current, ...(response.data || {}), motoristaId: "" }
+            : current
+        );
         onRefresh();
       } else {
         const error = await res.json();
@@ -1061,7 +1069,6 @@ export default function VeiculosView({
             {/* COMPREHENSIVE VEHICLE DETAILS SHEET (Phase 10) */}
             {selectedVehicleForDetails ? (() => {
               const v = veiculos.find(x => x.id === selectedVehicleForDetails.id) || selectedVehicleForDetails;
-              const assignedDriverObj = motoristas.find(m => m.id === v.motoristaId);
               const associatedUnit = unidades.find(u => u.id === v.unidadeId);
               const parsedStatus = getCalculatedStatus(v);
               
@@ -1273,8 +1280,8 @@ export default function VeiculosView({
                           <h4 className="text-sm font-bold text-white border-b border-slate-850 pb-1.5 uppercase font-mono tracking-wider">Vínculos Administrativos</h4>
                           <div className="grid grid-cols-2 gap-y-2 gap-x-4">
                             <div>
-                              <span className="text-slate-500 block font-mono text-[10px]">MOTORISTA HABITUAL</span>
-                              <strong className="text-white text-xs flex items-center gap-1">{assignedDriverObj ? <><User className="w-3.5 h-3.5 text-sky-400" /> {assignedDriverObj.nome}</> : "Nenhum condutor fixo"}</strong>
+                              <span className="text-slate-500 block font-mono text-[10px]">MOTORISTA VINCULADO AO VEÍCULO</span>
+                              <strong className="text-xs"><VehicleDriverLink vehicle={v} drivers={motoristas} /></strong>
                             </div>
                             <div>
                               <span className="text-slate-500 block font-mono text-[10px]">FILIAL DE ALOCAÇÃO</span>
@@ -2074,7 +2081,7 @@ export default function VeiculosView({
                           className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white"
                         >
                           <option value="">Nenhum motorista</option>
-                          {motoristas.map(m => (
+                          {motoristas.filter(m => m.unidadeId === unidadeId && (m.tipo === "Motorista" || !m.tipo)).map(m => (
                             <option key={m.id} value={m.id}>{m.nome} (CNH: {m.statusFinal})</option>
                           ))}
                         </select>
@@ -2495,7 +2502,7 @@ export default function VeiculosView({
             {viewMode === "cards" && (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {filteredVeiculos.map((v) => {
-                  const assignedDriverObj = motoristas.find(m => m.id === v.motoristaId);
+                  const driverLink = resolveVehicleDriverLink(v, motoristas);
                   const parsedStatus = getCalculatedStatus(v);
                   const isRoteirizado = disps?.some(d => d.veiculoId === v.id && d.roteirizado && d.data === selectedDate) ||
                                         rotas?.some(r => r.veiculoId === v.id && r.data === selectedDate);
@@ -2579,12 +2586,10 @@ export default function VeiculosView({
                         {/* Driver and Operations */}
                         <div className="grid grid-cols-2 gap-2 bg-slate-950 p-2.5 rounded-xl border border-slate-800 text-[11px] font-sans">
                           <div>
-                            <span className="text-slate-500 block text-[9px] uppercase font-mono">MOTORISTA ATUAL:</span>
-                            {assignedDriverObj ? (
+                            <span className="text-slate-500 block text-[9px] uppercase font-mono">MOTORISTA VINCULADO:</span>
+                            {driverLink.status === "linked" ? (
                               <div className="mt-0.5 space-y-1">
-                                <strong className="text-white font-semibold block truncate flex items-center gap-1">
-                                  <User className="w-3.5 h-3.5 text-sky-400" /> {assignedDriverObj.nome}
-                                </strong>
+                                <strong className="block truncate font-semibold"><VehicleDriverLink vehicle={v} drivers={motoristas} compact /></strong>
                                 <button
                                   type="button"
                                   id={`unbind-${v.id}`}
@@ -2598,7 +2603,7 @@ export default function VeiculosView({
                                 </button>
                               </div>
                             ) : (
-                              <span className="text-slate-500 italic block mt-0.5">Sem condutor fixado</span>
+                              <span className="mt-0.5 block"><VehicleDriverLink vehicle={v} drivers={motoristas} compact /></span>
                             )}
                           </div>
                           <div>
@@ -2804,7 +2809,7 @@ export default function VeiculosView({
                     </thead>
                     <tbody className="divide-y divide-slate-850/80">
                       {filteredVeiculos.map((v) => {
-                        const assignedDriverObj = motoristas.find(m => m.id === v.motoristaId);
+                        const driverLink = resolveVehicleDriverLink(v, motoristas);
                         const parsedStatus = getCalculatedStatus(v);
                         const isRoteirizado = disps?.some(d => d.veiculoId === v.id && d.roteirizado && d.data === selectedDate) ||
                                               rotas?.some(r => r.veiculoId === v.id && r.data === selectedDate);
@@ -2821,11 +2826,9 @@ export default function VeiculosView({
                               <div className="text-[10px] text-slate-500 font-mono uppercase">{v.perfil} • {v.tipo}</div>
                             </td>
                             <td className="py-3.5 px-4">
-                              {assignedDriverObj ? (
+                              {driverLink.status === "linked" ? (
                                 <div className="flex flex-col gap-0.5">
-                                  <div className="font-semibold text-white flex items-center gap-1">
-                                    <User className="w-3.5 h-3.5 text-sky-400" /> {assignedDriverObj.nome}
-                                  </div>
+                                  <div className="font-semibold"><VehicleDriverLink vehicle={v} drivers={motoristas} compact /></div>
                                   <button
                                     type="button"
                                     id={`tbl-unbind-${v.id}`}
@@ -2839,7 +2842,7 @@ export default function VeiculosView({
                                   </button>
                                 </div>
                               ) : (
-                                <div className="text-slate-500 italic">Nenhum vinculado</div>
+                                <VehicleDriverLink vehicle={v} drivers={motoristas} compact />
                               )}
                             </td>
                             <td className="py-3.5 px-4">
