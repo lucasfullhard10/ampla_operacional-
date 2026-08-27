@@ -7,6 +7,7 @@ import { createServer as createViteServer } from "vite";
 import { FileDatabase, Usuario, Motorista, Veiculo, Rota, NotaFiscal, Manutencao, UsuarioUnidadePermissao, Unidade, MovimentacaoFinanceira } from "./server/database";
 import { deduplicateAvailabilityRecords, isValidRouteForAvailability } from "./src/lib/fleetAvailability";
 import { normalizeDriverId, resolveVehicleDriverLink } from "./shared/vehicleDriverLink";
+import { buildRouteId, findConflictingRoute, getDtKey, isReentregaRoute, normalizeDt } from "./server/routeIdentity";
 
 async function startServer() {
   const app = express();
@@ -2659,18 +2660,21 @@ async function startServer() {
       return res.status(400).json({ error: "Número da DT é obrigatório." });
     }
 
-    const itemDtClean = String(item.dt).trim();
+    const itemDtClean = normalizeDt(item.dt);
+    if (!itemDtClean) {
+      return res.status(400).json({ error: "Número da DT é obrigatório." });
+    }
     item.dt = itemDtClean;
 
     const allRoutes = FileDatabase.get("rotas") || [];
-    const isReentrega = item.tipo && String(item.tipo).toLowerCase().includes("reentrega");
+    const isReentrega = isReentregaRoute(item);
+    const conflictingRoute = findConflictingRoute(allRoutes, item);
 
-    const isRepeated = allRoutes.some((r: any) => 
-      r.dt && String(r.dt).trim().toLowerCase() === itemDtClean.toLowerCase()
-    );
-
-    if (isRepeated && !isReentrega) {
-      return res.status(400).json({ error: `❌ DT EM DUPLICIDADE\nNão é possível cadastrar. A DT #${itemDtClean} já está cadastrada no sistema.` });
+    if (conflictingRoute) {
+      const detail = isReentrega
+        ? "Esta mesma reentrega já foi registrada. Aguarde a atualização da tela antes de tentar novamente."
+        : `A DT #${itemDtClean} já está cadastrada no sistema.`;
+      return res.status(409).json({ error: `❌ DT EM DUPLICIDADE\n${detail}` });
     }
 
     if (!item.status_viagem) {
@@ -2705,7 +2709,9 @@ async function startServer() {
       }
     ];
 
-    item.id = `DT-${item.dt}`;
+    // A viagem principal has a stable ID. Re-deliveries need their own ID;
+    // sharing DT-<numero> made updates/finalizations hit the wrong array item.
+    item.id = buildRouteId(item, crypto.randomUUID());
     
     // Ensure reentrega validation flags are correctly set
     if (isReentrega) {
@@ -2761,15 +2767,14 @@ async function startServer() {
     }
 
     if (item.dt) {
-      const newDtClean = String(item.dt).trim();
-      const isReentrega = (item.tipo || current.tipo) && String(item.tipo || current.tipo).toLowerCase().includes("reentrega");
-      if (newDtClean && newDtClean.toLowerCase() !== String(current.dt || "").trim().toLowerCase()) {
+      const newDtClean = normalizeDt(item.dt);
+      if (newDtClean && getDtKey(newDtClean) !== getDtKey(current.dt)) {
         const allRoutes = FileDatabase.get("rotas") || [];
-        const isRepeated = allRoutes.some((r: any) => 
-          r.id !== current.id && r.dt && String(r.dt).trim().toLowerCase() === newDtClean.toLowerCase()
-        );
-        if (isRepeated && !isReentrega) {
-          return res.status(400).json({ error: `❌ DT EM DUPLICIDADE\nNão é possível alterar. A DT #${newDtClean} já pertence a outra viagem cadastrada no sistema.` });
+        const currentIndex = allRoutes.indexOf(current);
+        const otherRoutes = allRoutes.filter((_: any, index: number) => index !== currentIndex);
+        const candidate = { ...current, ...item, dt: newDtClean };
+        if (findConflictingRoute(otherRoutes, candidate)) {
+          return res.status(409).json({ error: `❌ DT EM DUPLICIDADE\nNão é possível alterar. A DT #${newDtClean} já pertence a outra viagem cadastrada no sistema.` });
         }
         item.dt = newDtClean;
       }
@@ -4792,7 +4797,8 @@ async function startServer() {
       if (!user) return res.status(401).json({ error: "Não autorizado" });
 
       const { 
-        dt, 
+        dt: requestedDt,
+        rotaId,
         motoristaId, 
         veiculoId, 
         unidadeId, 
@@ -4838,8 +4844,21 @@ async function startServer() {
         documento_validacao_data_upload
       } = req.body;
 
+      const dt = normalizeDt(requestedDt);
       if (!dt) {
         return res.status(400).json({ error: "Número da DT é obrigatório." });
+      }
+
+      const routes = FileDatabase.get("rotas") || [];
+      const targetRoute = rotaId
+        ? routes.find((route: any) => route.id === rotaId)
+        : routes.find((route: any) => getDtKey(route.dt) === getDtKey(dt) && !isReentregaRoute(route));
+
+      if (rotaId && !targetRoute) {
+        return res.status(404).json({ error: "A viagem selecionada para fechamento não foi localizada." });
+      }
+      if (targetRoute && getDtKey(targetRoute.dt) !== getDtKey(dt)) {
+        return res.status(400).json({ error: "A viagem selecionada não corresponde ao número da DT informado." });
       }
 
       const activeUnit = getRequestUnitContext(req, user);
@@ -4900,7 +4919,14 @@ async function startServer() {
       };
 
       // Check if already closed (unless it is in EM_ABERTO status)
-      const existing = (FileDatabase.get("fechamentos_dt") || []).find((c: any) => c.dt === dt);
+      const existing = (FileDatabase.get("fechamentos_dt") || []).find((closure: any) => {
+        if (targetRoute?.id && closure.rotaId === targetRoute.id) return true;
+        // Legacy closures did not store rotaId. They belong to the principal
+        // trip, never implicitly to a re-delivery with the same DT number.
+        return !closure.rotaId
+          && !isReentregaRoute(targetRoute || {})
+          && getDtKey(closure.dt) === getDtKey(dt);
+      });
       if (existing && existing.statusFechamento !== "EM_ABERTO") {
         return res.status(400).json({ error: `A DT ${dt} já se encontra fechada operacionalmente.` });
       }
@@ -5035,6 +5061,7 @@ async function startServer() {
       }
 
       const closureData = {
+        rotaId: targetRoute?.id || rotaId || existing?.rotaId,
         dataFechamento: dateStr,
         horaFechamento: timeStr,
         usuarioResponsavel: user.email,
@@ -5123,11 +5150,13 @@ async function startServer() {
       );
 
       // Update Rota status to "Finalizada"
-      const foundRota = (FileDatabase.get("rotas") || []).find((r: any) => r.dt === dt);
+      const foundRota = targetRoute || (FileDatabase.get("rotas") || []).find((route: any) =>
+        getDtKey(route.dt) === getDtKey(dt) && !isReentregaRoute(route)
+      );
       if (foundRota) {
         FileDatabase.update("rotas", foundRota.id, {
           status: "Finalizada",
-          status_viagem: resolvedStatus // Let routes reflect this specific closure status too!
+          status_viagem: "Finalizada"
         }, user.email);
         
         FileDatabase.logAudit(
@@ -5402,8 +5431,9 @@ async function startServer() {
       const user = getRequestUser(req);
       if (!user) return res.status(401).json({ error: "Não autorizado" });
 
-      const { dt, motivo, protocolo } = req.body;
-      if (!dt) {
+      const { closureId, dt: requestedDt, motivo, protocolo } = req.body;
+      const dt = normalizeDt(requestedDt);
+      if (!dt && !closureId) {
         return res.status(400).json({ error: "Número da DT é obrigatório." });
       }
       if (!motivo || !motivo.trim()) {
@@ -5415,7 +5445,9 @@ async function startServer() {
 
       // Check closure existence
       const closures = FileDatabase.get("fechamentos_dt") || [];
-      const existing = closures.find((c: any) => c.dt === dt);
+      const existing = closureId
+        ? closures.find((closure: any) => closure.id === closureId)
+        : closures.find((closure: any) => getDtKey(closure.dt) === getDtKey(dt));
       if (!existing) {
         return res.status(404).json({ error: "DT não localizada." });
       }
@@ -5487,7 +5519,11 @@ async function startServer() {
       }, user.email);
 
       // Change Rota status back to "Em rota" so it can be closed again
-      const foundRota = (FileDatabase.get("rotas") || []).find((r: any) => r.dt === dt);
+      const foundRota = (FileDatabase.get("rotas") || []).find((route: any) =>
+        existing.rotaId
+          ? route.id === existing.rotaId
+          : getDtKey(route.dt) === getDtKey(dt) && !isReentregaRoute(route)
+      );
       if (foundRota) {
         FileDatabase.update("rotas", foundRota.id, {
           status: "Em rota",

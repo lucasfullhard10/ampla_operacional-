@@ -267,10 +267,14 @@ export default function DashboardView({
     if (selectedUnit && selectedUnit !== "Todas") {
       list = list.filter(r => r.unidadeId === selectedUnit);
     }
-    const isClosed = (dt: string) => {
-      return (fechamentosDt || []).some(c => c.dt === dt && c.statusFechamento !== "EM_ABERTO");
+    const isClosed = (route: Rota) => {
+      return (fechamentosDt || []).some(c => {
+        if (c.rotaId) return c.rotaId === route.id && c.statusFechamento !== "EM_ABERTO";
+        const isReentrega = String(route.tipo || "").toLowerCase().includes("reentrega");
+        return !isReentrega && String(c.dt).trim() === String(route.dt).trim() && c.statusFechamento !== "EM_ABERTO";
+      });
     };
-    return list.filter(r => !isClosed(r.dt));
+    return list.filter(r => !isClosed(r));
   }, [rotas, fechamentosDt, selectedUnit]);
 
   const dashboardPendingStats = useMemo(() => {

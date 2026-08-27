@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useRef } from "react";
 import { 
   Plus, Search, Edit, Trash, FileText, CheckCircle, Clock, AlertCircle, 
   MapPin, User, Truck, DollarSign, X, Layers, RefreshCw, AlertTriangle, 
@@ -25,6 +25,19 @@ interface FechamentoDtProps {
   noShows?: any[];
 }
 
+const getDtIdentity = (value: unknown) => String(value ?? "")
+  .trim()
+  .replace(/^dt\s*[-:#]?\s*/i, "")
+  .replace(/^#\s*/, "")
+  .replace(/\s+/g, "")
+  .toUpperCase();
+
+const closureMatchesRoute = (closure: any, route: Rota) => {
+  if (closure.rotaId) return closure.rotaId === route.id;
+  const isReentrega = String(route.tipo || "").toLowerCase().includes("reentrega");
+  return !isReentrega && getDtIdentity(closure.dt) === getDtIdentity(route.dt);
+};
+
 export default function FechamentoDtView({ 
   rotas, 
   veiculos, 
@@ -47,6 +60,7 @@ export default function FechamentoDtView({
   const [reopenMotivo, setReopenMotivo] = useState("");
   const [reopenProtocol, setReopenProtocol] = useState("");
   const [reopenDt, setReopenDt] = useState("");
+  const [reopenClosureId, setReopenClosureId] = useState("");
   const [reopeningSubmitting, setReopeningSubmitting] = useState(false);
   const [selectedClosureForDetails, setSelectedClosureForDetails] = useState<any | null>(null);
   
@@ -202,6 +216,7 @@ export default function FechamentoDtView({
   const [notification, setNotification] = useState<NotificationType | null>(null);
   const [confirmDialog, setConfirmDialog] = useState<ConfirmType | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const closureSubmittingRef = useRef(false);
 
   // Control Panel Filter States (AMPLA v2.2)
   const [controlPanelTab, setControlPanelTab] = useState<"pendentes" | "fechadas">("pendentes");
@@ -262,7 +277,7 @@ export default function FechamentoDtView({
           "Content-Type": "application/json",
           "x-user-email": userEmail
         },
-        body: JSON.stringify({ dt: reopenDt, motivo: reopenMotivo, protocolo: reopenProtocol })
+        body: JSON.stringify({ closureId: reopenClosureId, dt: reopenDt, motivo: reopenMotivo, protocolo: reopenProtocol })
       });
       
       const data = await res.json();
@@ -297,7 +312,7 @@ export default function FechamentoDtView({
   // Unclosed active DTs for user lookup help
   const unclosedDts = useMemo(() => {
     return rotas.filter(r => 
-      !fechamentosDt.some(c => c.dt === r.dt && c.statusFechamento !== "EM_ABERTO") && r.status !== "Finalizada"
+      !fechamentosDt.some(c => closureMatchesRoute(c, r) && c.statusFechamento !== "EM_ABERTO") && r.status !== "Finalizada"
     );
   }, [rotas, fechamentosDt]);
 
@@ -348,7 +363,7 @@ export default function FechamentoDtView({
 
   const pendingDts = useMemo(() => {
     return rotas.filter(r => 
-      !fechamentosDt.some(c => c.dt === r.dt && c.statusFechamento !== "EM_ABERTO")
+      !fechamentosDt.some(c => closureMatchesRoute(c, r) && c.statusFechamento !== "EM_ABERTO")
     );
   }, [rotas, fechamentosDt]);
 
@@ -518,7 +533,7 @@ export default function FechamentoDtView({
       const closedMatch = fechamentosDt.find(c => c.dt && String(c.dt).trim().toLowerCase() === cleanQuery);
       if (closedMatch) {
         found = {
-          id: `DT-${closedMatch.dt}`,
+          id: closedMatch.rotaId || `DT-${closedMatch.dt}`,
           dt: closedMatch.dt,
           data: closedMatch.dataFechamento || new Date().toISOString().split("T")[0],
           veiculoId: closedMatch.veiculoId || veiculos[0]?.id || "",
@@ -592,7 +607,7 @@ export default function FechamentoDtView({
       setDocValidacaoTipo("");
       setDocValidacaoDataUpload("");
 
-      const alreadyClosed = fechamentosDt.find(c => c.dt === found.dt && c.statusFechamento !== "EM_ABERTO");
+      const alreadyClosed = fechamentosDt.find(c => closureMatchesRoute(c, found) && c.statusFechamento !== "EM_ABERTO");
       if (alreadyClosed) {
         setNotification({
           type: "warning",
@@ -716,6 +731,7 @@ export default function FechamentoDtView({
 
   // Confirm close DT
   const handleConfirmClosure = async () => {
+    if (closureSubmittingRef.current) return;
     if (!activeSearchedDt) return;
 
     // Validation checks for questionnaire
@@ -794,6 +810,7 @@ export default function FechamentoDtView({
       }
     }
 
+    closureSubmittingRef.current = true;
     setSubmitting(true);
     try {
       const computedStatus = houveFalta === "Sim" 
@@ -812,6 +829,7 @@ export default function FechamentoDtView({
         },
         body: JSON.stringify({
           dt: activeSearchedDt.dt,
+          rotaId: activeSearchedDt.id,
           motoristaId: activeSearchedDt.motoristaId || activeSearchedDt.motorista_id,
           veiculoId: activeSearchedDt.veiculoId || activeSearchedDt.veiculo_id,
           unidadeId: activeSearchedDt.unidadeId || activeSearchedDt.unidade_id || "un-go",
@@ -949,6 +967,7 @@ export default function FechamentoDtView({
     } catch (err: any) {
       setNotification({ type: "error", message: `❌ Falha na conexão com o servidor: ${err.message}` });
     } finally {
+      closureSubmittingRef.current = false;
       setSubmitting(false);
     }
   };
@@ -1913,7 +1932,7 @@ export default function FechamentoDtView({
 
                 {/* ALERT IF CLOSED already */}
                 {(() => {
-                  const closureObj = fechamentosDt.find(c => c.dt === activeSearchedDt.dt && c.statusFechamento !== "EM_ABERTO");
+                  const closureObj = fechamentosDt.find(c => closureMatchesRoute(c, activeSearchedDt) && c.statusFechamento !== "EM_ABERTO");
                   
                   if (closureObj) {
                     const isMasterUser = currentUser && (currentUser.perfil === "admin_master" || currentUser.tipo_usuario === "MASTER");
@@ -1981,6 +2000,7 @@ export default function FechamentoDtView({
                               type="button"
                               onClick={() => {
                                 setReopenDt(closureObj.dt);
+                                setReopenClosureId(closureObj.id);
                                 setReopenMotivo("");
                                 setIsReopenModalOpen(true);
                               }}
@@ -3584,7 +3604,7 @@ export default function FechamentoDtView({
                 type="button"
                 onClick={handleConfirmClosure}
                 disabled={submitting}
-                className="flex-1 py-2 bg-emerald-600 hover:bg-emerald-550 text-white font-extrabold rounded text-xs uppercase flex items-center justify-center gap-1 shadow-lg shadow-emerald-950/40 cursor-pointer"
+                className="flex-1 py-2 bg-emerald-600 hover:bg-emerald-550 text-white font-extrabold rounded text-xs uppercase flex items-center justify-center gap-1 shadow-lg shadow-emerald-950/40 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {submitting ? "Gravando..." : "Confirmar Encerramento"}
               </button>

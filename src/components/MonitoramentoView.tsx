@@ -49,6 +49,7 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
   const [isAdding, setIsAdding] = useState(false);
   const [errorMess, setErrorMess] = useState("");
   const [loading, setLoading] = useState(false);
+  const createSubmittingRef = useRef(false);
 
   const [notification, setNotification] = useState<NotificationType | null>(null);
   const [confirmDialog, setConfirmDialog] = useState<ConfirmType | null>(null);
@@ -917,6 +918,7 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
   // CREATE DT
   const handleCreateRoute = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (createSubmittingRef.current) return;
     setErrorMess("");
 
     if (!dt.trim() || !veiculoId || !motoristaId) {
@@ -951,6 +953,7 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
 
     const routeUnit = chosenMotorista?.unidadeId || filterUnidade || unidades[0]?.id || "un-go";
 
+    createSubmittingRef.current = true;
     setLoading(true);
     try {
       const res = await fetch("/api/rotas", {
@@ -1021,6 +1024,7 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
     } catch (e) {
       setErrorMess("Erro operacional de rede de dados.");
     } finally {
+      createSubmittingRef.current = false;
       setLoading(false);
     }
   };
@@ -2219,9 +2223,10 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
                 </button>
                 <button
                   type="submit"
-                  className="w-2/3 bg-sky-600 hover:bg-sky-500 text-white font-medium py-2 rounded transition"
+                  disabled={loading}
+                  className="w-2/3 bg-sky-600 hover:bg-sky-500 text-white font-medium py-2 rounded transition disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  Registrar Viagem
+                  {loading ? "Registrando..." : "Registrar Viagem"}
                 </button>
               </div>
             </form>

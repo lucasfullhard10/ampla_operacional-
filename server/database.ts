@@ -9,6 +9,7 @@ import {
   formatCalendarDateBr,
   getOperationalDateString,
 } from "../shared/documentExpiration.ts";
+import { reconcileRouteRecords } from "./routeIdentity.ts";
 
 // Ensure data folder exists
 const DATA_DIR = path.join(process.cwd(), "data");
@@ -851,6 +852,18 @@ export class FileDatabase {
         console.log("[FileDatabase] Local cache synchronized with active Supabase records. Keys fetched:", Array.from(fetchedKeys));
       }
 
+      if (this.cache?.rotas) {
+        const repairedRoutes = reconcileRouteRecords(this.cache.rotas as any[]);
+        if (repairedRoutes.changed) {
+          this.cache.rotas = repairedRoutes.routes as Rota[];
+          this.writeLocalFile(this.cache);
+          console.warn(
+            `[FileDatabase] Corrigidas identidades de rotas antigas; ${repairedRoutes.consolidated} duplicata(s) principal(is) consolidada(s).`,
+          );
+          this.asyncWriteToSupabase("rotas", this.cache.rotas);
+        }
+      }
+
       // Check if any keys from this.cache are missing on Supabase, and write them to Supabase
       if (this.cache) {
         const missingKeys: string[] = [];
@@ -1186,6 +1199,12 @@ export class FileDatabase {
         });
       }
 
+      const repairedRoutes = reconcileRouteRecords((schema.rotas || []) as any[]);
+      if (repairedRoutes.changed) {
+        schema.rotas = repairedRoutes.routes as Rota[];
+        backfilled = true;
+      }
+
       // Backfill missing protocols in fechamentos_dt (AMPLA v2.2)
       const fechamentos = schema.fechamentos_dt || [];
       let maxProtocolNum = 10540;
@@ -1358,6 +1377,10 @@ export class FileDatabase {
     
     if (!item.id) {
       item.id = `${key.slice(0, 3)}-${Date.now()}`;
+    }
+
+    if (key === "rotas" && array.some((existing) => existing.id === item.id)) {
+      throw new Error(`A rota com ID ${item.id} já existe e não pode ser inserida novamente.`);
     }
     
     array.push(item);
