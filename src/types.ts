@@ -1,3 +1,5 @@
+import type { ShipsDeliveryOrder } from "../shared/ships";
+
 export interface Usuario {
   id: string;
   email: string;
@@ -235,6 +237,21 @@ export interface Rota {
   observacoes_operacionais?: string;
   ocorrencias?: OccurrenceEntry[];
   log_alteracoes?: ChangeLogEntry[];
+
+  // Dados da importação do relatório de viagem do Ships
+  dt_normalizada?: string;
+  horaRota?: string;
+  origemRegistro?: "MANUAL" | "SHIPS_PDF";
+  shipsEntregas?: ShipsDeliveryOrder[];
+  quantidadeClientesUnicos?: number;
+  shipsImportadoEm?: string;
+  shipsImportadoPor?: string;
+  shipsArquivoNome?: string;
+  shipsVehicleNumber?: string;
+  shipsVendor?: string;
+  shipsTripType?: string;
+  shipsVehicleType?: string;
+  shipsVehicleMake?: string;
 
   // Reentrega validation data shared by monitoring and closing workflows
   reentrega_validada?: boolean;

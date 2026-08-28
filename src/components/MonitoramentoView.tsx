@@ -6,13 +6,16 @@ import {
   X as LucideX, Layers as LucideLayers, RefreshCw as LucideRefreshCw, AlertTriangle as LucideAlertTriangle, 
   Calendar as LucideCalendar, Phone as LucidePhone, RotateCcw as LucideRotateCcw, Share2 as LucideShare2,
   Printer as LucidePrinter, Send as LucideSend, Copy as LucideCopy, Download as LucideDownload, Save, History,
-  BarChart2, Filter, Eye, MessageSquare, ShieldCheck, CheckSquare, XCircle, ArrowRight, Package, UserMinus, Building, AlertOctagon, CornerDownLeft, Sparkles, Folder, Wrench, ChevronDown, ChevronUp, TrendingUp
+  BarChart2, Filter, Eye, MessageSquare, ShieldCheck, CheckSquare, XCircle, ArrowRight, Package, UserMinus, Building, AlertOctagon, CornerDownLeft, Sparkles, Folder, Wrench, ChevronDown, ChevronUp, TrendingUp, Upload as LucideUpload
 } from "lucide-react";
 import { toPng } from "html-to-image";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, Cell } from "recharts";
 import { Rota, Veiculo, Motorista, NotaFiscal, Unidade } from "../types";
 import { NotificationModal, ConfirmModal, NotificationType, ConfirmType } from "./NotificationModal";
 import SafeResponsiveContainer from "./SafeResponsiveContainer";
+import ShipsPdfImportModal from "./ShipsPdfImportModal";
+import ShipsRouteDeliveries from "./ShipsRouteDeliveries";
+import { normalizeShipsDtKey } from "../../shared/ships";
 
 interface MonitoramentoProps {
   rotas: Rota[];
@@ -179,6 +182,7 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
   const [viewMode, setViewMode] = useState<"cards" | "table">("cards");
   const [sharingRoute, setSharingRoute] = useState<Rota | null>(null);
   const [historyModalRoute, setHistoryModalRoute] = useState<Rota | null>(null);
+  const [shipsImportOpen, setShipsImportOpen] = useState(false);
   const [printLayoutActive, setPrintLayoutActive] = useState(false);
   const shareCardRef = useRef<HTMLDivElement>(null);
 
@@ -1553,7 +1557,9 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
       const uObj = (unidades || []).find((u) => u.id === r.unidadeId);
 
       // Simple text-based inputs
-      const matchDt = filterDt ? r.dt.includes(filterDt.trim()) : true;
+      const filterDtKey = normalizeShipsDtKey(filterDt);
+      const routeDtKey = normalizeShipsDtKey(r.dt_normalizada || r.dt);
+      const matchDt = filterDt ? (r.dt.includes(filterDt.trim()) || routeDtKey.includes(filterDtKey)) : true;
       const matchVeiculo = filterVeiculo ? (vObj?.placa || "").toLowerCase().includes(filterVeiculo.trim().toLowerCase()) : true;
       const matchMotorista = filterMotorista ? (mObj?.nome || "").toLowerCase().includes(filterMotorista.trim().toLowerCase()) : true;
       const matchUnidade = filterUnidade ? (r.unidadeId === filterUnidade) : true;
@@ -1572,13 +1578,21 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
         : true;
 
       const searchLow = searchTerm.toLowerCase().trim();
+      const searchDtKey = normalizeShipsDtKey(searchTerm);
+      const shipsSearchMatch = r.shipsEntregas?.some((delivery) =>
+        delivery.deliveryOrder.toLowerCase().includes(searchLow)
+        || delivery.customerId.toLowerCase().includes(searchLow)
+        || (delivery.customerName || "").toLowerCase().includes(searchLow)
+      );
       const matchSearch = searchLow ? (
-        r.dt.includes(searchLow) ||
+        r.dt.toLowerCase().includes(searchLow) ||
+        (searchDtKey && routeDtKey.includes(searchDtKey)) ||
         (vObj?.placa || "").toLowerCase().includes(searchLow) ||
         (mObj?.nome || "").toLowerCase().includes(searchLow) ||
         (uObj?.nome || "").toLowerCase().includes(searchLow) ||
         (r.clienteNome || "").toLowerCase().includes(searchLow) ||
-        (r.clienteCodigo || "").toLowerCase().includes(searchLow)
+        (r.clienteCodigo || "").toLowerCase().includes(searchLow) ||
+        Boolean(shipsSearchMatch)
       ) : true;
 
       return matchDt && matchVeiculo && matchMotorista && matchUnidade && matchStatus && matchPeriod && matchTransportador && matchSearch;
@@ -1688,16 +1702,26 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
         </div>
 
         {!isAdding && !editingRoute && (
-          <button
-            onClick={() => {
-              setIsAdding(true);
-              setEditingRoute(null);
-            }}
-            className="px-4 py-2 bg-sky-600 hover:bg-sky-500 text-white rounded text-xs font-semibold flex items-center gap-1.5 transition self-start"
-          >
-            <LucidePlus className="w-3.5 h-3.5" />
-            Nova Viagem / DT
-          </button>
+          <div className="flex flex-wrap gap-2 self-start">
+            <button
+              type="button"
+              onClick={() => setShipsImportOpen(true)}
+              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded text-xs font-semibold flex items-center gap-1.5 transition"
+            >
+              <LucideUpload className="w-3.5 h-3.5" />
+              Importar PDF do Ships
+            </button>
+            <button
+              onClick={() => {
+                setIsAdding(true);
+                setEditingRoute(null);
+              }}
+              className="px-4 py-2 bg-sky-600 hover:bg-sky-500 text-white rounded text-xs font-semibold flex items-center gap-1.5 transition"
+            >
+              <LucidePlus className="w-3.5 h-3.5" />
+              Nova Viagem / DT
+            </button>
+          </div>
         )}
       </div>
 
@@ -2768,6 +2792,9 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
                             <div className="space-y-0.5">
                               <span className="text-white font-bold block font-mono text-xs">DT #{r.dt}</span>
                               <span className="text-[10px] text-slate-400 font-mono block">Saída: {r.data} • {r.tipo}</span>
+                              {r.origemRegistro === "SHIPS_PDF" && (
+                                <span className="mt-1 inline-flex rounded border border-emerald-500/25 bg-emerald-500/10 px-1.5 py-0.5 text-[8px] font-bold text-emerald-300">SHIPS PDF</span>
+                              )}
                               
                               {r.tipo && String(r.tipo).toLowerCase().includes("reentrega") && (
                                 <div className="mt-1">
@@ -2892,6 +2919,14 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
                           {/* Multiple Actions: EDIT, OCORRENCIA, ACCIDENT, TRASH */}
                           <td className="py-3.5 px-3 text-right">
                             <div className="flex items-center justify-end gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => setHistoryModalRoute(r)}
+                                className="p-1 bg-slate-950 hover:bg-slate-850 border border-slate-800 rounded text-slate-400 hover:text-white"
+                                title="Visualizar DT"
+                              >
+                                <Eye className="w-3 h-3 text-emerald-400" />
+                              </button>
                               {/* New Occurrence button */}
                               <button
                                 onClick={() => openOccurrenceModal(r.id)}
@@ -3496,7 +3531,7 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
                           className="flex-1 bg-slate-900 border border-slate-800 text-slate-300 hover:text-white rounded-lg py-1.5 text-[11px] font-mono transition flex items-center justify-center gap-1.5 cursor-pointer"
                         >
                           <LucideClock className="w-3.5 h-3.5 text-slate-500" />
-                          Histórico da Operação
+                          Visualizar DT
                         </button>
                         
                         <button
@@ -4179,6 +4214,12 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
 
             {/* Scrollable Timeline Content */}
             <div className="p-6 space-y-6 overflow-y-auto flex-1 text-left">
+              <ShipsRouteDeliveries
+                route={historyModalRoute}
+                vehicleLabel={veiculos.find((vehicle) => vehicle.id === historyModalRoute.veiculoId)?.placa}
+                driverLabel={motoristas.find((driver) => driver.id === historyModalRoute.motoristaId)?.nome}
+              />
+
               {/* Incident occurrences if any */}
               <div>
                 <h4 className="text-xs font-mono font-bold uppercase tracking-wider text-rose-400 mb-3 flex items-center gap-1.5">
@@ -4276,6 +4317,28 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
           </div>
         </div>
       )}
+
+      <ShipsPdfImportModal
+        open={shipsImportOpen}
+        rotas={rotas}
+        veiculos={veiculos}
+        motoristas={motoristas}
+        onClose={() => setShipsImportOpen(false)}
+        onViewRoute={(route) => {
+          setShipsImportOpen(false);
+          setHistoryModalRoute(route);
+        }}
+        onImported={(route) => {
+          setShipsImportOpen(false);
+          setHistoryModalRoute(route);
+          setNotification({
+            title: "DT importada",
+            message: `A DT #${route.dt} foi cadastrada com ${route.shipsEntregas?.length || 0} Delivery Orders.`,
+            type: "success",
+          });
+          onRefresh();
+        }}
+      />
 
       <NotificationModal notification={notification} onClose={() => setNotification(null)} />
       <ConfirmModal confirm={confirmDialog} onClose={() => setConfirmDialog(null)} />

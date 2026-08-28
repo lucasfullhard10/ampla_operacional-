@@ -21,7 +21,8 @@ export function normalizeDt(value: unknown): string {
 }
 
 export function getDtKey(value: unknown): string {
-  return normalizeDt(value).replace(/\s+/g, "");
+  const key = normalizeDt(value).replace(/\s+/g, "");
+  return /^\d+$/.test(key) ? key.replace(/^0+(?=\d)/, "") : key;
 }
 
 export function isReentregaRoute(route: RouteIdentityInput): boolean {
@@ -105,10 +106,10 @@ export function reconcileRouteRecords<T extends RouteIdentityInput & Record<stri
 
   for (const sourceRoute of source || []) {
     const canonicalDt = normalizeDt(sourceRoute.dt);
-    const route = { ...sourceRoute, dt: canonicalDt } as T;
-    if (canonicalDt !== String(sourceRoute.dt ?? "")) changed = true;
-
     const dtKey = getDtKey(canonicalDt);
+    const route = { ...sourceRoute, dt: canonicalDt, dt_normalizada: dtKey } as T;
+    if (canonicalDt !== String(sourceRoute.dt ?? "")) changed = true;
+    if (String(sourceRoute.dt_normalizada ?? "") !== dtKey) changed = true;
     if (!dtKey) {
       routes.push(route);
       if (route.id) usedIds.add(String(route.id));

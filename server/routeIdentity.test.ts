@@ -13,6 +13,8 @@ test("normaliza aliases do mesmo número de DT", () => {
   assert.equal(normalizeDt(" DT-12683734 "), "12683734");
   assert.equal(normalizeDt("#12683734"), "12683734");
   assert.equal(getDtKey("dt: AB 123"), "AB123");
+  assert.equal(getDtKey("00012683734"), "12683734");
+  assert.equal(getDtKey("0000"), "0");
 });
 
 test("bloqueia uma segunda viagem principal para a mesma DT", () => {
@@ -20,6 +22,11 @@ test("bloqueia uma segunda viagem principal para a mesma DT", () => {
   const duplicate = { dt: " DT-123 ", tipo: "Entrega", data: "2026-08-27" };
 
   assert.equal(findConflictingRoute(routes, duplicate)?.id, "DT-123");
+});
+
+test("bloqueia a mesma DT quando o Ships adiciona zeros à esquerda", () => {
+  const routes = [{ id: "DT-12688623", dt: "12688623", tipo: "Entrega" }];
+  assert.equal(findConflictingRoute(routes, { dt: "0012688623", tipo: "Entrega" })?.id, "DT-12688623");
 });
 
 test("permite reentrega distinta e bloqueia reenvio idêntico", () => {

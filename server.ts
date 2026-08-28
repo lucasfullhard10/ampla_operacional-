@@ -8,6 +8,11 @@ import { FileDatabase, Usuario, Motorista, Veiculo, Rota, NotaFiscal, Manutencao
 import { deduplicateAvailabilityRecords, isValidRouteForAvailability } from "./src/lib/fleetAvailability";
 import { normalizeDriverId, resolveVehicleDriverLink } from "./shared/vehicleDriverLink";
 import { buildRouteId, findConflictingRoute, getDtKey, isReentregaRoute, normalizeDt } from "./server/routeIdentity";
+import {
+  countUniqueShipsCustomers,
+  normalizeShipsVehicleNumber,
+  sanitizeShipsDeliveries,
+} from "./shared/ships";
 
 async function startServer() {
   const app = express();
@@ -2644,6 +2649,166 @@ async function startServer() {
     res.json(list.filter(r => r.unidadeId === activeUnit));
   });
 
+  app.post("/api/rotas/import-ships", (req, res) => {
+    const user = getRequestUser(req);
+    if (!user) return res.status(401).json({ error: "Não autorizado" });
+
+    const body = req.body || {};
+    const dt = normalizeDt(body.tripNo ?? body.dt);
+    const dtKey = getDtKey(dt);
+    const data = String(body.tripDate ?? body.data ?? "").trim();
+    const horaRota = String(body.tripTime ?? body.horaRota ?? "").trim();
+    const veiculoId = String(body.vehicleId ?? body.veiculoId ?? "").trim();
+    const motoristaId = String(body.driverId ?? body.motoristaId ?? "").trim();
+    const requestedStatus = String(body.status_viagem ?? body.status ?? "").trim();
+    const deliveries = sanitizeShipsDeliveries(body.deliveries ?? body.shipsEntregas);
+    const allRoutes = FileDatabase.get("rotas") || [];
+
+    if (!dtKey) return res.status(400).json({ error: "Trip No/DT é obrigatório." });
+    const parsedDate = new Date(`${data}T00:00:00`);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(data) || Number.isNaN(parsedDate.getTime()) || parsedDate.toISOString().slice(0, 10) !== data) {
+      return res.status(400).json({ error: "Trip Date é obrigatório ou está inválido." });
+    }
+    const timeMatch = horaRota.match(/^(\d{2}):(\d{2})$/);
+    if (!timeMatch || Number(timeMatch[1]) > 23 || Number(timeMatch[2]) > 59) {
+      return res.status(400).json({ error: "Horário da viagem é obrigatório ou está inválido." });
+    }
+    if (deliveries.length === 0) return res.status(400).json({ error: "O PDF precisa conter ao menos um Delivery Order válido." });
+
+    const conflictingRoute = findConflictingRoute(allRoutes, { dt, tipo: "Entrega" });
+    if (conflictingRoute) {
+      return res.status(409).json({
+        error: `ATENÇÃO: Esta DT já está cadastrada no Sistema Ampla.`,
+        existingRouteId: conflictingRoute.id,
+      });
+    }
+
+    const vehicle = (FileDatabase.get("veiculos") || []).find((item: Veiculo) => item.id === veiculoId);
+    if (!vehicle) return res.status(400).json({ error: "Selecione um veículo cadastrado." });
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const vehicleHasExpiredRequirement = [
+      vehicle.licenciamentoVencimento,
+      vehicle.seguroVencimento,
+      vehicle.anttVencimento,
+      vehicle.proximaManutencao,
+    ].filter(Boolean).some((value) => new Date(String(value)) < today);
+    if (vehicle.status !== "Liberado" || vehicle.documentacaoStatus === "Pendente" || vehicleHasExpiredRequirement) {
+      return res.status(400).json({ error: "O veículo selecionado não está liberado para roteirização." });
+    }
+
+    const driver = (FileDatabase.get("motoristas") || []).find((item: Motorista) => item.id === motoristaId);
+    if (!driver) return res.status(400).json({ error: "Selecione um motorista cadastrado." });
+    if (driver.tipo && driver.tipo !== "Motorista") return res.status(400).json({ error: "O cadastro selecionado não é de motorista." });
+    if (driver.statusFinal === "BLOQUEADO" || driver.statusFinal === "PENDENTE") {
+      return res.status(400).json({ error: "O motorista selecionado não está liberado para roteirização." });
+    }
+
+    const unitId = vehicle.unidadeId || driver.unidadeId;
+    if (!unitId || unitId === "Todas") return res.status(400).json({ error: "Não foi possível determinar a unidade da viagem." });
+    if (driver.unidadeId !== unitId) {
+      return res.status(400).json({ error: "Veículo e motorista precisam pertencer à mesma unidade." });
+    }
+    const authorizedUnits = getAuthorizedUnitsForUser(user);
+    if (!authorizedUnits.includes("Todas") && !authorizedUnits.includes(unitId)) {
+      return res.status(403).json({ error: "Você não possui acesso à unidade do veículo selecionado." });
+    }
+
+    const statusMap: Record<string, Rota["status"]> = {
+      "aguardando carregamento": "Aguardando carregamento",
+      "em carregamento": "Em carregamento",
+      "em rota": "Em rota",
+      "em rota (entregando)": "Em rota",
+      "em descarga": "Em descarga",
+      "aguardando descarga": "Em descarga",
+      "ag.descarga": "Em descarga",
+      "finalizada": "Finalizada",
+      "cancelada": "Aguardando carregamento",
+      "veículo quebrado": "Aguardando carregamento",
+      "retorno base": "Aguardando carregamento",
+    };
+    const statusViagemMap: Record<string, string> = {
+      "aguardando carregamento": "Aguardando Carregamento",
+      "em carregamento": "Em Carregamento",
+      "em rota": "Em Rota",
+      "em rota (entregando)": "Em Rota",
+      "em descarga": "Em Descarga",
+      "aguardando descarga": "AG.DESCARGA",
+      "ag.descarga": "AG.DESCARGA",
+      "finalizada": "Finalizada",
+      "cancelada": "Cancelada",
+      "veículo quebrado": "Veículo Quebrado",
+      "retorno base": "Retorno Base",
+    };
+    const statusKey = requestedStatus.toLowerCase();
+    const status = statusMap[statusKey];
+    const statusViagem = statusViagemMap[statusKey];
+    if (!status) return res.status(400).json({ error: "Status inicial inválido." });
+
+    const now = new Date();
+    const createdAt = now.toISOString();
+    const importedDeliveries = deliveries.map((delivery) => ({
+      ...delivery,
+      id: `SHIPS-${dtKey}-${delivery.deliveryOrder}`,
+      createdAt,
+    }));
+    const route: Rota = {
+      id: buildRouteId({ dt, tipo: "Entrega" }),
+      dt,
+      dt_normalizada: dtKey,
+      data,
+      horaRota,
+      unidadeId: unitId,
+      veiculoId: vehicle.id,
+      motoristaId: driver.id,
+      tipo: "Entrega",
+      status,
+      status_viagem: statusViagem,
+      historico_status: [{
+        data: createdAt.slice(0, 10),
+        hora: now.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }),
+        status: statusViagem,
+        usuario: user.email,
+      }],
+      totalEntregas: importedDeliveries.length,
+      entregues: 0,
+      devolucoes: 0,
+      recusadas: 0,
+      dataPrevista: data,
+      origemRegistro: "SHIPS_PDF",
+      shipsEntregas: importedDeliveries,
+      quantidadeClientesUnicos: countUniqueShipsCustomers(importedDeliveries),
+      shipsImportadoEm: createdAt,
+      shipsImportadoPor: user.email,
+      shipsArquivoNome: String(body.fileName ?? body.shipsArquivoNome ?? "").trim().slice(0, 255) || undefined,
+      shipsVehicleNumber: normalizeShipsVehicleNumber(body.vehicleNumber ?? body.shipsVehicleNumber),
+      shipsVendor: String(body.vendor ?? "").trim().slice(0, 120) || undefined,
+      shipsTripType: String(body.tripType ?? "").trim().slice(0, 120) || undefined,
+      shipsVehicleType: String(body.vehicleType ?? "").trim().slice(0, 120) || undefined,
+      shipsVehicleMake: String(body.vehicleMake ?? "").trim().slice(0, 120) || undefined,
+    };
+
+    // One aggregate write: if persistence fails, neither the DT nor its
+    // Delivery Orders are partially stored.
+    const added = FileDatabase.add("rotas", route, user.email);
+
+    const availability = FileDatabase.get("disponibilidade");
+    const availabilityIndex = availability.findIndex((item: any) => item.veiculoId === route.veiculoId && item.data === route.data);
+    if (availabilityIndex !== -1) {
+      availability[availabilityIndex].roteirizado = true;
+      FileDatabase.set("disponibilidade", availability);
+    }
+
+    logAudit(
+      req,
+      user.email,
+      "DT_IMPORTADA_SHIPS",
+      `DT #${dt} importada do Ships com ${importedDeliveries.length} Delivery Orders e ${route.quantidadeClientesUnicos} clientes.`,
+      unitId,
+    );
+    res.status(201).json({ success: true, route: added });
+  });
+
   app.post("/api/rotas", (req, res) => {
     const user = getRequestUser(req);
     if (!user) return res.status(401).json({ error: "Não autorizado" });
@@ -2665,6 +2830,7 @@ async function startServer() {
       return res.status(400).json({ error: "Número da DT é obrigatório." });
     }
     item.dt = itemDtClean;
+    item.dt_normalizada = getDtKey(itemDtClean);
 
     const allRoutes = FileDatabase.get("rotas") || [];
     const isReentrega = isReentregaRoute(item);
@@ -2777,6 +2943,7 @@ async function startServer() {
           return res.status(409).json({ error: `❌ DT EM DUPLICIDADE\nNão é possível alterar. A DT #${newDtClean} já pertence a outra viagem cadastrada no sistema.` });
         }
         item.dt = newDtClean;
+        item.dt_normalizada = getDtKey(newDtClean);
       }
     }
 

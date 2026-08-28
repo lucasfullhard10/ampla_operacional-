@@ -10,6 +10,7 @@ import {
   getOperationalDateString,
 } from "../shared/documentExpiration.ts";
 import { reconcileRouteRecords } from "./routeIdentity.ts";
+import type { ShipsDeliveryOrder } from "../shared/ships.ts";
 
 // Ensure data folder exists
 const DATA_DIR = path.join(process.cwd(), "data");
@@ -268,6 +269,22 @@ export interface Rota {
   observacoes_operacionais?: string;
   ocorrencias?: OccurrenceEntry[];
   log_alteracoes?: ChangeLogEntry[];
+
+  // Data imported from a Ships trip report. Kept in the route aggregate so
+  // the DT and its Delivery Orders are persisted in one database write.
+  dt_normalizada?: string;
+  horaRota?: string;
+  origemRegistro?: "MANUAL" | "SHIPS_PDF";
+  shipsEntregas?: ShipsDeliveryOrder[];
+  quantidadeClientesUnicos?: number;
+  shipsImportadoEm?: string;
+  shipsImportadoPor?: string;
+  shipsArquivoNome?: string;
+  shipsVehicleNumber?: string;
+  shipsVendor?: string;
+  shipsTripType?: string;
+  shipsVehicleType?: string;
+  shipsVehicleMake?: string;
 
   // Reentrega validation fields used by monitoring and closing workflows
   reentrega_validada?: boolean;
