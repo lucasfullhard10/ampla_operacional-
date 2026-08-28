@@ -13,6 +13,12 @@ export interface ShipsPdfTextLine {
   page?: number;
 }
 
+type ShipsPdfPageText = {
+  page: number;
+  lines: string[];
+  normalizedText: string;
+};
+
 const MONTHS: Record<string, number> = {
   january: 1,
   february: 2,
@@ -28,8 +34,17 @@ const MONTHS: Record<string, number> = {
   december: 12,
 };
 
+export function normalizeShipsExtractedText(value: unknown): string {
+  return String(value ?? "")
+    .replace(/\u00A0/g, " ")
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F\u00AD\u200B-\u200D\u2060\uFEFF]/g, "")
+    .replace(/\s*:\s*/g, ":")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function compactSpaces(value: unknown): string {
-  return String(value ?? "").replace(/\s+/g, " ").trim();
+  return normalizeShipsExtractedText(value);
 }
 
 function normalizeHeader(value: unknown): string {
@@ -50,6 +65,63 @@ function getFieldValue(lines: string[], label: RegExp): string {
   }
   return "";
 }
+
+function buildPageTexts(sourceLines: ShipsPdfTextLine[] | string[]): ShipsPdfPageText[] {
+  const pages = new Map<number, string[]>();
+
+  for (const sourceLine of sourceLines) {
+    const page = typeof sourceLine === "string" ? 1 : Number(sourceLine.page || 1);
+    const line = compactSpaces(typeof sourceLine === "string" ? sourceLine : sourceLine.text);
+    if (!line) continue;
+    const pageLines = pages.get(page) || [];
+    pageLines.push(line);
+    pages.set(page, pageLines);
+  }
+
+  return Array.from(pages.entries())
+    .sort(([firstPage], [secondPage]) => firstPage - secondPage)
+    .map(([page, pageLines]) => ({
+      page,
+      lines: pageLines,
+      normalizedText: normalizeShipsExtractedText(pageLines.join(" ")),
+    }));
+}
+
+function findMatchByPage(pageTexts: ShipsPdfPageText[], pattern: RegExp): string {
+  for (const pageText of pageTexts) {
+    const match = pageText.normalizedText.match(pattern);
+    if (match?.[1]) return compactSpaces(match[1]);
+  }
+  return "";
+}
+
+function findValueAfterSplitLabel(
+  pageTexts: ShipsPdfPageText[],
+  labelPattern: RegExp,
+  valuePattern: RegExp,
+  isValid: (candidate: string) => boolean = Boolean,
+): string {
+  for (const pageText of pageTexts) {
+    for (let start = 0; start < pageText.lines.length; start++) {
+      for (let end = start; end < Math.min(pageText.lines.length, start + 6); end++) {
+        const windowText = normalizeShipsExtractedText(pageText.lines.slice(start, end + 1).join(" "));
+        const labelMatch = windowText.match(labelPattern);
+        if (!labelMatch || labelMatch.index === undefined) continue;
+
+        const afterLabel = windowText.slice(labelMatch.index + labelMatch[0].length).replace(/^[\s:.-]+/, "");
+        const valueMatch = afterLabel.match(valuePattern);
+        const candidate = compactSpaces(valueMatch?.[0]);
+        if (candidate && isValid(candidate)) return candidate;
+      }
+    }
+  }
+  return "";
+}
+
+const TRIP_NUMBER_PATTERN = /\bTrip\s*(?:No|Number)\.?\s*:?\s*(\d+)/i;
+const VEHICLE_NUMBER_PATTERN = /\bVehicle\s*Number\s*:?\s*([A-Z0-9-]+)/i;
+const TRIP_DATE_VALUE_PATTERN = /(?:(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday),?\s*)?[A-Za-z]+\s+\d{1,2},\s*\d{4}(?:\s+\d{1,2}:\d{2}\s*(?:AM|PM))?/i;
+const TRIP_DATE_PATTERN = new RegExp(`\\bTrip\\s*Date\\s*:?\\s*(${TRIP_DATE_VALUE_PATTERN.source})`, "i");
 
 export function parseShipsTripDate(value: unknown): { date: string; time: string } | null {
   const text = compactSpaces(value).replace(/^(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday),?\s*/i, "");
@@ -148,17 +220,27 @@ function extractDeliveries(lines: string[]): { deliveries: ShipsDeliveryOrder[];
 }
 
 export function parseShipsPdfLines(sourceLines: ShipsPdfTextLine[] | string[]): ShipsParsedTrip {
-  const lines = sourceLines
-    .map((line) => compactSpaces(typeof line === "string" ? line : line.text))
-    .filter(Boolean);
+  const pageTexts = buildPageTexts(sourceLines);
+  const lines = pageTexts.flatMap((pageText) => pageText.lines);
 
-  const tripNoRaw = getFieldValue(lines, /^\s*Trip\s*No\.?\s*:?\s*(\d{4,})?\s*$/i)
-    || (lines.join("\n").match(/Trip\s*No\.?\s*:?\s*(\d{4,})/i)?.[1] || "");
-  const vehicleRaw = getFieldValue(lines, /^\s*Vehicle\s*Number\s*:?\s*([A-Z0-9 -]{4,})?\s*$/i);
-  const tripDateRaw = getFieldValue(
-    lines,
-    /^\s*Trip\s*Date\s*:?\s*(.*(?:\d{4})(?:\s+\d{1,2}:\d{2}(?:\s*[AP]M)?)?)?\s*$/i,
-  );
+  // Header values use continuous normalized page text. PDF.js may split a
+  // visually continuous label/value into multiple positioned text items.
+  const tripNoRaw = findMatchByPage(pageTexts, TRIP_NUMBER_PATTERN)
+    || findValueAfterSplitLabel(pageTexts, /\bTrip\s*(?:No|Number)\.?\s*:?/i, /\d+/, (candidate) => /^\d+$/.test(candidate));
+  const vehicleRaw = findMatchByPage(pageTexts, VEHICLE_NUMBER_PATTERN)
+    || findValueAfterSplitLabel(
+      pageTexts,
+      /\bVehicle\s*Number\s*:?/i,
+      /[A-Z0-9-]+/i,
+      (candidate) => /^[A-Z0-9-]+$/i.test(candidate),
+    );
+  const tripDateRaw = findMatchByPage(pageTexts, TRIP_DATE_PATTERN)
+    || findValueAfterSplitLabel(
+      pageTexts,
+      /\bTrip\s*Date\s*:?/i,
+      TRIP_DATE_VALUE_PATTERN,
+      (candidate) => Boolean(parseShipsTripDate(candidate)),
+    );
   const parsedDate = parseShipsTripDate(tripDateRaw);
   const { deliveries, duplicateCount } = extractDeliveries(lines);
   const warnings: string[] = [];

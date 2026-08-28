@@ -1,6 +1,6 @@
 import { GlobalWorkerOptions, getDocument } from "pdfjs-dist";
 import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
-import { parseShipsPdfLines, type ShipsPdfTextLine } from "../../shared/shipsPdfParser";
+import { normalizeShipsExtractedText, parseShipsPdfLines, type ShipsPdfTextLine } from "../../shared/shipsPdfParser";
 import type { ShipsParsedTrip } from "../../shared/ships";
 
 GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
@@ -56,7 +56,14 @@ export class ShipsPdfParser {
             x: Number(item.transform?.[4] || 0),
             y: Number(item.transform?.[5] || 0),
           }));
-        lines.push(...groupPageItems(positioned, pageNumber));
+        const pageLines = groupPageItems(positioned, pageNumber);
+        if (import.meta.env.DEV && pageNumber === 1) {
+          console.debug(
+            "[ShipsPdfParser] normalized text:",
+            normalizeShipsExtractedText(pageLines.map((line) => line.text).join(" ")),
+          );
+        }
+        lines.push(...pageLines);
         page.cleanup();
       }
     } finally {
