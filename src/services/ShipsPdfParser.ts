@@ -1,6 +1,9 @@
 import { GlobalWorkerOptions, getDocument } from "pdfjs-dist";
 import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import {
+  groupShipsPdfPageItems,
+  inspectShipsPdfHeader,
+  isShipsPdfFileDescriptor,
   normalizeShipsExtractedText,
   parseShipsPdfLines,
   type ShipsPdfPositionedTextItem,
@@ -10,32 +13,9 @@ import type { ShipsParsedTrip } from "../../shared/ships";
 
 GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
-function groupPageItems(items: ShipsPdfPositionedTextItem[], page: number): ShipsPdfTextLine[] {
-  const rows: Array<{ y: number; items: ShipsPdfPositionedTextItem[] }> = [];
-
-  for (const item of [...items].sort((first, second) => second.y - first.y || first.x - second.x)) {
-    const row = rows.find((candidate) => Math.abs(candidate.y - item.y) <= 2.5);
-    if (row) row.items.push(item);
-    else rows.push({ y: item.y, items: [item] });
-  }
-
-  return rows
-    .sort((first, second) => second.y - first.y)
-    .map((row) => ({
-      page,
-      text: row.items
-        .sort((first, second) => first.x - second.x)
-        .map((item) => item.text)
-        .join(" ")
-        .replace(/\s+/g, " ")
-        .trim(),
-    }))
-    .filter((line) => line.text);
-}
-
 export class ShipsPdfParser {
   static async parse(file: File): Promise<ShipsParsedTrip> {
-    if (!file || (!file.type.includes("pdf") && !file.name.toLowerCase().endsWith(".pdf"))) {
+    if (!isShipsPdfFileDescriptor(file)) {
       throw new Error("Selecione um arquivo PDF válido do Ships.");
     }
 
@@ -58,8 +38,9 @@ export class ShipsPdfParser {
             y: Number(item.transform?.[5] || 0),
             width: Number(item.width || 0),
             height: Number(item.height || 0),
+            hasEOL: Boolean(item.hasEOL),
           }));
-        const pageLines = groupPageItems(positioned, pageNumber);
+        const pageLines = groupShipsPdfPageItems(positioned, pageNumber);
         if (import.meta.env.DEV && pageNumber === 1) {
           const rawText = positioned.map((item) => item.text).join(" ");
           console.debug("[ShipsPdfParser] rawItems", positioned);
@@ -77,11 +58,31 @@ export class ShipsPdfParser {
       await loadingTask.destroy();
     }
 
-    const parsed = parseShipsPdfLines(lines, allPositionedItems);
+    const inspection = inspectShipsPdfHeader(lines, allPositionedItems);
     if (import.meta.env.DEV) {
-      console.debug("[ShipsPdfParser] trip", parsed.tripNo);
-      console.debug("[ShipsPdfParser] vehicle", parsed.vehicleNumber);
+      console.debug("[ShipsPdfParser] trip", inspection.tripNoRaw || null);
+      console.debug("[ShipsPdfParser] vehicleSearch", inspection.vehicleSearch);
+      console.debug("[ShipsPdfParser] vehicle", inspection.vehicleRaw || null);
+      console.debug("[ShipsPdfParser] tripDateSearch", inspection.tripDateSearch);
     }
-    return parsed;
+    try {
+      return parseShipsPdfLines(lines, allPositionedItems);
+    } catch (error) {
+      const firstPageItems = allPositionedItems.filter((item) => item.page === 1);
+      const rawText = firstPageItems.map((item) => item.text).join(" ");
+      console.error("[ShipsPdfParser] extraction failure", {
+        fileName: file.name,
+        rawItems: firstPageItems,
+        rawText,
+        normalizedText: normalizeShipsExtractedText(rawText),
+        reconstructedLines: lines.filter((line) => (line.page || 1) === 1),
+        trip: inspection.tripNoRaw || null,
+        vehicleSearch: inspection.vehicleSearch,
+        vehicle: inspection.vehicleRaw || null,
+        tripDateSearch: inspection.tripDateSearch,
+        tripDate: inspection.tripDateRaw || null,
+      });
+      throw error;
+    }
   }
 }

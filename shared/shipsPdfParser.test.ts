@@ -1,6 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { normalizeShipsExtractedText, parseShipsPdfLines, parseShipsPdfText, parseShipsTripDate } from "./shipsPdfParser.ts";
+import {
+  groupShipsPdfPageItems,
+  isShipsPdfFileDescriptor,
+  normalizeShipsExtractedText,
+  parseShipsPdfLines,
+  parseShipsPdfText,
+  parseShipsTripDate,
+  type ShipsPdfPositionedTextItem,
+} from "./shipsPdfParser.ts";
 
 const shipsText = `
 Trip No: 0012688623
@@ -75,7 +83,7 @@ test("recompõe labels fragmentados em spans, NBSP e caracteres invisíveis", ()
   assert.equal(parsed.tripNo, "0012688623");
   assert.equal(parsed.vehicleNumber, "REF9E90");
   assert.equal(parsed.tripTime, "07:43");
-  assert.equal(normalizeShipsExtractedText(" Vehicle\u00A0 Number \u200B :  REF9E90 "), "Vehicle Number:REF9E90");
+  assert.equal(normalizeShipsExtractedText(" Vehicle\u00A0 Num\u200Eber \u200B :  REF9E90 "), "Vehicle Number:REF9E90");
 });
 
 test("procura o cabeçalho nas páginas seguintes quando a primeira não o contém", () => {
@@ -144,6 +152,83 @@ Delivery Order Customer ID
 8080635859 0002615081 CLIENTE UM`);
     assert.equal(parsed.vehicleNumber, vehicleNumber);
   }
+});
+
+test("produz o mesmo resultado com o mesmo conteúdo e nomes de arquivo diferentes", () => {
+  const fileNames = ["reports.pdf", "NWQ6602 ENTREGA.pdf", "arquivo-teste.pdf", "ROTA MANHÃ.pdf"];
+  const parsedByFileName = fileNames.map((name) => {
+    assert.equal(isShipsPdfFileDescriptor({ name, type: "application/pdf" }), true);
+    return parseShipsPdfText(shipsText);
+  });
+
+  for (const parsed of parsedByFileName.slice(1)) {
+    assert.deepEqual(parsed, parsedByFileName[0]);
+  }
+});
+
+test("reconstrói palavras quando o PDF.js retorna uma letra por TextItem", () => {
+  const items: ShipsPdfPositionedTextItem[] = [];
+  let x = 100;
+  for (const segment of ["Vehicle", "Number:", "NWQ6602"]) {
+    for (const character of segment) {
+      items.push({ page: 1, text: character, x, y: 700, width: 5, height: 10 });
+      x += 5;
+    }
+    x += 8;
+  }
+
+  const reconstructedVehicleLine = groupShipsPdfPageItems(items, 1);
+  assert.equal(reconstructedVehicleLine[0].text, "Vehicle Number:NWQ6602");
+
+  const parsed = parseShipsPdfLines(
+    [
+      { page: 1, text: "Trip No: 0012688623" },
+      ...reconstructedVehicleLine,
+      { page: 1, text: "Trip Date: Friday, August 28, 2026 7:43 AM" },
+      { page: 1, text: "Delivery Order Customer ID" },
+      { page: 1, text: "8080635859 0002615081 CLIENTE UM" },
+    ],
+    items,
+  );
+
+  assert.equal(parsed.vehicleNumber, "NWQ6602");
+});
+
+test("interpreta o layout real do reports.pdf com cabeçalho em duas linhas e Secondary Trip vazio", () => {
+  const lines = [
+    { page: 1, text: "Vehicle Trip Friday, August 28, 2026 8:15" },
+    { page: 1, text: "Trip No:0012688621 NWQ6602 Vendor:Ampla Service Grupo Ltda." },
+    { page: 1, text: "Number:Date:AM" },
+    { page: 1, text: "Sr Secondary Delivery Customer" },
+    { page: 1, text: "Customer ID Area Article No Article Description Qty Box Remarks" },
+    { page: 1, text: "No. Trip No. Order Name" },
+    { page: 1, text: "1 8080636680 0002203432 0002203432" },
+    { page: 1, text: "2 8080636847 0002203432 0002203432" },
+    { page: 1, text: "3 8080637113 0002203432 0002203432" },
+  ];
+  const positionedItems: ShipsPdfPositionedTextItem[] = [
+    { page: 1, text: "Vehicle", x: 144.677, y: 515.76, width: 39.519, height: 9.605 },
+    { page: 1, text: "Number:", x: 144.677, y: 504.355, width: 46.821, height: 9.605 },
+    { page: 1, text: "NWQ6602", x: 240.729, y: 510.358, width: 48.618, height: 9.605 },
+    { page: 1, text: "Trip", x: 609.926, y: 515.76, width: 21.396, height: 9.605 },
+    { page: 1, text: "Date:", x: 609.926, y: 504.355, width: 29, height: 9.605 },
+    { page: 1, text: "Friday, August 28, 2026 8:15", x: 670.558, y: 515.76, width: 139.839, height: 9.605 },
+    { page: 1, text: "AM", x: 670.558, y: 504.355, width: 14, height: 9.605 },
+  ];
+
+  const parsed = parseShipsPdfLines(lines, positionedItems);
+
+  assert.equal(parsed.tripNo, "0012688621");
+  assert.equal(parsed.vehicleNumber, "NWQ6602");
+  assert.equal(parsed.tripDate, "2026-08-28");
+  assert.equal(parsed.tripTime, "08:15");
+  assert.deepEqual(parsed.deliveries.map((delivery) => delivery.deliveryOrder), [
+    "8080636680",
+    "8080636847",
+    "8080637113",
+  ]);
+  assert.equal(parsed.uniqueCustomerCount, 1);
+  assert.ok(parsed.deliveries.every((delivery) => delivery.customerId === "0002203432"));
 });
 
 test("conta pedidos e clientes separadamente, mantendo cliente repetido", () => {
