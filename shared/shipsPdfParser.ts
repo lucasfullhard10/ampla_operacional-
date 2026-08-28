@@ -13,6 +13,15 @@ export interface ShipsPdfTextLine {
   page?: number;
 }
 
+export interface ShipsPdfPositionedTextItem {
+  text: string;
+  page: number;
+  x: number;
+  y: number;
+  width?: number;
+  height?: number;
+}
+
 type ShipsPdfPageText = {
   page: number;
   lines: string[];
@@ -123,6 +132,88 @@ const VEHICLE_NUMBER_PATTERN = /\bVehicle\s*Number\s*:?\s*([A-Z0-9-]+)/i;
 const TRIP_DATE_VALUE_PATTERN = /(?:(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday),?\s*)?[A-Za-z]+\s+\d{1,2},\s*\d{4}(?:\s+\d{1,2}:\d{2}\s*(?:AM|PM))?/i;
 const TRIP_DATE_PATTERN = new RegExp(`\\bTrip\\s*Date\\s*:?\\s*(${TRIP_DATE_VALUE_PATTERN.source})`, "i");
 
+function normalizeVehicleForDisplay(value: unknown): string {
+  return normalizeShipsExtractedText(value).toUpperCase().replace(/\s+/g, "");
+}
+
+function isCoordinateVehicleCandidate(value: string): boolean {
+  const comparable = normalizeShipsVehicleNumber(value);
+  return comparable.length >= 2
+    && comparable.length <= 20
+    && /\d/.test(comparable)
+    && /^[A-Z0-9]+$/.test(comparable);
+}
+
+function extractVehicleFromPositionedItems(items: ShipsPdfPositionedTextItem[]): string {
+  const pages = Array.from(new Set(items.map((item) => item.page))).sort((first, second) => first - second);
+
+  for (const page of pages) {
+    const pageItems = items
+      .filter((item) => item.page === page && compactSpaces(item.text))
+      .map((item, index) => ({ ...item, index, normalized: compactSpaces(item.text) }));
+
+    const labelGroups: Array<typeof pageItems> = [];
+    for (const item of pageItems) {
+      if (/vehicle\s*number\s*:?/i.test(item.normalized)) labelGroups.push([item]);
+    }
+
+    const vehicleTokens = pageItems.filter((item) => /\bvehicle\b/i.test(item.normalized));
+    const numberTokens = pageItems.filter((item) => /\bnumber\b/i.test(item.normalized));
+    for (const vehicleToken of vehicleTokens) {
+      const nearbyNumber = numberTokens
+        .filter((numberToken) => numberToken.index !== vehicleToken.index)
+        .map((numberToken) => {
+          const yDistance = Math.abs(numberToken.y - vehicleToken.y);
+          const horizontalOrder = numberToken.x >= vehicleToken.x - 8;
+          const sameRow = yDistance <= Math.max(10, vehicleToken.height || 0, numberToken.height || 0);
+          const stacked = yDistance <= 35 && Math.abs(numberToken.x - vehicleToken.x) <= 100;
+          return {
+            item: numberToken,
+            valid: horizontalOrder && (sameRow || stacked),
+            score: yDistance * 10 + Math.abs(numberToken.x - vehicleToken.x),
+          };
+        })
+        .filter((candidate) => candidate.valid)
+        .sort((first, second) => first.score - second.score)[0]?.item;
+      if (nearbyNumber) labelGroups.push([vehicleToken, nearbyNumber]);
+    }
+
+    for (const labelItems of labelGroups) {
+      const labelIndexes = new Set(labelItems.map((item) => item.index));
+      const labelLeft = Math.min(...labelItems.map((item) => item.x));
+      const labelRight = Math.max(...labelItems.map((item) => item.x + (item.width || item.normalized.length * 5)));
+      const labelY = labelItems.reduce((total, item) => total + item.y, 0) / labelItems.length;
+      const rowTolerance = Math.max(12, ...labelItems.map((item) => (item.height || 0) * 1.75));
+
+      const candidates = pageItems
+        .filter((item) => !labelIndexes.has(item.index))
+        .map((item) => {
+          const value = item.normalized.replace(/^:+|:+$/g, "");
+          const yDistance = Math.abs(item.y - labelY);
+          const isRight = item.x >= labelRight - 4 && yDistance <= rowTolerance;
+          const verticalDistance = labelY - item.y;
+          const isBelow = verticalDistance > 0
+            && verticalDistance <= 40
+            && item.x >= labelLeft - 20
+            && item.x <= labelRight + 220;
+          return {
+            value,
+            valid: isCoordinateVehicleCandidate(value) && (isRight || isBelow),
+            score: isRight
+              ? yDistance * 100 + Math.max(0, item.x - labelRight)
+              : 100_000 + verticalDistance * 100 + Math.abs(item.x - labelLeft),
+          };
+        })
+        .filter((candidate) => candidate.valid)
+        .sort((first, second) => first.score - second.score);
+
+      if (candidates[0]) return normalizeVehicleForDisplay(candidates[0].value);
+    }
+  }
+
+  return "";
+}
+
 export function parseShipsTripDate(value: unknown): { date: string; time: string } | null {
   const text = compactSpaces(value).replace(/^(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday),?\s*/i, "");
   const match = text.match(/^([A-Za-z]+)\s+(\d{1,2}),\s*(\d{4})(?:\s+(\d{1,2}):(\d{2})(?:\s*([AP]M))?)?/i);
@@ -219,7 +310,10 @@ function extractDeliveries(lines: string[]): { deliveries: ShipsDeliveryOrder[];
   return { deliveries: sanitized, duplicateCount: parsedRows.length - sanitized.length };
 }
 
-export function parseShipsPdfLines(sourceLines: ShipsPdfTextLine[] | string[]): ShipsParsedTrip {
+export function parseShipsPdfLines(
+  sourceLines: ShipsPdfTextLine[] | string[],
+  positionedItems: ShipsPdfPositionedTextItem[] = [],
+): ShipsParsedTrip {
   const pageTexts = buildPageTexts(sourceLines);
   const lines = pageTexts.flatMap((pageText) => pageText.lines);
 
@@ -233,7 +327,8 @@ export function parseShipsPdfLines(sourceLines: ShipsPdfTextLine[] | string[]): 
       /\bVehicle\s*Number\s*:?/i,
       /[A-Z0-9-]+/i,
       (candidate) => /^[A-Z0-9-]+$/i.test(candidate),
-    );
+    )
+    || extractVehicleFromPositionedItems(positionedItems);
   const tripDateRaw = findMatchByPage(pageTexts, TRIP_DATE_PATTERN)
     || findValueAfterSplitLabel(
       pageTexts,
@@ -255,7 +350,7 @@ export function parseShipsPdfLines(sourceLines: ShipsPdfTextLine[] | string[]): 
   return {
     tripNo,
     tripNoNormalized: normalizeShipsDtKey(tripNo),
-    vehicleNumber: normalizeShipsVehicleNumber(vehicleRaw),
+    vehicleNumber: normalizeVehicleForDisplay(vehicleRaw),
     tripDate: parsedDate.date,
     tripTime: parsedDate.time,
     vendor: getFieldValue(lines, /^\s*Vendor\s*:?\s*(.*)?$/i) || undefined,

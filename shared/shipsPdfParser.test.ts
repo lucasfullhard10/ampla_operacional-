@@ -91,6 +91,61 @@ test("procura o cabeçalho nas páginas seguintes quando a primeira não o cont�
   assert.equal(parsed.vehicleNumber, "REF9E90");
 });
 
+test("aceita as quatro variações textuais de Vehicle Number", () => {
+  const variants = [
+    ["Vehicle Number: REF9E90"],
+    ["Vehicle Number:", "REF9E90"],
+    ["Vehicle", "Number:", "REF9E90"],
+    ["Vehicle   Number :   REF9E90"],
+  ];
+
+  for (const vehicleLines of variants) {
+    const parsed = parseShipsPdfLines([
+      "Trip No: 0012688623",
+      ...vehicleLines,
+      "Trip Date: Friday, August 28, 2026 7:43 AM",
+      "Delivery Order Customer ID",
+      "8080635859 0002615081 CLIENTE UM",
+    ]);
+    assert.equal(parsed.vehicleNumber, "REF9E90");
+  }
+});
+
+test("usa coordenadas quando a ordem textual separa visualmente Vehicle e Number", () => {
+  const parsed = parseShipsPdfLines(
+    [
+      { page: 1, text: "Trip No: 0012688623" },
+      { page: 1, text: "Vehicle" },
+      { page: 1, text: "Vendor: Ampla Service Grupo Ltda." },
+      { page: 1, text: "Number:" },
+      { page: 1, text: "ABC-1D23" },
+      { page: 1, text: "Trip Date: Friday, August 28, 2026 7:43 AM" },
+      { page: 1, text: "Delivery Order Customer ID" },
+      { page: 1, text: "8080635859 0002615081 CLIENTE UM" },
+    ],
+    [
+      { page: 1, text: "Vehicle", x: 100, y: 700, width: 42, height: 10 },
+      { page: 1, text: "Number:", x: 148, y: 700, width: 46, height: 10 },
+      { page: 1, text: "ABC-1D23", x: 225, y: 700, width: 58, height: 10 },
+      { page: 1, text: "Vendor: Ampla Service Grupo Ltda.", x: 100, y: 675, width: 180, height: 10 },
+    ],
+  );
+
+  assert.equal(parsed.vehicleNumber, "ABC-1D23");
+});
+
+test("reconhece outras placas sem hardcode", () => {
+  for (const vehicleNumber of ["XYZ1234", "QWE-8R76", "TRK90876"]) {
+    const parsed = parseShipsPdfText(`
+Trip Number: 0012688623
+Vehicle Number: ${vehicleNumber}
+Trip Date: Friday, August 28, 2026 7:43 AM
+Delivery Order Customer ID
+8080635859 0002615081 CLIENTE UM`);
+    assert.equal(parsed.vehicleNumber, vehicleNumber);
+  }
+});
+
 test("conta pedidos e clientes separadamente, mantendo cliente repetido", () => {
   const parsed = parseShipsPdfText(shipsText);
   assert.equal(parsed.deliveries.length, 4);

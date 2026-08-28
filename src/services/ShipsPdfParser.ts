@@ -1,20 +1,19 @@
 import { GlobalWorkerOptions, getDocument } from "pdfjs-dist";
 import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
-import { normalizeShipsExtractedText, parseShipsPdfLines, type ShipsPdfTextLine } from "../../shared/shipsPdfParser";
+import {
+  normalizeShipsExtractedText,
+  parseShipsPdfLines,
+  type ShipsPdfPositionedTextItem,
+  type ShipsPdfTextLine,
+} from "../../shared/shipsPdfParser";
 import type { ShipsParsedTrip } from "../../shared/ships";
 
 GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
-type PositionedText = {
-  text: string;
-  x: number;
-  y: number;
-};
+function groupPageItems(items: ShipsPdfPositionedTextItem[], page: number): ShipsPdfTextLine[] {
+  const rows: Array<{ y: number; items: ShipsPdfPositionedTextItem[] }> = [];
 
-function groupPageItems(items: PositionedText[], page: number): ShipsPdfTextLine[] {
-  const rows: Array<{ y: number; items: PositionedText[] }> = [];
-
-  for (const item of items.sort((first, second) => second.y - first.y || first.x - second.x)) {
+  for (const item of [...items].sort((first, second) => second.y - first.y || first.x - second.x)) {
     const row = rows.find((candidate) => Math.abs(candidate.y - item.y) <= 2.5);
     if (row) row.items.push(item);
     else rows.push({ y: item.y, items: [item] });
@@ -44,6 +43,7 @@ export class ShipsPdfParser {
     const loadingTask = getDocument({ data });
     const document = await loadingTask.promise;
     const lines: ShipsPdfTextLine[] = [];
+    const allPositionedItems: ShipsPdfPositionedTextItem[] = [];
 
     try {
       for (let pageNumber = 1; pageNumber <= document.numPages; pageNumber++) {
@@ -53,16 +53,23 @@ export class ShipsPdfParser {
           .filter((item: any) => typeof item.str === "string" && item.str.trim())
           .map((item: any) => ({
             text: item.str.trim(),
+            page: pageNumber,
             x: Number(item.transform?.[4] || 0),
             y: Number(item.transform?.[5] || 0),
+            width: Number(item.width || 0),
+            height: Number(item.height || 0),
           }));
         const pageLines = groupPageItems(positioned, pageNumber);
         if (import.meta.env.DEV && pageNumber === 1) {
+          const rawText = positioned.map((item) => item.text).join(" ");
+          console.debug("[ShipsPdfParser] rawItems", positioned);
+          console.debug("[ShipsPdfParser] rawText", rawText);
           console.debug(
-            "[ShipsPdfParser] normalized text:",
-            normalizeShipsExtractedText(pageLines.map((line) => line.text).join(" ")),
+            "[ShipsPdfParser] normalizedText",
+            normalizeShipsExtractedText(rawText),
           );
         }
+        allPositionedItems.push(...positioned);
         lines.push(...pageLines);
         page.cleanup();
       }
@@ -70,6 +77,11 @@ export class ShipsPdfParser {
       await loadingTask.destroy();
     }
 
-    return parseShipsPdfLines(lines);
+    const parsed = parseShipsPdfLines(lines, allPositionedItems);
+    if (import.meta.env.DEV) {
+      console.debug("[ShipsPdfParser] trip", parsed.tripNo);
+      console.debug("[ShipsPdfParser] vehicle", parsed.vehicleNumber);
+    }
+    return parsed;
   }
 }
