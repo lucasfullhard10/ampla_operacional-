@@ -11,6 +11,20 @@ import {
 } from "../shared/documentExpiration.ts";
 import { reconcileRouteRecords } from "./routeIdentity.ts";
 import type { ShipsDeliveryOrder } from "../shared/ships.ts";
+import {
+  DEFAULT_CHECKLIST_CONFIG,
+  DEFAULT_CHECKLIST_TEMPLATES,
+  getChecklistDeadline,
+  getChecklistWeek,
+  isChecklistFinal,
+  type ChecklistAnexo,
+  type ChecklistConfiguracao,
+  type ChecklistItemTemplate,
+  type ChecklistProtocolCounter,
+  type ChecklistResposta,
+  type ChecklistVeiculo,
+  type VeiculoBloqueio,
+} from "../shared/weeklyChecklist.ts";
 
 // Ensure data folder exists
 const DATA_DIR = path.join(process.cwd(), "data");
@@ -53,10 +67,11 @@ export interface Usuario {
   
   // New compliance fields
   unidade_id?: string;
-  tipo_usuario?: "MASTER" | "SUPERVISOR" | "OPERADOR" | "CONFERENTE" | "MOTORISTA" | "FINANCEIRO" | "ADMINISTRATIVO";
+  tipo_usuario?: "MASTER" | "SUPERVISOR" | "OPERADOR" | "CONFERENTE" | "MOTORISTA" | "MANUTENCAO" | "FINANCEIRO" | "ADMINISTRATIVO";
   cpf?: string;
   telefone?: string;
   cargo?: string;
+  motoristaId?: string;
   permissions?: {
     [key: string]: {
       visualizar: boolean;
@@ -373,6 +388,16 @@ export interface Manutencao {
   oficina?: string;
   fornecedor?: string;
   responsavel?: string;
+  origemChecklist?: boolean;
+  checklistId?: string;
+  checklistRespostaId?: string;
+  criticidade?: "NORMAL" | "CRITICA";
+  motoristaId?: string;
+  motoristaNomeSnapshot?: string;
+  statusResolucao?: "PENDENTE" | "CORRIGIDA" | "CANCELADA";
+  resolucaoObservacao?: string;
+  resolvidoEm?: string;
+  resolvidoPor?: string;
   checklist: {
     oleo: boolean;
     filtro: boolean;
@@ -457,12 +482,16 @@ export interface Alerta {
   severidade: "Crítica" | "Atenção";
   status: "Ativo" | "Resolvido";
   dataCriacao: string;
-  entidadeTipo?: "Pessoa" | "Veículo" | "Manutenção";
+  entidadeTipo?: "Pessoa" | "Veículo" | "Manutenção" | "Checklist";
   entidadeNome?: string;
   unidadeId?: string;
   dataVencimento?: string;
   diasRestantes?: number;
   classificacao?: "VENCIDO" | "VENCE_HOJE" | "VENCIMENTO_PROXIMO";
+  checklistId?: string;
+  veiculoId?: string;
+  identificadorSemana?: string;
+  destino?: string;
 }
 
 export interface UsuarioUnidadePermissao {
@@ -603,6 +632,13 @@ export interface DatabaseSchema {
   devolucoes_hierarquia?: any[];
   devolucoes_motivos?: any[];
   devolucoes_registros?: any[];
+  checklist_item_templates: ChecklistItemTemplate[];
+  checklists_veiculos: ChecklistVeiculo[];
+  checklist_respostas: ChecklistResposta[];
+  checklist_anexos: ChecklistAnexo[];
+  veiculos_bloqueios: VeiculoBloqueio[];
+  checklist_configuracoes: ChecklistConfiguracao[];
+  checklist_protocolos: ChecklistProtocolCounter[];
 }
 
 const DEFAULT_UNIDADES: Unidade[] = [
@@ -720,6 +756,13 @@ const INITIAL_DATABASE: DatabaseSchema = {
     { id: "Y22", codigo: "Y22", descricao: "Falta de espaço físico" }
   ],
   devolucoes_registros: [],
+  checklist_item_templates: DEFAULT_CHECKLIST_TEMPLATES,
+  checklists_veiculos: [],
+  checklist_respostas: [],
+  checklist_anexos: [],
+  veiculos_bloqueios: [],
+  checklist_configuracoes: [DEFAULT_CHECKLIST_CONFIG],
+  checklist_protocolos: [],
 };
 
 export class FileDatabase {
@@ -1704,6 +1747,144 @@ export class FileDatabase {
         warningWindowDays: 7,
       });
     });
+
+    // Checklist alerts are derived from the current operational state. They are
+    // never manually deleted: completing the checklist, resolving maintenance,
+    // reinspecting or releasing the block removes the corresponding key here.
+    const configurations = db.checklist_configuracoes || [DEFAULT_CHECKLIST_CONFIG];
+    const checklists = db.checklists_veiculos || [];
+    const activeBlocks = (db.veiculos_bloqueios || []).filter((block) => block.status === "ATIVO");
+    const checklistMaintenances = db.manutencoes.filter((maintenance) =>
+      maintenance.origemChecklist && maintenance.statusResolucao === "PENDENTE",
+    );
+
+    db.veiculos
+      .filter((vehicle) => vehicle.status !== "Bloqueado")
+      .forEach((vehicle) => {
+        const config = configurations.find((candidate) => candidate.ativo && candidate.unidadeId === vehicle.unidadeId)
+          || configurations.find((candidate) => candidate.ativo && !candidate.unidadeId)
+          || DEFAULT_CHECKLIST_CONFIG;
+        const week = getChecklistWeek(dataCriacao, config.diaInicialSemana);
+        const weeklyChecklist = checklists.find((checklist) =>
+          checklist.veiculoId === vehicle.id &&
+          checklist.unidadeId === vehicle.unidadeId &&
+          checklist.identificadorSemana === week.identifier &&
+          !checklist.checklistOriginalId &&
+          checklist.status !== "CANCELADO",
+        );
+        const weeklyCompleted = weeklyChecklist && isChecklistFinal(weeklyChecklist.status);
+        if (!weeklyCompleted) {
+          const deadline = getChecklistDeadline(week, config);
+          const overdue = referenceDate.getTime() > deadline.getTime();
+          const id = `al-checklist-pendente-${slugify(vehicle.unidadeId)}-${slugify(vehicle.id)}-${slugify(week.identifier)}`;
+          alertsById.set(id, {
+            id,
+            tipo: overdue ? "Checklist semanal atrasado" : "Checklist semanal pendente",
+            refId: weeklyChecklist?.id || vehicle.id,
+            mensagem: `${overdue ? "Checklist semanal atrasado" : "Checklist semanal pendente"} do veículo ${vehicle.placa} — semana ${formatCalendarDateBr(week.start)} a ${formatCalendarDateBr(week.end)}`,
+            severidade: overdue ? "Crítica" : "Atenção",
+            status: "Ativo",
+            dataCriacao,
+            entidadeTipo: "Checklist",
+            entidadeNome: vehicle.placa,
+            unidadeId: vehicle.unidadeId,
+            checklistId: weeklyChecklist?.id,
+            veiculoId: vehicle.id,
+            identificadorSemana: week.identifier,
+            destino: "checklist-semanal",
+          });
+        }
+      });
+
+    activeBlocks.forEach((block) => {
+      const vehicle = db.veiculos.find((candidate) => candidate.id === block.veiculoId);
+      const checklist = checklists.find((candidate) => candidate.id === block.checklistId);
+      const id = `al-checklist-bloqueio-${slugify(block.id)}`;
+      alertsById.set(id, {
+        id,
+        tipo: "Veículo bloqueado por checklist",
+        refId: block.checklistId,
+        mensagem: `Veículo ${vehicle?.placa || block.veiculoId} bloqueado por não conformidade crítica: ${block.motivo}`,
+        severidade: "Crítica",
+        status: "Ativo",
+        dataCriacao,
+        entidadeTipo: "Checklist",
+        entidadeNome: vehicle?.placa || block.veiculoId,
+        unidadeId: block.unidadeId,
+        checklistId: block.checklistId,
+        veiculoId: block.veiculoId,
+        identificadorSemana: checklist?.identificadorSemana,
+        destino: "checklist-semanal",
+      });
+    });
+
+    checklists
+      .filter((checklist) =>
+        checklist.possuiNaoConformidadeCritica &&
+        checklist.status !== "LIBERADO" &&
+        checklist.status !== "CANCELADO",
+      )
+      .forEach((checklist) => {
+        const id = `al-checklist-nao-conformidade-critica-${slugify(checklist.id)}`;
+        alertsById.set(id, {
+          id,
+          tipo: "Não conformidade crítica em checklist",
+          refId: checklist.id,
+          mensagem: `Não conformidade crítica aberta no veículo ${checklist.placaSnapshot} — protocolo ${checklist.protocolo || "em emissão"}`,
+          severidade: "Crítica",
+          status: "Ativo",
+          dataCriacao,
+          entidadeTipo: "Checklist",
+          entidadeNome: checklist.placaSnapshot,
+          unidadeId: checklist.unidadeId,
+          checklistId: checklist.id,
+          veiculoId: checklist.veiculoId,
+          identificadorSemana: checklist.identificadorSemana,
+          destino: "checklist-semanal",
+        });
+      });
+
+    checklistMaintenances.forEach((maintenance) => {
+      const vehicle = db.veiculos.find((candidate) => candidate.id === maintenance.veiculoId);
+      const id = `al-checklist-manutencao-${slugify(maintenance.id)}`;
+      alertsById.set(id, {
+        id,
+        tipo: "Manutenção de checklist pendente",
+        refId: maintenance.checklistId || maintenance.id,
+        mensagem: `Manutenção pendente originada pelo checklist do veículo ${vehicle?.placa || maintenance.placa || maintenance.veiculoId}`,
+        severidade: maintenance.criticidade === "CRITICA" ? "Crítica" : "Atenção",
+        status: "Ativo",
+        dataCriacao,
+        entidadeTipo: "Checklist",
+        entidadeNome: vehicle?.placa || maintenance.placa || maintenance.veiculoId,
+        unidadeId: maintenance.unidadeId,
+        checklistId: maintenance.checklistId,
+        veiculoId: maintenance.veiculoId,
+        destino: "checklist-semanal",
+      });
+    });
+
+    checklists
+      .filter((checklist) => checklist.status === "AGUARDANDO_REINSPECAO")
+      .forEach((checklist) => {
+        const id = `al-checklist-reinspecao-${slugify(checklist.id)}`;
+        alertsById.set(id, {
+          id,
+          tipo: "Reinspeção pendente",
+          refId: checklist.id,
+          mensagem: `Reinspeção pendente para o veículo ${checklist.placaSnapshot} — protocolo ${checklist.protocolo || "em emissão"}`,
+          severidade: "Atenção",
+          status: "Ativo",
+          dataCriacao,
+          entidadeTipo: "Checklist",
+          entidadeNome: checklist.placaSnapshot,
+          unidadeId: checklist.unidadeId,
+          checklistId: checklist.id,
+          veiculoId: checklist.veiculoId,
+          identificadorSemana: checklist.identificadorSemana,
+          destino: "checklist-semanal",
+        });
+      });
 
     db.alertas = Array.from(alertsById.values()).sort((left, right) => {
       const severityOrder = left.severidade === right.severidade ? 0 : left.severidade === "Crítica" ? -1 : 1;

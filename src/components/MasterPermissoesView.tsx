@@ -29,6 +29,7 @@ const MODULES: ModuleDef[] = [
   { key: "financeiro-pessoas", name: "Financeiro de Pessoas", desc: "Controle de faturamentos e pagamentos de colaboradores." },
   { key: "recebimentos", name: "Contas a Receber", desc: "Gestão de contas, faturas e recebimentos operacionais." },
   { key: "manutencao", name: "Ficha Manutenção", desc: "Controle de ordens e histórico de manutenção da frota." },
+  { key: "checklist-semanal", name: "Checklist Semanal", desc: "Inspeções, não conformidades, reinspeções e liberação operacional da frota." },
   { key: "epi", name: "Estoque de EPIs", desc: "Movimentação de botas, cones de sinalização e óculos de proteção." },
   { key: "alertas", name: "Central de Conformidades", desc: "Alertas automáticos de documentos e exames vencidos." },
   { key: "auditoria", name: "Logs de Auditoria", desc: "Acesso aos logs transacionais e de segurança de auditoria." }

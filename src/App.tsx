@@ -3,7 +3,7 @@ import {
   Building, Truck, Users, Calendar, Layers, Navigation, DollarSign, Hammer, 
   Archive, AlertTriangle, Shield, LogOut, LayoutDashboard, Menu, X, Bell, ShieldAlert,
   User, CheckCircle, HelpCircle, Key, ChevronLeft, ChevronRight, ClipboardList, FolderCheck,
-  WalletCards, Undo2
+  WalletCards, Undo2, ClipboardCheck
 } from "lucide-react";
 
 import { Unidade, Motorista, Veiculo, Rota, Descarga, Manutencao, Abastecimento, EstoqueEpi, MovimentacaoEpi, Alerta, Auditoria, Usuario } from "./types";
@@ -34,6 +34,8 @@ const MasterUnidadesView = lazy(() => import("./components/MasterUnidadesView"))
 const CentralProcessos = lazy(() => import("./components/CentralProcessos"));
 const CentralDocumentosView = lazy(() => import("./components/CentralDocumentosView"));
 const DevolucoesView = lazy(() => import("./components/DevolucoesView"));
+const ChecklistSemanalView = lazy(() => import("./components/ChecklistSemanalView"));
+const DriverChecklistView = lazy(() => import("./components/DriverChecklistView"));
 
 const TAB_TITLES: Record<string, string> = {
   dashboard: "Dashboard Operativo",
@@ -48,6 +50,7 @@ const TAB_TITLES: Record<string, string> = {
   "financeiro-pessoas": "Financeiro de Pessoas",
   recebimentos: "Centro de Recebimentos / Contas a Receber",
   manutencao: "Histórico de Manutenções",
+  "checklist-semanal": "Checklist Semanal de Veículos",
   epi: "Alocação EPIs",
   alertas: "Painel Alertas Ativos",
   auditoria: "Logs de Segurança",
@@ -194,7 +197,7 @@ export default function App() {
 
   // Load all logistics data from API safely
   const loadGlobalData = async () => {
-    if (!currentUser) return;
+    if (!currentUser || currentUser.tipo_usuario === "MOTORISTA") return;
     try {
       const headers = { 
         "x-user-email": currentUser.email,
@@ -503,6 +506,7 @@ export default function App() {
     { id: "financeiro-pessoas", label: "Financeiro de Pessoas", icon: WalletCards },
     { id: "recebimentos", label: "Contas a Receber", icon: DollarSign },
     { id: "manutencao", label: "Ficha Manutenção", icon: Hammer },
+    { id: "checklist-semanal", label: "Checklist Semanal", icon: ClipboardCheck },
     { id: "epi", label: "Estoque de EPIs", icon: Archive },
     { id: "alertas", label: "Central de Conformidades", icon: AlertTriangle, count: alertas.length },
     { id: "auditoria", label: "Logs de Auditoria", icon: Shield },
@@ -695,6 +699,16 @@ export default function App() {
           </p>
         </div>
       </div>
+    );
+  }
+
+  if (currentUser.tipo_usuario === "MOTORISTA") {
+    return (
+      <ErrorBoundary>
+        <Suspense fallback={<div className="min-h-screen bg-slate-950 text-slate-400 flex items-center justify-center">Carregando portal do motorista...</div>}>
+          <DriverChecklistView currentUser={currentUser} onLogout={handleLogout} />
+        </Suspense>
+      </ErrorBoundary>
     );
   }
 
@@ -1196,6 +1210,10 @@ export default function App() {
               />
             )}
 
+            {activeTab === "checklist-semanal" && (
+              <ChecklistSemanalView currentUser={currentUser} selectedUnit={selectedUnit} />
+            )}
+
             {activeTab === "epi" && (
               <EpiView 
                 estoque={estoqueEpi}
@@ -1210,6 +1228,7 @@ export default function App() {
               <AlertasView 
                 alertas={alertas}
                 onRefresh={loadGlobalData}
+                onNavigate={navigateToTab}
               />
             )}
 

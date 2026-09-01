@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { Plus, Trash2, Shield, Search, User, Mail, Phone, Lock, Edit3, Key, AlertTriangle, ShieldCheck } from "lucide-react";
-import { Unidade, Usuario } from "../types";
+import { Motorista, Unidade, Usuario } from "../types";
 import { NotificationModal, ConfirmModal, NotificationType, ConfirmType } from "./NotificationModal";
 
 interface MasterUsuariosProps {
@@ -15,12 +15,14 @@ const TIPO_USUARIO_OPTIONS = [
   "OPERADOR",
   "CONFERENTE",
   "MOTORISTA",
+  "MANUTENCAO",
   "FINANCEIRO",
   "ADMINISTRATIVO"
 ] as const;
 
 export default function MasterUsuariosView({ unidades, userEmail, onRefresh }: MasterUsuariosProps) {
   const [usuarios, setUsuarios] = useState<Usuario[]>([]);
+  const [motoristas, setMotoristas] = useState<Motorista[]>([]);
   const [loading, setLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
 
@@ -35,6 +37,7 @@ export default function MasterUsuariosView({ unidades, userEmail, onRefresh }: M
   const [unidadeId, setUnidadeId] = useState("");
   const [tipoUsuario, setTipoUsuario] = useState<(typeof TIPO_USUARIO_OPTIONS)[number]>("OPERADOR");
   const [status, setStatus] = useState<"ativo" | "inativo">("ativo");
+  const [motoristaId, setMotoristaId] = useState("");
 
   // Notifications
   const [notification, setNotification] = useState<NotificationType | null>(null);
@@ -57,8 +60,18 @@ export default function MasterUsuariosView({ unidades, userEmail, onRefresh }: M
     }
   };
 
+  const fetchMotoristas = async () => {
+    try {
+      const res = await fetch("/api/motoristas", { headers: { "x-user-email": userEmail, "x-selected-unit": "Todas" } });
+      if (res.ok) setMotoristas(await res.json());
+    } catch (err) {
+      console.error("Erro ao listar motoristas oficiais:", err);
+    }
+  };
+
   useEffect(() => {
     fetchUsuarios();
+    fetchMotoristas();
   }, []);
 
   useEffect(() => {
@@ -78,6 +91,7 @@ export default function MasterUsuariosView({ unidades, userEmail, onRefresh }: M
     setUnidadeId(unidades[0]?.id || "");
     setTipoUsuario("OPERADOR");
     setStatus("ativo");
+    setMotoristaId("");
   };
 
   const handleCreateOrUpdate = async (e: React.FormEvent) => {
@@ -87,6 +101,10 @@ export default function MasterUsuariosView({ unidades, userEmail, onRefresh }: M
         type: "error",
         message: "Por favor, preencha os campos obrigatórios (Nome, Usuário, Unidade de Referência)."
       });
+      return;
+    }
+    if (tipoUsuario === "MOTORISTA" && !motoristaId) {
+      setNotification({ type: "error", message: "Selecione o cadastro oficial do motorista vinculado a este login." });
       return;
     }
 
@@ -101,7 +119,8 @@ export default function MasterUsuariosView({ unidades, userEmail, onRefresh }: M
         unidade_id: unidadeId,
         tipo_usuario: tipoUsuario,
         status,
-        unidadesPermitidas: [unidadeId]
+        unidadesPermitidas: [unidadeId],
+        motoristaId: tipoUsuario === "MOTORISTA" ? motoristaId : undefined,
       };
 
       const url = editingUserId ? `/api/usuarios/${editingUserId}` : "/api/usuarios";
@@ -151,6 +170,7 @@ export default function MasterUsuariosView({ unidades, userEmail, onRefresh }: M
     setUnidadeId(user.unidadeId || user.unidade_id || "");
     setTipoUsuario(user.tipo_usuario || "OPERADOR");
     setStatus(user.status || "ativo");
+    setMotoristaId(user.motoristaId || "");
   };
 
   const handleDelete = (user: Usuario) => {
@@ -336,7 +356,10 @@ export default function MasterUsuariosView({ unidades, userEmail, onRefresh }: M
                 <label className="text-slate-400 block font-mono font-medium">Tipo Usuário *</label>
                 <select
                   value={tipoUsuario}
-                  onChange={(e) => setTipoUsuario(e.target.value as any)}
+                  onChange={(e) => {
+                    setTipoUsuario(e.target.value as (typeof TIPO_USUARIO_OPTIONS)[number]);
+                    if (e.target.value !== "MOTORISTA") setMotoristaId("");
+                  }}
                   className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1.5 text-white text-xs outline-none cursor-pointer"
                 >
                   {TIPO_USUARIO_OPTIONS.map(opt => (
@@ -346,11 +369,29 @@ export default function MasterUsuariosView({ unidades, userEmail, onRefresh }: M
               </div>
             </div>
 
+            {tipoUsuario === "MOTORISTA" && (
+              <div className="space-y-1 rounded-lg border border-emerald-500/20 bg-emerald-500/5 p-3">
+                <label className="text-emerald-300 block font-mono font-medium">Cadastro oficial do motorista *</label>
+                <select
+                  value={motoristaId}
+                  onChange={(e) => setMotoristaId(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-2 text-white text-xs outline-none cursor-pointer"
+                  required
+                >
+                  <option value="">Selecionar motorista por ID oficial...</option>
+                  {motoristas
+                    .filter((driver) => (!driver.tipo || driver.tipo === "Motorista") && driver.unidadeId === unidadeId)
+                    .map((driver) => <option key={driver.id} value={driver.id}>{driver.nome} · {driver.cpf}</option>)}
+                </select>
+                <p className="text-[9px] text-slate-500">O vínculo usa o ID do cadastro oficial; nome e CPF não são usados como chave.</p>
+              </div>
+            )}
+
             <div className="space-y-1">
               <label className="text-slate-400 block font-mono font-medium">Status da Conta *</label>
               <select
                 value={status}
-                onChange={(e) => setStatus(e.target.value as any)}
+                onChange={(e) => setStatus(e.target.value as "ativo" | "inativo")}
                 className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1.5 text-white text-xs outline-none cursor-pointer"
               >
                 <option value="ativo">Conta Ativada (Acesso Liberado)</option>

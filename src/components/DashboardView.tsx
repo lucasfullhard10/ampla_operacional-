@@ -424,6 +424,51 @@ export default function DashboardView({
           </div>
         </div>
       </button>
+
+      {data.checklistSemanal && (
+        <button
+          type="button"
+          onClick={() => setGlobalActiveTab("checklist-semanal")}
+          className="w-full rounded-xl border border-emerald-500/20 bg-gradient-to-r from-slate-900 to-emerald-950/30 p-4 text-left transition hover:border-emerald-400/40"
+        >
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex items-center gap-3">
+              <div className="flex h-11 w-11 items-center justify-center rounded-lg border border-emerald-500/25 bg-emerald-500/10 text-emerald-400">
+                <ClipboardList className="h-5 w-5" />
+              </div>
+              <div>
+                <h2 className="text-sm font-bold text-white">Checklist semanal</h2>
+                <p className="mt-0.5 text-xs text-slate-400">
+                  Semana {String(data.checklistSemanal.semana.start).split("-").reverse().join("/")} a {String(data.checklistSemanal.semana.end).split("-").reverse().join("/")}
+                </p>
+              </div>
+            </div>
+            <div className="grid grid-cols-3 gap-2 text-center font-mono sm:grid-cols-7">
+              {[
+                ["Veículos", data.checklistSemanal.totalVeiculosAtivos, "text-white"],
+                ["Realizados", data.checklistSemanal.realizados, "text-emerald-400"],
+                ["Pendentes", data.checklistSemanal.pendentes, "text-amber-400"],
+                ["Conformes", data.checklistSemanal.conformes, "text-emerald-300"],
+                ["Pendências", data.checklistSemanal.naoConformes, "text-orange-400"],
+                ["Bloqueados", data.checklistSemanal.bloqueados, "text-rose-400"],
+                ["Conclusão", `${data.checklistSemanal.conclusaoPercentual}%`, "text-sky-400"],
+              ].map(([label, value, color]) => (
+                <div key={String(label)} className="min-w-20 rounded-lg border border-slate-800 bg-slate-950 px-3 py-2">
+                  <span className={`block text-lg font-bold ${color}`}>{String(value)}</span>
+                  <span className="text-[8px] uppercase text-slate-500">{String(label)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+          {data.checklistSemanal.alertas?.length > 0 && (
+            <div className="mt-3 flex items-center gap-2 border-t border-slate-800 pt-3 text-xs text-amber-300">
+              <AlertTriangle className="h-4 w-4" />
+              {data.checklistSemanal.alertas[0].mensagem}
+              {data.checklistSemanal.alertas.length > 1 && <span className="text-slate-500">+ {data.checklistSemanal.alertas.length - 1} alerta(s)</span>}
+            </div>
+          )}
+        </button>
+      )}
       
       {/* Header Controls */}
       <h1 className="sr-only">Painel de Monitoramento</h1>

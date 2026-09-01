@@ -5,9 +5,10 @@ import { Alerta } from "../types";
 interface AlertasProps {
   alertas: Alerta[];
   onRefresh: () => void;
+  onNavigate?: (tab: string) => void;
 }
 
-export default function AlertasView({ alertas, onRefresh }: AlertasProps) {
+export default function AlertasView({ alertas, onNavigate }: AlertasProps) {
   const criticalCount = alertas.filter((a) => a.severidade === "Crítica").length;
   const warningCount = alertas.filter((a) => a.severidade === "Atenção").length;
 
@@ -86,6 +87,11 @@ export default function AlertasView({ alertas, onRefresh }: AlertasProps) {
                   {a.dataVencimento && <span>Vencimento: {a.dataVencimento.split("-").reverse().join("/")}</span>}
                   {a.diasRestantes !== undefined && <span>Dias restantes: {a.diasRestantes}</span>}
                 </div>
+                {a.destino === "checklist-semanal" && onNavigate && (
+                  <button type="button" onClick={() => onNavigate(a.destino!)} className="mt-3 rounded-lg border border-emerald-500/25 bg-emerald-500/10 px-3 py-2 text-[10px] font-black text-emerald-300 hover:bg-emerald-500/20">
+                    ABRIR CHECKLIST DO VEÍCULO
+                  </button>
+                )}
               </div>
             </div>
           ))}

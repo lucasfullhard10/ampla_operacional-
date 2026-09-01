@@ -1,4 +1,18 @@
 import type { ShipsDeliveryOrder } from "../shared/ships";
+export type {
+  ChecklistAnswerValue,
+  ChecklistAnexo,
+  ChecklistConfiguracao,
+  ChecklistCriticality,
+  ChecklistItemTemplate,
+  ChecklistResposta,
+  ChecklistResult,
+  ChecklistStatus,
+  ChecklistVeiculo,
+  ChecklistWeekPeriod,
+  VehicleBlockStatus,
+  VeiculoBloqueio,
+} from "../shared/weeklyChecklist";
 
 export interface Usuario {
   id: string;
@@ -15,10 +29,11 @@ export interface Usuario {
   
   // New compliance fields
   unidade_id?: string;
-  tipo_usuario?: "MASTER" | "SUPERVISOR" | "OPERADOR" | "CONFERENTE" | "MOTORISTA" | "FINANCEIRO" | "ADMINISTRATIVO";
+  tipo_usuario?: "MASTER" | "SUPERVISOR" | "OPERADOR" | "CONFERENTE" | "MOTORISTA" | "MANUTENCAO" | "FINANCEIRO" | "ADMINISTRATIVO";
   cpf?: string;
   telefone?: string;
   cargo?: string;
+  motoristaId?: string;
   permissions?: {
     [key: string]: {
       visualizar: boolean;
@@ -345,6 +360,16 @@ export interface Manutencao {
   oficina?: string;
   fornecedor?: string;
   responsavel?: string;
+  origemChecklist?: boolean;
+  checklistId?: string;
+  checklistRespostaId?: string;
+  criticidade?: "NORMAL" | "CRITICA";
+  motoristaId?: string;
+  motoristaNomeSnapshot?: string;
+  statusResolucao?: "PENDENTE" | "CORRIGIDA" | "CANCELADA";
+  resolucaoObservacao?: string;
+  resolvidoEm?: string;
+  resolvidoPor?: string;
   checklist: {
     oleo: boolean;
     filtro: boolean;
@@ -427,12 +452,16 @@ export interface Alerta {
   severidade: "Crítica" | "Atenção";
   status: "Ativo" | "Resolvido";
   dataCriacao: string;
-  entidadeTipo?: "Pessoa" | "Veículo" | "Manutenção";
+  entidadeTipo?: "Pessoa" | "Veículo" | "Manutenção" | "Checklist";
   entidadeNome?: string;
   unidadeId?: string;
   dataVencimento?: string;
   diasRestantes?: number;
   classificacao?: "VENCIDO" | "VENCE_HOJE" | "VENCIMENTO_PROXIMO";
+  checklistId?: string;
+  veiculoId?: string;
+  identificadorSemana?: string;
+  destino?: string;
 }
 
 export interface ProcessoAnexo {
