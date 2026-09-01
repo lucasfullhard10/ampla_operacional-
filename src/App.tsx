@@ -119,6 +119,7 @@ export default function App() {
   
   // Forced password reset state
   const [forcedResetUserEmail, setForcedResetUserEmail] = useState<string | null>(null);
+  const [currentPasswordValue, setCurrentPasswordValue] = useState("");
   const [newPasswordValue, setNewPasswordValue] = useState("");
   const [confirmPasswordValue, setConfirmPasswordValue] = useState("");
   
@@ -197,7 +198,7 @@ export default function App() {
 
   // Load all logistics data from API safely
   const loadGlobalData = async () => {
-    if (!currentUser || currentUser.tipo_usuario === "MOTORISTA") return;
+    if (!currentUser || currentUser.tipo_usuario === "MOTORISTA" || currentUser.tipo_usuario === "AJUDANTE") return;
     try {
       const headers = { 
         "x-user-email": currentUser.email,
@@ -377,6 +378,8 @@ export default function App() {
         const data = await res.json();
         if (data.forcePasswordReset) {
           setForcedResetUserEmail(email);
+          setPassword("");
+          setCurrentPasswordValue("");
           setLoginError("");
         } else {
           setCurrentUser(data.user);
@@ -441,8 +444,8 @@ export default function App() {
     e.preventDefault();
     setLoginError("");
     
-    if (newPasswordValue.length < 8) {
-      setLoginError("A nova senha deve possuir pelo menos 8 caracteres.");
+    if (newPasswordValue.length < 8 || !/[A-Za-zÀ-ÿ]/.test(newPasswordValue) || !/\d/.test(newPasswordValue) || /\s/.test(newPasswordValue)) {
+      setLoginError("A nova senha deve ter ao menos 8 caracteres, uma letra, um número e nenhum espaço.");
       return;
     }
     if (newPasswordValue !== confirmPasswordValue) {
@@ -455,7 +458,7 @@ export default function App() {
       const res = await fetch("/api/auth/change-password", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: forcedResetUserEmail, newPassword: newPasswordValue }),
+        body: JSON.stringify({ email: forcedResetUserEmail, currentPassword: currentPasswordValue, newPassword: newPasswordValue, confirmPassword: confirmPasswordValue }),
       });
 
       if (res.ok) {
@@ -463,6 +466,7 @@ export default function App() {
         setCurrentUser(data.user);
         setSelectedUnit(data.user.unidadeId || data.user.unidade_id || "Todas");
         setForcedResetUserEmail(null);
+        setCurrentPasswordValue("");
         setNewPasswordValue("");
         setConfirmPasswordValue("");
       } else {
@@ -490,6 +494,13 @@ export default function App() {
 
   // Nav categories filter logic according to privileges
   const isMaster = currentUser && (currentUser.perfil === "admin_master" || currentUser.tipo_usuario === "MASTER");
+  const canManageUsersUi = Boolean(currentUser && (
+    isMaster ||
+    currentUser.perfil === "admin_unidade" ||
+    ["SUPERVISOR", "ADMINISTRATIVO", "GESTOR_OPERACIONAL"].includes(currentUser.tipo_usuario || "") ||
+    currentUser.permissions?.usuarios?.editar === true ||
+    currentUser.permissions?.usuarios?.edit === true
+  ));
 
   const itemsSidemenu = [
     { id: "dashboard", label: "Painel Executivo", icon: LayoutDashboard },
@@ -589,11 +600,25 @@ export default function App() {
                 </div>
 
                 <div className="space-y-1">
+                  <label className="text-slate-400 block font-mono">Senha Atual / Provisória</label>
+                  <input
+                    type="password"
+                    required
+                    autoComplete="current-password"
+                    placeholder="Digite novamente a senha provisória"
+                    value={currentPasswordValue}
+                    disabled={loadingSession}
+                    onChange={(e) => setCurrentPasswordValue(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded px-3 py-2 text-white focus:outline-none focus:ring-1 focus:ring-sky-500 text-xs"
+                  />
+                </div>
+
+                <div className="space-y-1">
                   <label className="text-slate-400 block font-mono">Nova Senha Forte</label>
                   <input
                     type="password"
                     required
-                    placeholder="Mínimo de 4 caracteres"
+                    placeholder="Mínimo de 8 caracteres, com letra e número"
                     value={newPasswordValue}
                     disabled={loadingSession}
                     onChange={(e) => setNewPasswordValue(e.target.value)}
@@ -619,9 +644,11 @@ export default function App() {
                     type="button"
                     onClick={() => {
                       setForcedResetUserEmail(null);
+                      setCurrentPasswordValue("");
                       setNewPasswordValue("");
                       setConfirmPasswordValue("");
                       setLoginError("");
+                      void fetch("/api/auth/logout", { method: "POST" });
                     }}
                     className="flex-1 bg-slate-950 hover:bg-slate-850 border border-slate-800 text-slate-400 py-2 rounded text-xs transition cursor-pointer"
                   >
@@ -702,7 +729,7 @@ export default function App() {
     );
   }
 
-  if (currentUser.tipo_usuario === "MOTORISTA") {
+  if (currentUser.tipo_usuario === "MOTORISTA" || currentUser.tipo_usuario === "AJUDANTE") {
     return (
       <ErrorBoundary>
         <Suspense fallback={<div className="min-h-screen bg-slate-950 text-slate-400 flex items-center justify-center">Carregando portal do motorista...</div>}>
@@ -857,8 +884,8 @@ export default function App() {
               );
             })}
 
-            {/* Master Administration Exclusive Sidebar Block */}
-            {isMaster && (
+            {/* User administration block */}
+            {canManageUsersUi && (
               <div className="mt-4 pt-3 border-t border-slate-800/60 space-y-1">
                 {!sidebarCollapsed ? (
                   <span className="px-3 text-[9px] font-bold text-sky-400 flex items-center gap-1 block tracking-widest uppercase mb-2 font-mono">
@@ -868,10 +895,10 @@ export default function App() {
                   <div className="border-t border-slate-850 my-2 mx-1"></div>
                 )}
                 {[
-                  { id: "master-usuarios", label: "Gerenciar Usuários", icon: Users },
-                  { id: "master-permissoes", label: "Controle Permissões", icon: Key },
-                  { id: "master-unidades", label: "Gerenciar Unidades", icon: Building }
-                ].map((m) => {
+                  { id: "master-usuarios", label: "Gerenciar Usuários", icon: Users, masterOnly: false },
+                  { id: "master-permissoes", label: "Controle Permissões", icon: Key, masterOnly: true },
+                  { id: "master-unidades", label: "Gerenciar Unidades", icon: Building, masterOnly: true }
+                ].filter((item) => !item.masterOnly || isMaster).map((m) => {
                   const Icon = m.icon;
                   const isActive = activeTab === m.id;
                   return (
@@ -1070,6 +1097,7 @@ export default function App() {
               <CentralProcessos 
                 currentUser={currentUser}
                 unidades={unidades}
+                onNavigate={navigateToTab}
               />
             )}
 
@@ -1243,6 +1271,7 @@ export default function App() {
                 unidades={unidades}
                 onRefresh={loadGlobalData}
                 userEmail={currentUser.email}
+                canManageAllUsers={Boolean(isMaster)}
               />
             )}
 

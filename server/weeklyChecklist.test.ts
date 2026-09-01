@@ -5,6 +5,7 @@ import { FileDatabase } from "./database.ts";
 import {
   DEFAULT_CHECKLIST_CONFIG,
   canDriverAccessChecklist,
+  canHelperAccessChecklist,
   findActiveVehicleBlock,
   getChecklistResult,
   getChecklistWeek,
@@ -127,6 +128,12 @@ test("motorista A não acessa checklist do motorista B por ID", () => {
   assert.equal(canDriverAccessChecklist("mot-renato", "usr-outro", target), false);
 });
 
+test("ajudante acessa somente checklist que preserva seu vínculo na rota", () => {
+  const target = checklist({ ajudanteIdsSnapshot: ["aju-paulo"] });
+  assert.equal(canHelperAccessChecklist("aju-paulo", target), true);
+  assert.equal(canHelperAccessChecklist("aju-outra-unidade", target), false);
+});
+
 test("sem checklist no prazo cria alerta e checklist concluído remove o alerta", () => {
   const week = getChecklistWeek("2026-08-31", 1);
   const database = {
@@ -145,3 +152,17 @@ test("sem checklist no prazo cria alerta e checklist concluído remove o alerta"
   assert.equal(database.alertas.some((alert) => alert.tipo.includes("Checklist semanal")), false);
 });
 
+test("checklist com pendência gera alerta operacional sem duplicar alerta crítico", () => {
+  const database = {
+    motoristas: [],
+    veiculos: [{ id: "vei-1", placa: "ABC1D23", modelo: "Teste", unidadeId: "un-1", status: "Liberado", licenciamentoVencimento: "2027-01-01", seguroVencimento: "2027-01-01" }],
+    manutencoes: [],
+    alertas: [],
+    checklist_configuracoes: [{ ...DEFAULT_CHECKLIST_CONFIG, unidadeId: "un-1" }],
+    checklists_veiculos: [checklist({ status: "COM_PENDENCIAS", resultado: "COM_PENDENCIAS", possuiNaoConformidade: true })],
+    veiculos_bloqueios: [],
+  } as unknown as DatabaseSchema;
+  FileDatabase.recalculateAlerts(database, new Date("2026-09-01T15:00:00"));
+  assert.equal(database.alertas.filter((alert) => alert.tipo === "Pendência operacional em checklist").length, 1);
+  assert.equal(database.alertas.some((alert) => alert.tipo === "Não conformidade crítica em checklist"), false);
+});

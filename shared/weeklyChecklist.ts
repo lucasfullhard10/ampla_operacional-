@@ -84,6 +84,8 @@ export interface ChecklistVeiculo {
   usuarioMotoristaId?: string;
   motoristaNomeSnapshot?: string;
   motoristaCpfSnapshot?: string;
+  ajudanteIdsSnapshot?: string[];
+  ajudanteNomesSnapshot?: string[];
   placaSnapshot: string;
   veiculoModeloSnapshot?: string;
   unidadeNomeSnapshot?: string;
@@ -108,6 +110,8 @@ export interface ChecklistVeiculo {
   dataAssinatura?: string;
   assinaturaMotoristaNomeSnapshot?: string;
   assinaturaMotoristaCpfSnapshot?: string;
+  assinaturaUsuarioNomeSnapshot?: string;
+  assinaturaUsuarioTipoSnapshot?: "MOTORISTA" | "AJUDANTE" | "ADMINISTRATIVO";
   assinaturaUserId?: string;
   assinaturaIp?: string;
   assinaturaUserAgent?: string;
@@ -190,6 +194,7 @@ export interface OperationalRoute {
   data: string;
   veiculoId: string;
   motoristaId: string;
+  ajudantesIds?: string[];
   unidadeId: string;
   status?: string;
   status_viagem?: string;
@@ -404,6 +409,10 @@ export function findActiveVehicleBlock(blocks: VeiculoBloqueio[], vehicleId: str
 export function canDriverAccessChecklist(driverId: string | undefined, userId: string, checklist: ChecklistVeiculo): boolean {
   return Boolean(driverId) && checklist.motoristaId === driverId &&
     (!checklist.usuarioMotoristaId || checklist.usuarioMotoristaId === userId);
+}
+
+export function canHelperAccessChecklist(helperId: string | undefined, checklist: ChecklistVeiculo): boolean {
+  return Boolean(helperId) && checklist.ajudanteIdsSnapshot?.includes(helperId!) === true;
 }
 
 export function validateVehicleRelease(input: {

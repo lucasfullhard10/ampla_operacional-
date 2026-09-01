@@ -17,9 +17,10 @@ import { downloadDocumentOrNotify } from "../lib/documents";
 interface CentralProcessosProps {
   currentUser: Usuario;
   unidades: Unidade[];
+  onNavigate?: (tabId: string) => void;
 }
 
-export default function CentralProcessos({ currentUser, unidades }: CentralProcessosProps) {
+export default function CentralProcessos({ currentUser, unidades, onNavigate }: CentralProcessosProps) {
   // System states
   const [processos, setProcessos] = useState<Processo[]>([]);
   const [colunas, setColunas] = useState<ProcessoColuna[]>([]);
@@ -828,9 +829,16 @@ export default function CentralProcessos({ currentUser, unidades }: CentralProce
                       <p className="text-xs text-slate-405 text-center py-4">Nenhuma notificação recente.</p>
                     ) : (
                       notificacoes.map(n => (
-                        <div 
+                        <button
+                          type="button"
                           key={n.id} 
                           onClick={() => {
+                            if (n.checklistId) {
+                              onNavigate?.("checklist-semanal");
+                              setShowNotifPanel(false);
+                              handleMarkNotificationRead(n.id);
+                              return;
+                            }
                             const relatedProc = processos.find(p => p.id === n.processoId);
                             if (relatedProc) {
                               setSelectedProcesso(relatedProc);
@@ -838,7 +846,7 @@ export default function CentralProcessos({ currentUser, unidades }: CentralProce
                             }
                             handleMarkNotificationRead(n.id);
                           }}
-                          className={`p-2.5 rounded-lg border cursor-pointer hover:border-indigo-500 transition-colors duration-200 ${
+                          className={`w-full p-2.5 text-left rounded-lg border cursor-pointer hover:border-indigo-500 transition-colors duration-200 ${
                             n.lida 
                               ? 'bg-[#0F172A] border-slate-800 text-slate-305' 
                               : 'bg-indigo-950/40 border-indigo-900 text-white'
@@ -848,9 +856,10 @@ export default function CentralProcessos({ currentUser, unidades }: CentralProce
                             <span className="font-semibold text-xs text-slate-200">{n.titulo}</span>
                             {!n.lida && <span className="h-2 w-2 rounded-full bg-indigo-500"></span>}
                           </div>
+                          {n.severidade && <span className={`mt-1 inline-block rounded px-1.5 py-0.5 text-[8px] font-black ${n.severidade === "URGENTE" ? "bg-rose-500/15 text-rose-300" : n.severidade === "OPERACIONAL" ? "bg-amber-500/15 text-amber-300" : "bg-sky-500/15 text-sky-300"}`}>{n.severidade}</span>}
                           <p className="text-xs text-slate-400 mt-1 line-clamp-2">{n.mensagem}</p>
                           <span className="text-[10px] text-slate-500 mt-2 block">{new Date(n.data).toLocaleString("pt-BR")}</span>
-                        </div>
+                        </button>
                       ))
                     )}
                   </div>

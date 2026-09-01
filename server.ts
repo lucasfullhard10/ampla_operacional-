@@ -16,9 +16,11 @@ import {
 import {
   CHECKLIST_MODULE_KEY,
   canDriverAccessChecklist,
+  canHelperAccessChecklist,
   formatLocalIsoDate,
   getChecklistResult,
   getChecklistWeek,
+  isRouteOperationallyActive,
   isChecklistFinal,
   validateChecklistResponses,
   validateVehicleRelease,
@@ -41,13 +43,33 @@ import {
   resolveChecklistDriver,
 } from "./server/weeklyChecklistService";
 import { createChecklistPdf } from "./server/checklistPdf";
+import {
+  canManageUsers,
+  canUseExistingSession,
+  hashPassword,
+  isFieldUser,
+  isMasterUser as isMasterAccount,
+  normalizeLogin,
+  requiresPasswordChange,
+  validateLogin,
+  validatePasswordPolicy,
+  verifyPassword,
+} from "./server/authSecurity";
+import { SessionStore } from "./server/sessionStore";
+import {
+  buildChecklistNotifications,
+  getChecklistFinalNotificationTypes,
+  mergeChecklistNotifications,
+  selectChecklistNotificationRecipients,
+  type ChecklistNotificationType,
+} from "./server/checklistNotifications";
 
 async function startServer() {
   const app = express();
   const PORT = 3000;
   const SESSION_COOKIE = "ampla_session";
   const SESSION_TTL_MS = 8 * 60 * 60 * 1000;
-  const sessions = new Map<string, { userId: string; expiresAt: number }>();
+  const sessions = new SessionStore(SESSION_TTL_MS);
 
   const validateOfficialVehicleDriver = (vehicle: Partial<Veiculo>) => {
     const link = resolveVehicleDriverLink(vehicle, FileDatabase.get("motoristas"));
@@ -68,7 +90,7 @@ async function startServer() {
 
   const issueSession = (res: express.Response, user: Usuario) => {
     const token = crypto.randomBytes(32).toString("base64url");
-    sessions.set(token, { userId: user.id, expiresAt: Date.now() + SESSION_TTL_MS });
+    sessions.issue(user.id, token);
     const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
     res.setHeader("Set-Cookie", `${SESSION_COOKIE}=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${SESSION_TTL_MS / 1000}${secure}`);
   };
@@ -78,26 +100,6 @@ async function startServer() {
     if (token) sessions.delete(token);
     const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
     res.setHeader("Set-Cookie", `${SESSION_COOKIE}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0${secure}`);
-  };
-
-  const hashPassword = (password: string): string => {
-    const salt = crypto.randomBytes(16);
-    const hash = crypto.scryptSync(password, salt, 64);
-    return `scrypt$${salt.toString("base64")}$${hash.toString("base64")}`;
-  };
-
-  const verifyPassword = (password: string, user: Usuario): boolean => {
-    if (user.senhaHash) {
-      const [algorithm, saltValue, hashValue] = user.senhaHash.split("$");
-      if (algorithm !== "scrypt" || !saltValue || !hashValue) return false;
-      const expected = Buffer.from(hashValue, "base64");
-      const actual = crypto.scryptSync(password, Buffer.from(saltValue, "base64"), expected.length);
-      return expected.length === actual.length && crypto.timingSafeEqual(expected, actual);
-    }
-    if (!user.senha) return false;
-    const expected = Buffer.from(user.senha);
-    const actual = Buffer.from(password);
-    return expected.length === actual.length && crypto.timingSafeEqual(expected, actual);
   };
 
   // Initialize and bootstrap database connection
@@ -136,23 +138,31 @@ async function startServer() {
     const publicPaths = new Set(["/auth/login", "/auth/unidades"]);
     if (!publicPaths.has(req.path)) {
       const token = readCookie(req, SESSION_COOKIE);
-      const session = token ? sessions.get(token) : undefined;
+      const session = sessions.get(token);
       if (!session || session.expiresAt <= Date.now()) {
         if (token) sessions.delete(token);
         return res.status(401).json({ success: false, message: "Sessão expirada ou não autenticada." });
       }
       const users = (FileDatabase.get("usuarios") as Usuario[]) || [];
-      const authenticatedUser = users.find(user => user.id === session.userId && user.status === "ativo");
+      const authenticatedUser = users.find(user => user.id === session.userId && canUseExistingSession(user));
       if (!authenticatedUser) {
         sessions.delete(token!);
         return res.status(401).json({ success: false, message: "Usuário da sessão não está ativo." });
       }
-      session.expiresAt = Date.now() + SESSION_TTL_MS;
+      sessions.refresh(token!);
       (req as express.Request & { authenticatedUser?: Usuario }).authenticatedUser = authenticatedUser;
+
+      if (requiresPasswordChange(authenticatedUser) &&
+          !["/auth/change-password", "/auth/logout"].includes(req.path)) {
+        return res.status(403).json({
+          error: "Troca de senha obrigatória antes de acessar os módulos.",
+          code: "PASSWORD_CHANGE_REQUIRED",
+        });
+      }
 
       // Driver accounts are deliberately isolated from all administrative APIs.
       // Object-level authorization is applied again inside each checklist route.
-      if (authenticatedUser.tipo_usuario === "MOTORISTA") {
+      if (isFieldUser(authenticatedUser)) {
         const driverAllowed = [
           { method: "POST", pattern: /^\/auth\/logout$/ },
           { method: "POST", pattern: /^\/auth\/change-password$/ },
@@ -165,7 +175,7 @@ async function startServer() {
           { method: "GET", pattern: /^\/checklists\/[^/]+\/pdf$/ },
         ].some((rule) => rule.method === req.method && rule.pattern.test(req.path));
         if (!driverAllowed) {
-          return res.status(403).json({ error: "O perfil MOTORISTA não possui acesso a este módulo." });
+          return res.status(403).json({ error: `O perfil ${authenticatedUser.tipo_usuario} não possui acesso a este módulo.` });
         }
       }
     }
@@ -295,8 +305,9 @@ async function startServer() {
     return user;
   };
 
-  const isMasterUser = (user: Usuario) => user.perfil === "admin_master" || user.tipo_usuario === "MASTER";
+  const isMasterUser = (user: Usuario) => isMasterAccount(user);
   const isDriverUser = (user: Usuario) => user.tipo_usuario === "MOTORISTA";
+  const isHelperUser = (user: Usuario) => user.tipo_usuario === "AJUDANTE";
   const getModulePermission = (user: Usuario, action: "visualizar" | "criar" | "editar" | "excluir" | "exportar") => {
     if (isMasterUser(user)) return true;
     const permission = user.permissions?.[CHECKLIST_MODULE_KEY] as (Record<string, boolean> | undefined);
@@ -310,8 +321,8 @@ async function startServer() {
     }
     return getModulePermission(user, "editar") === true;
   };
-  const canCreateChecklist = (user: Usuario) => isDriverUser(user) || isChecklistManager(user) || getModulePermission(user, "criar") === true;
-  const canViewChecklistModule = (user: Usuario) => isDriverUser(user) || isChecklistManager(user) || getModulePermission(user, "visualizar") !== false;
+  const canCreateChecklist = (user: Usuario) => isFieldUser(user) || isChecklistManager(user) || getModulePermission(user, "criar") === true;
+  const canViewChecklistModule = (user: Usuario) => isFieldUser(user) || isChecklistManager(user) || getModulePermission(user, "visualizar") !== false;
   const canAccessUnit = (user: Usuario, unitId: string) => {
     const authorized = getAuthorizedUnitsForUser(user);
     return authorized.includes("Todas") || authorized.includes(unitId);
@@ -320,6 +331,7 @@ async function startServer() {
     if (isDriverUser(user)) {
       return canDriverAccessChecklist(user.motoristaId, user.id, checklist);
     }
+    if (isHelperUser(user)) return canHelperAccessChecklist(user.ajudanteId, checklist);
     return canViewChecklistModule(user) && canAccessUnit(user, checklist.unidadeId);
   };
   const getClientIp = (req: express.Request) => {
@@ -334,6 +346,28 @@ async function startServer() {
     const bytes = Buffer.byteLength(match[2], "base64");
     if (bytes > 3 * 1024 * 1024) throw new Error(`${label} excede o limite de 3 MB.`);
     return { dataUrl: value, mimeType: match[1] };
+  };
+
+  const emitChecklistNotifications = async (
+    checklist: ChecklistVeiculo,
+    actor: Usuario,
+    types: ChecklistNotificationType[],
+    eventAt = new Date().toISOString(),
+  ) => {
+    // The checklist (and any vehicle block) must reach the configured durable
+    // store before its internal notification is created.
+    await FileDatabase.waitForPendingWrites();
+    const recipients = selectChecklistNotificationRecipients(
+      FileDatabase.get("usuarios") as Usuario[],
+      FileDatabase.get("usuario_unidade_permissao") as UsuarioUnidadePermissao[],
+      checklist.unidadeId,
+      actor.id,
+    );
+    if (recipients.length === 0) return;
+    const generated = buildChecklistNotifications({ checklist, recipients, types, actorName: actor.nome, eventAt });
+    const current = FileDatabase.get("processo_notificacoes") || [];
+    const merged = mergeChecklistNotifications(current, generated);
+    if (merged.length !== current.length) FileDatabase.set("processo_notificacoes", merged);
   };
 
   // Helper to get authorized units for user
@@ -494,14 +528,18 @@ async function startServer() {
       return res.status(400).json({ success: false, message: "Informe usuário e senha." });
     }
 
+    const normalizedLogin = normalizeLogin(email);
     const user = users.find((candidate) =>
-      candidate.email.toLowerCase() === email.trim().toLowerCase() ||
-      candidate.id.toLowerCase() === email.trim().toLowerCase()
+      normalizeLogin(candidate.email) === normalizedLogin ||
+      candidate.id.toLowerCase() === normalizedLogin
     );
 
     if (user) {
       if (user.status === "inativo") {
-        return res.status(403).json({ success: false, message: "Esta conta está suspensa ou inativa. Entre em contato com a Administração Master." });
+        return res.status(403).json({ success: false, message: "Esta conta está desativada. Entre em contato com um administrador autorizado." });
+      }
+      if (user.bloqueado) {
+        return res.status(403).json({ success: false, message: "Esta conta está bloqueada. Entre em contato com um administrador autorizado." });
       }
 
       if (!verifyPassword(password, user)) {
@@ -516,7 +554,7 @@ async function startServer() {
       }
 
       issueSession(res, user);
-      if (user.deveAlterarSenha) {
+      if (requiresPasswordChange(user)) {
         logApiAction(user.email, "AUTH_PWD_PENDING_CHANGE", "Logado com sucesso, necessita alterar a senha padrão");
         logAudit(req, user.nome, "LOGIN", `Login padrão efetuado (necessita redefinir senha)`, user.unidadeId);
         return res.json({ success: true, user: getUserWithPerms(user), forcePasswordReset: true });
@@ -532,24 +570,35 @@ async function startServer() {
 
   // Change Password endpoint for first log-in
   app.post("/api/auth/change-password", (req, res) => {
-    const { email, newPassword } = req.body;
+    const { email, currentPassword, newPassword, confirmPassword } = req.body;
     const authenticatedUser = getRequestUser(req);
-    if (typeof newPassword !== "string" || newPassword.length < 8) {
-      return res.status(400).json({ success: false, message: "A nova senha deve possuir pelo menos 8 caracteres." });
+    const passwordErrors = validatePasswordPolicy(newPassword);
+    if (passwordErrors.length > 0) return res.status(400).json({ success: false, message: passwordErrors.join(" ") });
+    if (newPassword !== confirmPassword) return res.status(400).json({ success: false, message: "A confirmação da nova senha não confere." });
+    if (!verifyPassword(String(currentPassword || ""), authenticatedUser)) {
+      return res.status(401).json({ success: false, message: "A senha atual ou provisória está incorreta." });
     }
-    if (authenticatedUser.email.toLowerCase() !== String(email || "").toLowerCase()) {
+    if (verifyPassword(newPassword, authenticatedUser)) {
+      return res.status(400).json({ success: false, message: "A nova senha deve ser diferente da senha atual." });
+    }
+    if (normalizeLogin(authenticatedUser.email) !== normalizeLogin(String(email || ""))) {
       return res.status(403).json({ success: false, message: "Não é permitido alterar a senha de outro usuário." });
     }
     const users = FileDatabase.get("usuarios");
-    const userIdx = users.findIndex(u => u.email.toLowerCase() === email?.toLowerCase() || u.id.toLowerCase() === email?.toLowerCase());
+    const normalizedLogin = normalizeLogin(String(email || ""));
+    const userIdx = users.findIndex(u => normalizeLogin(u.email) === normalizedLogin || u.id.toLowerCase() === normalizedLogin);
 
     if (userIdx !== -1) {
       const user = users[userIdx];
       user.senhaHash = hashPassword(newPassword);
       delete user.senha;
       user.deveAlterarSenha = false;
+      user.mustChangePassword = false;
       users[userIdx] = user;
       FileDatabase.set("usuarios", users);
+
+      sessions.revokeUser(user.id);
+      issueSession(res, user);
 
       logApiAction(user.email, "PASSWORD_CHANGED", "A senha obrigatória do primeiro acesso foi alterada com sucesso");
       logAudit(req, user.nome, "CHANGE_PASSWORD", "Alterou a senha de primeiro acesso", user.unidadeId);
@@ -1361,6 +1410,7 @@ async function startServer() {
       status: "ativo",
       senhaHash: hashPassword(tempPassword),
       deveAlterarSenha: true,
+      mustChangePassword: true,
       supervisor: supervisorName,
       unidade_id: unitId,
       tipo_usuario: "SUPERVISOR",
@@ -1453,6 +1503,7 @@ async function startServer() {
             status: "ativo",
             senhaHash: hashPassword(tempPassword),
             deveAlterarSenha: true,
+            mustChangePassword: true,
             supervisor: finalSupervisor,
             unidade_id: id,
             tipo_usuario: "SUPERVISOR",
@@ -1492,11 +1543,41 @@ async function startServer() {
   // ----------------------------------------------------
   // USUARIOS & PERMISSOES API
   // ----------------------------------------------------
+  const elevatedUserTypes = new Set(["MASTER", "SUPERVISOR", "GESTOR_OPERACIONAL", "ADMINISTRATIVO"]);
+  const canManageTargetUser = (actor: Usuario, target: Usuario): boolean => {
+    if (!canManageUsers(actor)) return false;
+    if (isMasterUser(actor)) return true;
+    if (isMasterUser(target) || target.perfil === "admin_unidade" || elevatedUserTypes.has(target.tipo_usuario || "")) return false;
+    const targetUnit = target.unidadeId || target.unidade_id;
+    return Boolean(targetUnit) && canAccessUnit(actor, targetUnit!);
+  };
+
+  const validateOfficialUserLink = (input: {
+    type?: Usuario["tipo_usuario"];
+    unitId?: string;
+    motoristaId?: string;
+    ajudanteId?: string;
+    users: Usuario[];
+    targetIndex?: number;
+  }): string | null => {
+    if (input.type !== "MOTORISTA" && input.type !== "AJUDANTE") return null;
+    const linkId = input.type === "MOTORISTA" ? input.motoristaId : input.ajudanteId;
+    const person = (FileDatabase.get("motoristas") as Motorista[]).find((candidate) => candidate.id === linkId);
+    const validType = input.type === "MOTORISTA"
+      ? person && (!person.tipo || person.tipo === "Motorista")
+      : person && (person.tipo === "Ajudante Fixo" || person.tipo === "Ajudante Geral");
+    if (!validType) return `O usuário ${input.type} deve estar vinculado a um cadastro oficial válido.`;
+    if (person!.unidadeId !== input.unitId) return "O profissional oficial e o usuário devem pertencer à mesma unidade.";
+    const duplicate = input.users.some((candidate, index) =>
+      index !== input.targetIndex &&
+      (input.type === "MOTORISTA" ? candidate.motoristaId === linkId : candidate.ajudanteId === linkId),
+    );
+    return duplicate ? "Este profissional já está vinculado a outro usuário." : null;
+  };
+
   app.get("/api/usuarios", (req, res) => {
     const user = getRequestUser(req);
-    if (!user) {
-      return res.status(401).json({ error: "Não autorizado" });
-    }
+    if (!canManageUsers(user)) return res.status(403).json({ error: "Usuário sem permissão para gerenciar credenciais." });
     const isMaster = user.perfil === "admin_master" || user.tipo_usuario === "MASTER";
     const usuarios = FileDatabase.get("usuarios") as Usuario[];
     const permissoes = FileDatabase.get("usuario_unidade_permissao") as UsuarioUnidadePermissao[];
@@ -1549,31 +1630,32 @@ async function startServer() {
 
   app.post("/api/usuarios", (req, res) => {
     const user = getRequestUser(req);
-    const isMaster = user && (user.perfil === "admin_master" || user.tipo_usuario === "MASTER");
-    if (!isMaster) {
-      return res.status(403).json({ error: "Somente administradores MASTER podem criar usuários." });
-    }
-    const { email, nome, tipo_usuario, unidade_id, status, senha, unidadesPermitidas, cpf, telefone, cargo, permissions, motoristaId } = req.body;
+    if (!canManageUsers(user)) return res.status(403).json({ error: "Usuário sem permissão para criar credenciais." });
+    const {
+      email, nome, tipo_usuario, unidade_id, status, senha, confirmarSenha, unidadesPermitidas,
+      cpf, telefone, cargo, permissions, motoristaId, ajudanteId, bloqueado, mustChangePassword,
+    } = req.body;
     if (!email || !nome || !senha || !unidade_id || !tipo_usuario) {
       return res.status(400).json({ error: "Usuário, nome, senha, tipo de usuário e unidade de referência são obrigatórios." });
     }
+    const loginErrors = validateLogin(email);
+    if (loginErrors.length > 0) return res.status(400).json({ error: loginErrors.join(" ") });
+    const passwordErrors = validatePasswordPolicy(senha);
+    if (passwordErrors.length > 0) return res.status(400).json({ error: passwordErrors.join(" ") });
+    if (senha !== confirmarSenha) return res.status(400).json({ error: "A confirmação da nova senha não confere." });
+    const normalizedLogin = normalizeLogin(email);
+    if (!isMasterUser(user)) {
+      if (unidade_id === "Todas" || !canAccessUnit(user, unidade_id)) return res.status(403).json({ error: "Acesso negado à unidade informada." });
+      if (elevatedUserTypes.has(tipo_usuario)) return res.status(403).json({ error: "Somente MASTER pode criar perfis administrativos superiores." });
+      if (permissions && Object.keys(permissions).length > 0) return res.status(403).json({ error: "Somente MASTER pode conceder permissões." });
+    }
     
     const currentUsers = FileDatabase.get("usuarios") as Usuario[];
-    if (currentUsers.some(u => u.email.toLowerCase() === email.toLowerCase() || u.id === `usr-${email.toLowerCase()}`)) {
-      return res.status(400).json({ error: "E-mail ou Usuário já cadastrado." });
+    if (currentUsers.some((candidate) => normalizeLogin(candidate.email) === normalizedLogin || candidate.id.toLowerCase() === normalizedLogin)) {
+      return res.status(409).json({ error: "Login já cadastrado." });
     }
-    if (tipo_usuario === "MOTORISTA") {
-      const officialDriver = (FileDatabase.get("motoristas") as Motorista[]).find((candidate) => candidate.id === motoristaId);
-      if (!officialDriver || (officialDriver.tipo && officialDriver.tipo !== "Motorista")) {
-        return res.status(400).json({ error: "O usuário MOTORISTA deve estar vinculado a um motorista oficial válido." });
-      }
-      if (officialDriver.unidadeId !== unidade_id) {
-        return res.status(400).json({ error: "O motorista oficial e o usuário devem pertencer à mesma unidade." });
-      }
-      if (currentUsers.some((candidate) => candidate.motoristaId === motoristaId)) {
-        return res.status(409).json({ error: "Este motorista já está vinculado a outro usuário." });
-      }
-    }
+    const linkError = validateOfficialUserLink({ type: tipo_usuario, unitId: unidade_id, motoristaId, ajudanteId, users: currentUsers });
+    if (linkError) return res.status(409).json({ error: linkError });
 
     // Map new tipo_usuario to classic perfil to maintain backward compatibility
     let calculatedPerfil: "admin_master" | "admin_unidade" | "operador" = "operador";
@@ -1584,14 +1666,16 @@ async function startServer() {
     }
 
     const newUser: Usuario = {
-      id: `usr-${email.split('@')[0].toLowerCase()}`,
-      email: email.trim(),
+      id: `usr-${normalizedLogin.replace(/[^a-z0-9]+/g, "-")}-${crypto.randomUUID().slice(0, 8)}`,
+      email: normalizedLogin,
       nome: nome.trim(),
       perfil: calculatedPerfil,
       unidadeId: unidade_id, // Unidade principal de referência
       status: status || "ativo",
       senhaHash: hashPassword(senha),
-      deveAlterarSenha: false,
+      deveAlterarSenha: Boolean(mustChangePassword),
+      mustChangePassword: Boolean(mustChangePassword),
+      bloqueado: Boolean(bloqueado),
       
       // New compliance fields
       unidade_id,
@@ -1600,12 +1684,13 @@ async function startServer() {
       telefone: telefone || "",
       cargo: cargo || "",
       motoristaId: tipo_usuario === "MOTORISTA" ? motoristaId : undefined,
+      ajudanteId: tipo_usuario === "AJUDANTE" ? ajudanteId : undefined,
       permissions: permissions || {},
     };
 
     FileDatabase.add("usuarios", newUser, user.email);
 
-    if (Array.isArray(unidadesPermitidas)) {
+    if (Array.isArray(unidadesPermitidas) && isMasterUser(user)) {
       const permissoes = FileDatabase.get("usuario_unidade_permissao") as UsuarioUnidadePermissao[];
       unidadesPermitidas.forEach(uId => {
         permissoes.push({
@@ -1619,38 +1704,68 @@ async function startServer() {
       FileDatabase.set("usuario_unidade_permissao", permissoes);
     }
 
-    logAudit(req, user.nome, "CADASTRO_USUARIO", `Cadastrou usuário: ${newUser.nome} (${newUser.email}) - Tipo: ${tipo_usuario}`, user.unidadeId);
+    logAudit(req, user.nome, "CADASTRO_USUARIO", `Usuário administrativo ${user.nome} criou o usuário ${newUser.nome} (${newUser.email}) - Tipo: ${tipo_usuario}.`, unidade_id);
     res.json({ success: true, user: getUserWithPerms(newUser) });
   });
 
   app.put("/api/usuarios/:id", (req, res) => {
     const user = getRequestUser(req);
-    const isMaster = user && (user.perfil === "admin_master" || user.tipo_usuario === "MASTER");
-    if (!isMaster) {
-      return res.status(403).json({ error: "Somente administradores MASTER podem editar usuários." });
-    }
     const { id } = req.params;
-    const { nome, tipo_usuario, unidade_id, status, senha, unidadesPermitidas, cpf, telefone, cargo, permissions, motoristaId } = req.body;
+    const {
+      nome, email, tipo_usuario, unidade_id, status, senha, newPassword, confirmarSenha,
+      confirmPassword, unidadesPermitidas, cpf, telefone, cargo, permissions, motoristaId,
+      ajudanteId, bloqueado, mustChangePassword, deveAlterarSenha,
+    } = req.body;
     
     const currentUsers = FileDatabase.get("usuarios") as Usuario[];
     const targetIdx = currentUsers.findIndex(u => u.id === id || (u.id && u.id.toLowerCase() === id.toLowerCase()));
     if (targetIdx === -1) {
       return res.status(404).json({ error: "Usuário não localizado." });
     }
-    const resultingType = tipo_usuario || currentUsers[targetIdx].tipo_usuario;
-    const resultingUnit = unidade_id || currentUsers[targetIdx].unidadeId || currentUsers[targetIdx].unidade_id;
-    const resultingDriverId = motoristaId !== undefined ? motoristaId : currentUsers[targetIdx].motoristaId;
-    if (resultingType === "MOTORISTA") {
-      const officialDriver = (FileDatabase.get("motoristas") as Motorista[]).find((candidate) => candidate.id === resultingDriverId);
-      if (!officialDriver || (officialDriver.tipo && officialDriver.tipo !== "Motorista")) {
-        return res.status(400).json({ error: "O usuário MOTORISTA deve estar vinculado a um motorista oficial válido." });
+    const target = currentUsers[targetIdx];
+    if (!canManageTargetUser(user, target)) return res.status(403).json({ error: "Você não possui permissão para gerenciar este usuário ou unidade." });
+    const isMaster = isMasterUser(user);
+    if (!isMaster) {
+      if (tipo_usuario && tipo_usuario !== target.tipo_usuario) return res.status(403).json({ error: "Somente MASTER pode alterar o tipo de usuário." });
+      if (unidade_id && unidade_id !== (target.unidadeId || target.unidade_id)) return res.status(403).json({ error: "Somente MASTER pode alterar a unidade do usuário." });
+      if (permissions !== undefined) return res.status(403).json({ error: "Somente MASTER pode conceder permissões." });
+    }
+    const resultingType = (tipo_usuario || target.tipo_usuario) as Usuario["tipo_usuario"];
+    const resultingUnit = unidade_id || target.unidadeId || target.unidade_id;
+    const resultingDriverId = motoristaId !== undefined ? motoristaId : target.motoristaId;
+    const resultingHelperId = ajudanteId !== undefined ? ajudanteId : target.ajudanteId;
+    const shouldValidateLink = tipo_usuario !== undefined || unidade_id !== undefined || motoristaId !== undefined || ajudanteId !== undefined;
+    if (shouldValidateLink) {
+      const linkError = validateOfficialUserLink({
+        type: resultingType,
+        unitId: resultingUnit,
+        motoristaId: resultingDriverId,
+        ajudanteId: resultingHelperId,
+        users: currentUsers,
+        targetIndex: targetIdx,
+      });
+      if (linkError) return res.status(409).json({ error: linkError });
+    }
+
+    const normalizedLogin = email !== undefined ? normalizeLogin(String(email)) : target.email;
+    if (email !== undefined) {
+      const loginErrors = validateLogin(email);
+      if (loginErrors.length > 0) return res.status(400).json({ error: loginErrors.join(" ") });
+      if (currentUsers.some((candidate, index) => index !== targetIdx && (normalizeLogin(candidate.email) === normalizedLogin || candidate.id.toLowerCase() === normalizedLogin))) {
+        return res.status(409).json({ error: "Login já cadastrado." });
       }
-      if (officialDriver.unidadeId !== resultingUnit) {
-        return res.status(400).json({ error: "O motorista oficial e o usuário devem pertencer à mesma unidade." });
-      }
-      if (currentUsers.some((candidate, index) => index !== targetIdx && candidate.motoristaId === resultingDriverId)) {
-        return res.status(409).json({ error: "Este motorista já está vinculado a outro usuário." });
-      }
+    }
+
+    const requestedPassword = newPassword ?? senha;
+    const requestedConfirmation = confirmPassword ?? confirmarSenha;
+    if (requestedPassword !== undefined) {
+      if (target.id === user.id) return res.status(400).json({ error: "Use a alteração de senha da própria conta, com confirmação da senha atual." });
+      const passwordErrors = validatePasswordPolicy(requestedPassword);
+      if (passwordErrors.length > 0) return res.status(400).json({ error: passwordErrors.join(" ") });
+      if (requestedPassword !== requestedConfirmation) return res.status(400).json({ error: "A confirmação da nova senha não confere." });
+    }
+    if ((bloqueado === true || status === "inativo") && target.id === user.id) {
+      return res.status(400).json({ error: "Você não pode bloquear ou desativar a própria conta." });
     }
 
     // Map new tipo_usuario to classic perfil to maintain backward compatibility
@@ -1667,6 +1782,7 @@ async function startServer() {
 
     const updatedFields: any = {};
     if (nome) updatedFields.nome = nome.trim();
+    if (email !== undefined) updatedFields.email = normalizedLogin;
     if (tipo_usuario) {
       updatedFields.tipo_usuario = tipo_usuario;
       if (calculatedPerfil) updatedFields.perfil = calculatedPerfil;
@@ -1676,8 +1792,14 @@ async function startServer() {
       updatedFields.unidadeId = unidade_id;
     }
     if (status) updatedFields.status = status;
-    if (senha) {
-      updatedFields.senhaHash = hashPassword(senha);
+    if (bloqueado !== undefined) updatedFields.bloqueado = Boolean(bloqueado);
+    const requestedMustChange = mustChangePassword ?? deveAlterarSenha;
+    if (requestedMustChange !== undefined) {
+      updatedFields.mustChangePassword = Boolean(requestedMustChange);
+      updatedFields.deveAlterarSenha = Boolean(requestedMustChange);
+    }
+    if (requestedPassword !== undefined) {
+      updatedFields.senhaHash = hashPassword(requestedPassword);
       updatedFields.senha = undefined;
     }
     if (cpf !== undefined) updatedFields.cpf = cpf;
@@ -1686,18 +1808,21 @@ async function startServer() {
     if (motoristaId !== undefined || tipo_usuario !== undefined) {
       updatedFields.motoristaId = resultingType === "MOTORISTA" ? resultingDriverId : undefined;
     }
-    if (permissions !== undefined) updatedFields.permissions = permissions;
+    if (ajudanteId !== undefined || tipo_usuario !== undefined) {
+      updatedFields.ajudanteId = resultingType === "AJUDANTE" ? resultingHelperId : undefined;
+    }
+    if (permissions !== undefined && isMaster) updatedFields.permissions = permissions;
 
-    FileDatabase.update("usuarios", id, updatedFields, user.email);
+    const updated = FileDatabase.update("usuarios", target.id, updatedFields, user.email) as Usuario;
 
-    if (Array.isArray(unidadesPermitidas)) {
+    if (Array.isArray(unidadesPermitidas) && isMaster) {
       let permissoes = FileDatabase.get("usuario_unidade_permissao") as UsuarioUnidadePermissao[];
-      permissoes = permissoes.filter(p => p.usuario_id !== id);
+      permissoes = permissoes.filter(p => p.usuario_id !== target.id);
       
       unidadesPermitidas.forEach(uId => {
         permissoes.push({
           id: `uup-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-          usuario_id: id,
+          usuario_id: target.id,
           unidade_id: uId,
           ativo: true,
           created_at: new Date().toISOString()
@@ -1706,12 +1831,19 @@ async function startServer() {
       FileDatabase.set("usuario_unidade_permissao", permissoes);
     }
 
-    logAudit(req, user.nome, "ALTERACAO_DADOS", `Alterou dados cadastrais do usuário ID ${id}: ${nome || ""}`, user.unidadeId);
-    if (permissions !== undefined || unidadesPermitidas !== undefined) {
-      logAudit(req, user.nome, "ALTERACAO_PERMISSOES", `Editou privilégios e permissões de acesso do usuário ID ${id}`, user.unidadeId);
+    const auditUnit = resultingUnit || user.unidadeId;
+    if (normalizedLogin !== target.email) logAudit(req, user.nome, "ALTERACAO_LOGIN", `Usuário administrativo ${user.nome} alterou o login do usuário ${target.nome} de ${target.email} para ${normalizedLogin}.`, auditUnit);
+    if (requestedPassword !== undefined) logAudit(req, user.nome, "REDEFINICAO_SENHA", `Usuário administrativo ${user.nome} redefiniu a senha do usuário ${target.nome}.`, auditUnit);
+    if (bloqueado !== undefined && Boolean(bloqueado) !== Boolean(target.bloqueado)) logAudit(req, user.nome, bloqueado ? "BLOQUEIO_USUARIO" : "DESBLOQUEIO_USUARIO", `Usuário administrativo ${user.nome} ${bloqueado ? "bloqueou" : "desbloqueou"} o usuário ${target.nome}.`, auditUnit);
+    if (status && status !== target.status) logAudit(req, user.nome, status === "ativo" ? "REATIVACAO_USUARIO" : "DESATIVACAO_USUARIO", `Usuário administrativo ${user.nome} ${status === "ativo" ? "reativou" : "desativou"} o usuário ${target.nome}.`, auditUnit);
+    if (resultingDriverId !== target.motoristaId || resultingHelperId !== target.ajudanteId) logAudit(req, user.nome, "ALTERACAO_VINCULO_USUARIO", `Usuário administrativo ${user.nome} alterou o vínculo oficial do usuário ${target.nome}.`, auditUnit);
+    if (requestedMustChange !== undefined && Boolean(requestedMustChange) !== Boolean(target.mustChangePassword || target.deveAlterarSenha)) logAudit(req, user.nome, "EXIGENCIA_TROCA_SENHA", `Usuário administrativo ${user.nome} ${requestedMustChange ? "exigiu" : "removeu a exigência de"} troca de senha para ${target.nome}.`, auditUnit);
+    if (permissions !== undefined || (Array.isArray(unidadesPermitidas) && isMaster)) {
+      logAudit(req, user.nome, "ALTERACAO_PERMISSOES", `Editou privilégios e permissões de acesso do usuário ID ${target.id}`, auditUnit);
     }
+    if (requestedPassword !== undefined || bloqueado === true || status === "inativo") sessions.revokeUser(target.id);
 
-    res.json({ success: true });
+    res.json({ success: true, user: getUserWithPerms(updated) });
   });
 
   app.delete("/api/usuarios/:id", (req, res) => {
@@ -4016,7 +4148,7 @@ async function startServer() {
   // ----------------------------------------------------
   app.get("/api/checklists/semana", (req, res) => {
     const user = getRequestUser(req);
-    if (!canViewChecklistModule(user) || isDriverUser(user)) {
+    if (!canViewChecklistModule(user) || isFieldUser(user)) {
       return res.status(403).json({ error: "Acesso negado ao painel administrativo de checklists." });
     }
     const requestedUnit = typeof req.query.unidadeId === "string" ? req.query.unidadeId : getRequestUnitContext(req, user);
@@ -4034,7 +4166,7 @@ async function startServer() {
 
   app.get("/api/checklists/templates", (req, res) => {
     const user = getRequestUser(req);
-    if (!canViewChecklistModule(user) || isDriverUser(user)) return res.status(403).json({ error: "Acesso negado." });
+    if (!canViewChecklistModule(user) || isFieldUser(user)) return res.status(403).json({ error: "Acesso negado." });
     const unitId = typeof req.query.unidadeId === "string" ? req.query.unidadeId : getRequestUnitContext(req, user);
     if (unitId !== "Todas" && !canAccessUnit(user, unitId)) return res.status(403).json({ error: "Acesso negado à unidade." });
     if (unitId === "Todas") return res.json(FileDatabase.get("checklist_item_templates"));
@@ -4046,7 +4178,7 @@ async function startServer() {
 
   app.post("/api/checklists/templates", (req, res) => {
     const user = getRequestUser(req);
-    if (!isChecklistManager(user) || isDriverUser(user)) return res.status(403).json({ error: "Apenas responsáveis autorizados podem configurar itens." });
+    if (!isChecklistManager(user) || isFieldUser(user)) return res.status(403).json({ error: "Apenas responsáveis autorizados podem configurar itens." });
     const body = req.body as Partial<ChecklistItemTemplate>;
     const unitId = body.unidadeId || getRequestUnitContext(req, user);
     if (unitId === "Todas" && !isMasterUser(user)) return res.status(403).json({ error: "Somente MASTER pode criar um item global." });
@@ -4086,7 +4218,7 @@ async function startServer() {
 
   app.put("/api/checklists/templates/:id", (req, res) => {
     const user = getRequestUser(req);
-    if (!isChecklistManager(user) || isDriverUser(user)) return res.status(403).json({ error: "Apenas responsáveis autorizados podem configurar itens." });
+    if (!isChecklistManager(user) || isFieldUser(user)) return res.status(403).json({ error: "Apenas responsáveis autorizados podem configurar itens." });
     const current = FileDatabase.get("checklist_item_templates").find((item) => item.id === req.params.id);
     if (!current) return res.status(404).json({ error: "Item de template não encontrado." });
     if (current.unidadeId && !canAccessUnit(user, current.unidadeId)) return res.status(403).json({ error: "Acesso negado à unidade." });
@@ -4114,7 +4246,7 @@ async function startServer() {
 
   app.get("/api/checklists/configuracao", (req, res) => {
     const user = getRequestUser(req);
-    if (!canViewChecklistModule(user) || isDriverUser(user)) return res.status(403).json({ error: "Acesso negado." });
+    if (!canViewChecklistModule(user) || isFieldUser(user)) return res.status(403).json({ error: "Acesso negado." });
     const unitId = typeof req.query.unidadeId === "string" ? req.query.unidadeId : getRequestUnitContext(req, user);
     if (unitId !== "Todas" && !canAccessUnit(user, unitId)) return res.status(403).json({ error: "Acesso negado à unidade." });
     res.json(getChecklistConfiguration(unitId));
@@ -4122,7 +4254,7 @@ async function startServer() {
 
   app.put("/api/checklists/configuracao", (req, res) => {
     const user = getRequestUser(req);
-    if (!isChecklistManager(user) || isDriverUser(user)) return res.status(403).json({ error: "Apenas responsáveis autorizados podem alterar o prazo." });
+    if (!isChecklistManager(user) || isFieldUser(user)) return res.status(403).json({ error: "Apenas responsáveis autorizados podem alterar o prazo." });
     const body = req.body as {
       unidadeId?: string;
       diaInicialSemana?: number;
@@ -4164,43 +4296,56 @@ async function startServer() {
 
   app.get("/api/motorista/me/checklist-atual", (req, res) => {
     const user = getRequestUser(req);
-    if (!isDriverUser(user)) return res.status(403).json({ error: "Endpoint exclusivo para motorista." });
-    if (!user.motoristaId) {
+    if (!isFieldUser(user)) return res.status(403).json({ error: "Endpoint exclusivo para motorista ou ajudante." });
+    const officialPersonId = isDriverUser(user) ? user.motoristaId : user.ajudanteId;
+    if (!officialPersonId) {
       return res.status(403).json({
-        error: "Seu usuário ainda não está vinculado a um cadastro de motorista. Procure um administrador.",
-        code: "DRIVER_NOT_LINKED",
+        error: "Seu usuário ainda não está vinculado a um cadastro profissional. Procure um administrador.",
+        code: "FIELD_USER_NOT_LINKED",
       });
     }
-    const driver = FileDatabase.get("motoristas").find((candidate) => candidate.id === user.motoristaId);
-    if (!driver || (driver.tipo && driver.tipo !== "Motorista") || driver.unidadeId !== user.unidadeId) {
+    const person = FileDatabase.get("motoristas").find((candidate) => candidate.id === officialPersonId);
+    const validPersonType = isDriverUser(user)
+      ? person && (!person.tipo || person.tipo === "Motorista")
+      : person && (person.tipo === "Ajudante Fixo" || person.tipo === "Ajudante Geral");
+    if (!validPersonType || person!.unidadeId !== user.unidadeId) {
       return res.status(403).json({
-        error: "Seu usuário ainda não está vinculado a um cadastro de motorista válido. Procure um administrador.",
-        code: "DRIVER_NOT_LINKED",
+        error: "Seu usuário ainda não está vinculado a um cadastro profissional válido. Procure um administrador.",
+        code: "FIELD_USER_NOT_LINKED",
       });
     }
     const today = formatLocalIsoDate(new Date());
-    const vehicles = FileDatabase.get("veiculos").filter((vehicle) => vehicle.unidadeId === driver.unidadeId);
-    const assignments = vehicles
-      .map((vehicle) => ({ vehicle, resolution: resolveChecklistDriver(vehicle, today) }))
-      .filter((entry) => entry.resolution.driver?.id === driver.id)
-      .sort((left, right) => Number(Boolean(right.resolution.route)) - Number(Boolean(left.resolution.route)));
+    const vehicles = FileDatabase.get("veiculos").filter((vehicle) => vehicle.unidadeId === person!.unidadeId);
+    const assignments = isDriverUser(user)
+      ? vehicles
+          .map((vehicle) => ({ vehicle, resolution: resolveChecklistDriver(vehicle, today) }))
+          .filter((entry) => entry.resolution.driver?.id === person!.id)
+          .sort((left, right) => Number(Boolean(right.resolution.route)) - Number(Boolean(left.resolution.route)))
+      : (FileDatabase.get("rotas") as Rota[])
+          .filter((route) => route.unidadeId === person!.unidadeId && route.ajudantesIds?.includes(person!.id) && isRouteOperationallyActive(route, today))
+          .map((route) => {
+            const vehicle = vehicles.find((candidate) => candidate.id === route.veiculoId);
+            return vehicle ? { vehicle, resolution: { ...resolveChecklistDriver(vehicle, today), route } } : null;
+          })
+          .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry));
     const assignment = assignments[0];
     if (!assignment) {
-      return res.json({ driver, assignment: null, message: "Nenhum veículo ou rota está atribuído a você hoje." });
+      return res.json({ driver: person, professionalRole: user.tipo_usuario, assignment: null, message: "Nenhum veículo ou rota está atribuído a você hoje." });
     }
-    const config = getChecklistConfiguration(driver.unidadeId);
+    const config = getChecklistConfiguration(person!.unidadeId);
     const week = getChecklistWeek(today, config.diaInicialSemana);
     const checklist = FileDatabase.get("checklists_veiculos")
       .filter((item) =>
         item.veiculoId === assignment.vehicle.id &&
-        item.motoristaId === driver.id &&
+        (isDriverUser(user) ? item.motoristaId === person!.id : item.ajudanteIdsSnapshot?.includes(person!.id)) &&
         item.identificadorSemana === week.identifier &&
         !item.checklistOriginalId &&
         item.status !== "CANCELADO",
       )
       .sort((left, right) => right.criadoEm.localeCompare(left.criadoEm))[0];
     res.json({
-      driver,
+      driver: person,
+      professionalRole: user.tipo_usuario,
       assignment: {
         veiculo: assignment.vehicle,
         rota: assignment.resolution.route,
@@ -4214,9 +4359,13 @@ async function startServer() {
 
   app.get("/api/motorista/me/checklists", (req, res) => {
     const user = getRequestUser(req);
-    if (!isDriverUser(user) || !user.motoristaId) return res.status(403).json({ error: "Usuário motorista sem vínculo oficial." });
+    if (!isFieldUser(user)) return res.status(403).json({ error: "Usuário sem perfil de campo." });
+    const officialPersonId = isDriverUser(user) ? user.motoristaId : user.ajudanteId;
+    if (!officialPersonId) return res.status(403).json({ error: "Usuário sem vínculo oficial." });
     const list = FileDatabase.get("checklists_veiculos")
-      .filter((item) => item.motoristaId === user.motoristaId && (!item.usuarioMotoristaId || item.usuarioMotoristaId === user.id))
+      .filter((item) => isDriverUser(user)
+        ? item.motoristaId === officialPersonId && (!item.usuarioMotoristaId || item.usuarioMotoristaId === user.id)
+        : item.ajudanteIdsSnapshot?.includes(officialPersonId))
       .sort((left, right) => right.criadoEm.localeCompare(left.criadoEm));
     res.json(list);
   });
@@ -4225,8 +4374,10 @@ async function startServer() {
     const user = getRequestUser(req);
     if (!canViewChecklistModule(user)) return res.status(403).json({ error: "Acesso negado." });
     let list = FileDatabase.get("checklists_veiculos") || [];
-    if (isDriverUser(user)) {
-      list = list.filter((item) => Boolean(user.motoristaId) && item.motoristaId === user.motoristaId && (!item.usuarioMotoristaId || item.usuarioMotoristaId === user.id));
+    if (isFieldUser(user)) {
+      list = list.filter((item) => isDriverUser(user)
+        ? Boolean(user.motoristaId) && item.motoristaId === user.motoristaId && (!item.usuarioMotoristaId || item.usuarioMotoristaId === user.id)
+        : Boolean(user.ajudanteId) && item.ajudanteIdsSnapshot?.includes(user.ajudanteId!) === true);
     } else {
       const unitId = typeof req.query.unidadeId === "string" ? req.query.unidadeId : getRequestUnitContext(req, user);
       if (unitId !== "Todas") list = list.filter((item) => item.unidadeId === unitId && canAccessUnit(user, item.unidadeId));
@@ -4259,7 +4410,7 @@ async function startServer() {
     if (!vehicle) return res.status(404).json({ error: "Veículo oficial não encontrado." });
     if (!canAccessUnit(user, vehicle.unidadeId)) return res.status(403).json({ error: "Acesso negado à unidade do veículo." });
     const today = formatLocalIsoDate(new Date());
-    const operationalDate = isDriverUser(user) ? today : (body.data || today);
+    const operationalDate = isFieldUser(user) ? today : (body.data || today);
     let week;
     try {
       week = getChecklistWeek(operationalDate, getChecklistConfiguration(vehicle.unidadeId).diaInicialSemana);
@@ -4267,9 +4418,14 @@ async function startServer() {
       return res.status(400).json({ error: error instanceof Error ? error.message : "Data inválida." });
     }
     const resolution = resolveChecklistDriver(vehicle, operationalDate);
-    if (isDriverUser(user)) {
-      if (!user.motoristaId) return res.status(403).json({ error: "Seu usuário ainda não está vinculado a um cadastro de motorista. Procure um administrador." });
-      if (resolution.driver?.id !== user.motoristaId) return res.status(403).json({ error: "Este veículo não está atribuído ao seu cadastro operacional hoje." });
+    if (isFieldUser(user)) {
+      if (isDriverUser(user)) {
+        if (!user.motoristaId) return res.status(403).json({ error: "Seu usuário ainda não está vinculado a um cadastro de motorista. Procure um administrador." });
+        if (resolution.driver?.id !== user.motoristaId) return res.status(403).json({ error: "Este veículo não está atribuído ao seu cadastro operacional hoje." });
+      } else {
+        if (!user.ajudanteId) return res.status(403).json({ error: "Seu usuário ainda não está vinculado a um cadastro de ajudante. Procure um administrador." });
+        if (!resolution.route?.ajudantesIds?.includes(user.ajudanteId)) return res.status(403).json({ error: "Este veículo não está atribuído ao seu cadastro operacional hoje." });
+      }
     }
     const duplicate = FileDatabase.get("checklists_veiculos").find((item) =>
       item.veiculoId === vehicle.id && item.unidadeId === vehicle.unidadeId && item.identificadorSemana === week.identifier &&
@@ -4303,13 +4459,13 @@ async function startServer() {
     removerFoto?: boolean;
   }
 
-  app.post("/api/checklists/:id/respostas", (req, res) => {
+  app.post("/api/checklists/:id/respostas", async (req, res) => {
     const user = getRequestUser(req);
     const detail = getChecklistDetail(req.params.id);
     if (!detail) return res.status(404).json({ error: "Checklist não encontrado." });
     if (!canAccessChecklist(user, detail.checklist)) return res.status(403).json({ error: "Acesso negado a este checklist." });
     if (isChecklistFinal(detail.checklist.status)) return res.status(409).json({ error: "Checklist finalizado não permite edição livre. Utilize reinspeção." });
-    const body = req.body as { respostas?: ChecklistResponseInput[]; km?: number };
+    const body = req.body as { respostas?: ChecklistResponseInput[]; km?: number; notifyAwaitingSignature?: boolean };
     if (!Array.isArray(body.respostas)) return res.status(400).json({ error: "Lista de respostas inválida." });
     const allowedAnswers: ChecklistAnswerValue[] = ["CONFORME", "NAO_CONFORME", "NAO_APLICA"];
     const storedResponses = FileDatabase.get("checklist_respostas") || [];
@@ -4353,20 +4509,35 @@ async function startServer() {
       updatedIds.add(current.id);
     }
     FileDatabase.set("checklist_respostas", storedResponses);
-    FileDatabase.update("checklists_veiculos", detail.checklist.id, {
+    const updatedChecklist = FileDatabase.update("checklists_veiculos", detail.checklist.id, {
       status: "EM_ANDAMENTO",
       km: typeof body.km === "number" && body.km >= 0 ? body.km : detail.checklist.km,
       atualizadoEm: new Date().toISOString(),
-    }, user.email);
-    res.json({ success: true, updated: updatedIds.size, detail: getChecklistDetail(detail.checklist.id) });
+    }, user.email) as ChecklistVeiculo;
+    const refreshed = getChecklistDetail(detail.checklist.id)!;
+    if (body.notifyAwaitingSignature !== false && validateChecklistResponses(refreshed.respostas).length === 0) {
+      try {
+        await emitChecklistNotifications(updatedChecklist, user, ["CHECKLIST_AGUARDANDO_ASSINATURA"]);
+      } catch (error) {
+        return res.status(500).json({ error: "As respostas foram salvas, mas não foi possível persistir a notificação de assinatura.", details: error instanceof Error ? error.message : String(error) });
+      }
+    }
+    res.json({ success: true, updated: updatedIds.size, detail: refreshed });
   });
 
-  app.post("/api/checklists/:id/finalizar", (req, res) => {
+  app.post("/api/checklists/:id/finalizar", async (req, res) => {
     const user = getRequestUser(req);
     const detail = getChecklistDetail(req.params.id);
     if (!detail) return res.status(404).json({ error: "Checklist não encontrado." });
     if (!canAccessChecklist(user, detail.checklist)) return res.status(403).json({ error: "Acesso negado a este checklist." });
-    if (isChecklistFinal(detail.checklist.status)) return res.status(409).json({ error: "Este checklist já foi finalizado." });
+    if (isChecklistFinal(detail.checklist.status)) {
+      try {
+        await emitChecklistNotifications(detail.checklist, user, getChecklistFinalNotificationTypes(detail.checklist), detail.checklist.finalizadoEm);
+      } catch (error) {
+        return res.status(500).json({ error: "Checklist finalizado, mas a notificação ainda não foi persistida.", details: error instanceof Error ? error.message : String(error) });
+      }
+      return res.json({ success: true, idempotent: true, checklist: detail.checklist, detail });
+    }
     const body = req.body as { declaracaoAceita?: boolean; assinaturaDataUrl?: string };
     if (body.declaracaoAceita !== true) return res.status(400).json({ error: "A declaração de veracidade deve ser aceita." });
     if (!detail.checklist.motoristaId || !detail.checklist.motoristaNomeSnapshot) {
@@ -4385,7 +4556,7 @@ async function startServer() {
       type: "ASSINATURA",
       dataUrl: signatureImage.dataUrl,
       mimeType: signatureImage.mimeType,
-      name: `assinatura-${detail.checklist.motoristaId}.png`,
+      name: `assinatura-${user.id}.png`,
       user,
       unitId: detail.checklist.unidadeId,
     });
@@ -4404,6 +4575,8 @@ async function startServer() {
       dataAssinatura: now,
       assinaturaMotoristaNomeSnapshot: detail.checklist.motoristaNomeSnapshot,
       assinaturaMotoristaCpfSnapshot: detail.checklist.motoristaCpfSnapshot,
+      assinaturaUsuarioNomeSnapshot: user.nome,
+      assinaturaUsuarioTipoSnapshot: isDriverUser(user) ? "MOTORISTA" : isHelperUser(user) ? "AJUDANTE" : "ADMINISTRATIVO",
       assinaturaUserId: user.id,
       assinaturaIp: getClientIp(req),
       assinaturaUserAgent: req.get("user-agent")?.slice(0, 500),
@@ -4435,17 +4608,22 @@ async function startServer() {
           logAudit(req, user.nome, "VEICULO_BLOQUEADO_CHECKLIST", `Bloqueou o veículo ${detail.checklist.placaSnapshot}; protocolo ${protocol}; motivo: ${block.motivo}.`, detail.checklist.unidadeId);
         });
     }
-    logAudit(req, user.nome, "CHECKLIST_ASSINADO", `Assinou o checklist ${protocol} como motorista ${detail.checklist.motoristaNomeSnapshot}.`, detail.checklist.unidadeId);
+    logAudit(req, user.nome, "CHECKLIST_ASSINADO", `Assinou o checklist ${protocol} como ${user.tipo_usuario || user.perfil}; motorista vinculado: ${detail.checklist.motoristaNomeSnapshot}.`, detail.checklist.unidadeId);
     logAudit(req, user.nome, "CHECKLIST_FINALIZADO", `Finalizou o checklist ${protocol} com resultado ${result}.`, detail.checklist.unidadeId);
     detail.respostas.filter((response) => response.resposta === "NAO_CONFORME").forEach((response) => {
       logAudit(req, user.nome, "CHECKLIST_NAO_CONFORMIDADE", `${protocol}: ${response.codigoSnapshot} — ${response.observacao || response.descricaoSnapshot}.`, detail.checklist.unidadeId);
     });
+    try {
+      await emitChecklistNotifications(updated, user, getChecklistFinalNotificationTypes(updated), now);
+    } catch (error) {
+      return res.status(500).json({ error: "Checklist finalizado, mas a notificação ainda não foi persistida. Reenvie a operação para concluir a notificação.", details: error instanceof Error ? error.message : String(error) });
+    }
     res.json({ success: true, checklist: updated, detail: getChecklistDetail(detail.checklist.id) });
   });
 
   app.post("/api/checklists/:id/gerar-manutencao", (req, res) => {
     const user = getRequestUser(req);
-    if (!isChecklistManager(user) || isDriverUser(user)) return res.status(403).json({ error: "Motorista não pode criar ou administrar solicitações de manutenção." });
+    if (!isChecklistManager(user) || isFieldUser(user)) return res.status(403).json({ error: "Usuário de campo não pode criar ou administrar solicitações de manutenção." });
     const detail = getChecklistDetail(req.params.id);
     if (!detail) return res.status(404).json({ error: "Checklist não encontrado." });
     if (!canAccessChecklist(user, detail.checklist)) return res.status(403).json({ error: "Acesso negado." });
@@ -4489,7 +4667,7 @@ async function startServer() {
 
   app.post("/api/checklists/:id/manutencoes/:maintenanceId/resolver", (req, res) => {
     const user = getRequestUser(req);
-    if (!isChecklistManager(user) || isDriverUser(user)) return res.status(403).json({ error: "Motorista não pode concluir manutenção." });
+    if (!isChecklistManager(user) || isFieldUser(user)) return res.status(403).json({ error: "Usuário de campo não pode concluir manutenção." });
     const detail = getChecklistDetail(req.params.id);
     if (!detail) return res.status(404).json({ error: "Checklist não encontrado." });
     if (!canAccessChecklist(user, detail.checklist)) return res.status(403).json({ error: "Acesso negado." });
@@ -4528,7 +4706,7 @@ async function startServer() {
 
   app.post("/api/checklists/:id/reinspecao", (req, res) => {
     const user = getRequestUser(req);
-    if (!isChecklistManager(user) || isDriverUser(user)) return res.status(403).json({ error: "Motorista não pode iniciar a reinspeção de liberação." });
+    if (!isChecklistManager(user) || isFieldUser(user)) return res.status(403).json({ error: "Usuário de campo não pode iniciar a reinspeção de liberação." });
     const detail = getChecklistDetail(req.params.id);
     if (!detail) return res.status(404).json({ error: "Checklist original não encontrado." });
     if (detail.checklist.checklistOriginalId) return res.status(400).json({ error: "A reinspeção deve ser criada a partir do checklist original." });
@@ -4561,7 +4739,7 @@ async function startServer() {
 
   app.post("/api/checklists/:id/liberar-veiculo", (req, res) => {
     const user = getRequestUser(req);
-    if (isDriverUser(user)) return res.status(403).json({ error: "Motorista não pode liberar o próprio veículo." });
+    if (isFieldUser(user)) return res.status(403).json({ error: "Usuário de campo não pode liberar o próprio veículo." });
     if (!isChecklistManager(user)) return res.status(403).json({ error: "Usuário sem permissão para liberação operacional." });
     const detail = getChecklistDetail(req.params.id);
     if (!detail) return res.status(404).json({ error: "Checklist original não encontrado." });
@@ -4572,7 +4750,7 @@ async function startServer() {
     const maintenance = detail.manutencoes.find((item) => item.id === body.manutencaoId && item.statusResolucao === "CORRIGIDA");
     const reinspection = detail.reinspecoes.find((item) => item.id === body.reinspecaoId);
     const releaseErrors = validateVehicleRelease({
-      actorIsDriver: isDriverUser(user),
+      actorIsDriver: isFieldUser(user),
       maintenanceResolved: Boolean(maintenance),
       reinspectionFinal: Boolean(reinspection && isChecklistFinal(reinspection.status)),
       reinspectionConforming: reinspection?.resultado === "CONFORME",
@@ -4601,7 +4779,7 @@ async function startServer() {
 
   app.post("/api/checklists/:id/cancelar", (req, res) => {
     const user = getRequestUser(req);
-    if (!isChecklistManager(user) || isDriverUser(user)) return res.status(403).json({ error: "Usuário sem permissão para cancelar checklist." });
+    if (!isChecklistManager(user) || isFieldUser(user)) return res.status(403).json({ error: "Usuário sem permissão para cancelar checklist." });
     const detail = getChecklistDetail(req.params.id);
     if (!detail) return res.status(404).json({ error: "Checklist não encontrado." });
     if (!canAccessChecklist(user, detail.checklist)) return res.status(403).json({ error: "Acesso negado." });
@@ -5488,7 +5666,10 @@ async function startServer() {
     const list = FileDatabase.get("processo_notificacoes") || [];
     const processos = FileDatabase.get("processos") || [];
     const filtered = list.filter(n => {
-      if (n.usuarioId?.toLowerCase() !== (user.email || "").toLowerCase()) {
+      const belongsToUser = n.recipientUserId
+        ? n.recipientUserId === user.id
+        : n.usuarioId?.toLowerCase() === (user.email || "").toLowerCase();
+      if (!belongsToUser) {
         return false;
       }
       if (n.processoId) {
@@ -5512,13 +5693,13 @@ async function startServer() {
 
     if (all) {
       list.forEach(n => {
-        if (n.usuarioId?.toLowerCase() === (user.email || "").toLowerCase()) {
+        if (n.recipientUserId === user.id || (!n.recipientUserId && n.usuarioId?.toLowerCase() === (user.email || "").toLowerCase())) {
           n.lida = true;
         }
       });
     } else if (id) {
       const idx = list.findIndex(n => n.id === id);
-      if (idx !== -1 && list[idx].usuarioId?.toLowerCase() === (user.email || "").toLowerCase()) {
+      if (idx !== -1 && (list[idx].recipientUserId === user.id || (!list[idx].recipientUserId && list[idx].usuarioId?.toLowerCase() === (user.email || "").toLowerCase()))) {
         list[idx].lida = true;
       }
     }

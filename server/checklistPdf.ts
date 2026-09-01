@@ -119,12 +119,12 @@ export function createChecklistPdf(detail: ChecklistDetail, unit?: Unidade): Pro
         doc.moveDown(1);
       }
     }
-    line("Assinado por", checklist.assinaturaMotoristaNomeSnapshot || checklist.motoristaNomeSnapshot);
-    line("CPF", checklist.assinaturaMotoristaCpfSnapshot || checklist.motoristaCpfSnapshot);
+    line("Assinado por", checklist.assinaturaUsuarioNomeSnapshot || checklist.assinaturaMotoristaNomeSnapshot || checklist.motoristaNomeSnapshot);
+    line("Perfil do signatário", checklist.assinaturaUsuarioTipoSnapshot || "MOTORISTA");
+    line("CPF do motorista vinculado", checklist.assinaturaMotoristaCpfSnapshot || checklist.motoristaCpfSnapshot);
     line("Data/hora da assinatura", checklist.dataAssinatura ? new Date(checklist.dataAssinatura).toLocaleString("pt-BR") : "—");
     line("Bloqueio operacional", checklist.bloqueouVeiculo ? "VEÍCULO BLOQUEADO" : "Não");
 
     doc.end();
   });
 }
-

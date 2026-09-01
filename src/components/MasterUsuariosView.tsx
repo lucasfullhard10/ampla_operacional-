@@ -7,20 +7,23 @@ interface MasterUsuariosProps {
   unidades: Unidade[];
   userEmail: string;
   onRefresh?: () => void;
+  canManageAllUsers?: boolean;
 }
 
 const TIPO_USUARIO_OPTIONS = [
   "MASTER",
   "SUPERVISOR",
+  "GESTOR_OPERACIONAL",
   "OPERADOR",
   "CONFERENTE",
   "MOTORISTA",
+  "AJUDANTE",
   "MANUTENCAO",
   "FINANCEIRO",
   "ADMINISTRATIVO"
 ] as const;
 
-export default function MasterUsuariosView({ unidades, userEmail, onRefresh }: MasterUsuariosProps) {
+export default function MasterUsuariosView({ unidades, userEmail, onRefresh, canManageAllUsers = false }: MasterUsuariosProps) {
   const [usuarios, setUsuarios] = useState<Usuario[]>([]);
   const [motoristas, setMotoristas] = useState<Motorista[]>([]);
   const [loading, setLoading] = useState(false);
@@ -33,11 +36,15 @@ export default function MasterUsuariosView({ unidades, userEmail, onRefresh }: M
   const [telefone, setTelefone] = useState("");
   const [email, setEmail] = useState(""); // This is used as the "Usuário" field
   const [senha, setSenha] = useState("");
+  const [confirmarSenha, setConfirmarSenha] = useState("");
   const [cargo, setCargo] = useState("");
   const [unidadeId, setUnidadeId] = useState("");
   const [tipoUsuario, setTipoUsuario] = useState<(typeof TIPO_USUARIO_OPTIONS)[number]>("OPERADOR");
   const [status, setStatus] = useState<"ativo" | "inativo">("ativo");
   const [motoristaId, setMotoristaId] = useState("");
+  const [ajudanteId, setAjudanteId] = useState("");
+  const [bloqueado, setBloqueado] = useState(false);
+  const [mustChangePassword, setMustChangePassword] = useState(false);
 
   // Notifications
   const [notification, setNotification] = useState<NotificationType | null>(null);
@@ -87,11 +94,15 @@ export default function MasterUsuariosView({ unidades, userEmail, onRefresh }: M
     setTelefone("");
     setEmail("");
     setSenha("");
+    setConfirmarSenha("");
     setCargo("");
     setUnidadeId(unidades[0]?.id || "");
     setTipoUsuario("OPERADOR");
     setStatus("ativo");
     setMotoristaId("");
+    setAjudanteId("");
+    setBloqueado(false);
+    setMustChangePassword(false);
   };
 
   const handleCreateOrUpdate = async (e: React.FormEvent) => {
@@ -107,6 +118,18 @@ export default function MasterUsuariosView({ unidades, userEmail, onRefresh }: M
       setNotification({ type: "error", message: "Selecione o cadastro oficial do motorista vinculado a este login." });
       return;
     }
+    if (tipoUsuario === "AJUDANTE" && !ajudanteId) {
+      setNotification({ type: "error", message: "Selecione o cadastro oficial do ajudante vinculado a este login." });
+      return;
+    }
+    if (senha && (senha.length < 8 || !/[A-Za-zÀ-ÿ]/.test(senha) || !/\d/.test(senha) || /\s/.test(senha))) {
+      setNotification({ type: "error", message: "A nova senha deve ter ao menos 8 caracteres, uma letra, um número e nenhum espaço." });
+      return;
+    }
+    if (senha !== confirmarSenha) {
+      setNotification({ type: "error", message: "A confirmação da nova senha não confere." });
+      return;
+    }
 
     try {
       const payload = {
@@ -115,12 +138,16 @@ export default function MasterUsuariosView({ unidades, userEmail, onRefresh }: M
         telefone: telefone.trim(),
         email: email.trim(),
         senha: senha ? senha.trim() : undefined,
+        confirmarSenha: senha ? confirmarSenha : undefined,
         cargo: cargo.trim(),
         unidade_id: unidadeId,
         tipo_usuario: tipoUsuario,
         status,
         unidadesPermitidas: [unidadeId],
         motoristaId: tipoUsuario === "MOTORISTA" ? motoristaId : undefined,
+        ajudanteId: tipoUsuario === "AJUDANTE" ? ajudanteId : undefined,
+        bloqueado,
+        mustChangePassword,
       };
 
       const url = editingUserId ? `/api/usuarios/${editingUserId}` : "/api/usuarios";
@@ -166,11 +193,15 @@ export default function MasterUsuariosView({ unidades, userEmail, onRefresh }: M
     setTelefone(user.telefone || "");
     setEmail(user.email);
     setSenha(""); // leave blank for password change option
+    setConfirmarSenha("");
     setCargo(user.cargo || "");
     setUnidadeId(user.unidadeId || user.unidade_id || "");
     setTipoUsuario(user.tipo_usuario || "OPERADOR");
     setStatus(user.status || "ativo");
     setMotoristaId(user.motoristaId || "");
+    setAjudanteId(user.ajudanteId || "");
+    setBloqueado(Boolean(user.bloqueado));
+    setMustChangePassword(Boolean(user.mustChangePassword || user.deveAlterarSenha));
   };
 
   const handleDelete = (user: Usuario) => {
@@ -203,8 +234,8 @@ export default function MasterUsuariosView({ unidades, userEmail, onRefresh }: M
   };
 
   const toggleBlockStatus = async (user: Usuario) => {
-    const nextStatus = user.status === "ativo" ? "inativo" : "ativo";
-    const confirmText = nextStatus === "inativo" 
+    const nextBlocked = !user.bloqueado;
+    const confirmText = nextBlocked
       ? `Suspender e bloquear temporariamente o acesso do usuário "${user.nome}"?`
       : `Reativar o acesso do usuário "${user.nome}"?`;
 
@@ -218,12 +249,12 @@ export default function MasterUsuariosView({ unidades, userEmail, onRefresh }: M
               "Content-Type": "application/json",
               "x-user-email": userEmail
             },
-            body: JSON.stringify({ status: nextStatus })
+            body: JSON.stringify({ bloqueado: nextBlocked })
           });
           if (res.ok) {
             setNotification({
               type: "success",
-              message: `✅ Usuário modificado para: ${nextStatus === "inativo" ? "Bloqueado" : "Ativo"}.`
+              message: `✅ Usuário modificado para: ${nextBlocked ? "Bloqueado" : "Desbloqueado"}.`
             });
             fetchUsuarios();
           } else {
@@ -321,18 +352,15 @@ export default function MasterUsuariosView({ unidades, userEmail, onRefresh }: M
               </div>
             </div>
 
-            <div className="space-y-1">
-              <label className="text-slate-400 block font-mono">
-                {editingUserId ? "Nova Senha (deixe em branco se mantida)" : "Senha de Acesso *"}
-              </label>
-              <input
-                type="password"
-                required={!editingUserId}
-                placeholder={editingUserId ? "Alterar senha..." : "Definir senha..."}
-                value={senha}
-                onChange={(e) => setSenha(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1.5 text-white text-xs outline-none focus:border-sky-500"
-              />
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              <div className="space-y-1">
+                <label className="text-slate-400 block font-mono">{editingUserId ? "Nova senha" : "Nova senha *"}</label>
+                <input type="password" autoComplete="new-password" required={!editingUserId} placeholder={editingUserId ? "Deixe em branco para manter" : "Mínimo de 8 caracteres"} value={senha} onChange={(e) => setSenha(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1.5 text-white text-xs outline-none focus:border-sky-500" />
+              </div>
+              <div className="space-y-1">
+                <label className="text-slate-400 block font-mono">{editingUserId ? "Confirmar nova senha" : "Confirmar nova senha *"}</label>
+                <input type="password" autoComplete="new-password" required={!editingUserId || Boolean(senha)} placeholder="Repita a nova senha" value={confirmarSenha} onChange={(e) => setConfirmarSenha(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1.5 text-white text-xs outline-none focus:border-sky-500" />
+              </div>
             </div>
 
             <div className="grid grid-cols-2 gap-2">
@@ -341,11 +369,12 @@ export default function MasterUsuariosView({ unidades, userEmail, onRefresh }: M
                 <select
                   value={unidadeId}
                   onChange={(e) => setUnidadeId(e.target.value)}
+                  disabled={Boolean(editingUserId && !canManageAllUsers)}
                   className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1.5 text-white text-xs outline-none cursor-pointer"
                   required
                 >
                   <option value="">Selecionar...</option>
-                  <option value="Todas">★ Todas (Visualização Geral)</option>
+                  {canManageAllUsers && <option value="Todas">★ Todas (Visualização Geral)</option>}
                   {unidades.map(u => (
                     <option key={u.id} value={u.id}>{u.nome}</option>
                   ))}
@@ -356,13 +385,15 @@ export default function MasterUsuariosView({ unidades, userEmail, onRefresh }: M
                 <label className="text-slate-400 block font-mono font-medium">Tipo Usuário *</label>
                 <select
                   value={tipoUsuario}
+                  disabled={Boolean(editingUserId && !canManageAllUsers)}
                   onChange={(e) => {
                     setTipoUsuario(e.target.value as (typeof TIPO_USUARIO_OPTIONS)[number]);
                     if (e.target.value !== "MOTORISTA") setMotoristaId("");
+                    if (e.target.value !== "AJUDANTE") setAjudanteId("");
                   }}
                   className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1.5 text-white text-xs outline-none cursor-pointer"
                 >
-                  {TIPO_USUARIO_OPTIONS.map(opt => (
+                  {TIPO_USUARIO_OPTIONS.filter((opt) => canManageAllUsers || !["MASTER", "SUPERVISOR", "GESTOR_OPERACIONAL", "ADMINISTRATIVO"].includes(opt)).map(opt => (
                     <option key={opt} value={opt}>{opt}</option>
                   ))}
                 </select>
@@ -387,6 +418,17 @@ export default function MasterUsuariosView({ unidades, userEmail, onRefresh }: M
               </div>
             )}
 
+            {tipoUsuario === "AJUDANTE" && (
+              <div className="space-y-1 rounded-lg border border-teal-500/20 bg-teal-500/5 p-3">
+                <label className="text-teal-300 block font-mono font-medium">Cadastro oficial do ajudante *</label>
+                <select value={ajudanteId} onChange={(e) => setAjudanteId(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-2 text-white text-xs outline-none cursor-pointer" required>
+                  <option value="">Selecionar ajudante por ID oficial...</option>
+                  {motoristas.filter((helper) => (helper.tipo === "Ajudante Fixo" || helper.tipo === "Ajudante Geral") && helper.unidadeId === unidadeId).map((helper) => <option key={helper.id} value={helper.id}>{helper.nome} · {helper.cpf}</option>)}
+                </select>
+                <p className="text-[9px] text-slate-500">O vínculo oficial permanece estável mesmo quando o login for alterado.</p>
+              </div>
+            )}
+
             <div className="space-y-1">
               <label className="text-slate-400 block font-mono font-medium">Status da Conta *</label>
               <select
@@ -395,8 +437,19 @@ export default function MasterUsuariosView({ unidades, userEmail, onRefresh }: M
                 className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1.5 text-white text-xs outline-none cursor-pointer"
               >
                 <option value="ativo">Conta Ativada (Acesso Liberado)</option>
-                <option value="inativo">Bloqueada / Suspensa</option>
+                <option value="inativo">Conta Desativada</option>
               </select>
+            </div>
+
+            <div className="grid gap-2 sm:grid-cols-2">
+              <label className="flex items-start gap-2 rounded-lg border border-slate-800 bg-slate-950 p-3 text-[10px] text-slate-300">
+                <input type="checkbox" checked={bloqueado} onChange={(e) => setBloqueado(e.target.checked)} className="mt-0.5 accent-rose-500" />
+                <span><strong className="block text-rose-300">Bloquear usuário</strong>Impede login e invalida sessões existentes.</span>
+              </label>
+              <label className="flex items-start gap-2 rounded-lg border border-slate-800 bg-slate-950 p-3 text-[10px] text-slate-300">
+                <input type="checkbox" checked={mustChangePassword} onChange={(e) => setMustChangePassword(e.target.checked)} className="mt-0.5 accent-sky-500" />
+                <span><strong className="block text-sky-300">Exigir troca de senha</strong>Bloqueia módulos até a senha ser alterada.</span>
+              </label>
             </div>
 
             <div className="flex gap-2 pt-2">
@@ -453,7 +506,8 @@ export default function MasterUsuariosView({ unidades, userEmail, onRefresh }: M
                 <tbody className="divide-y divide-slate-800/50">
                   {filtered.map(u => {
                     const matchedUnit = unidades.find(un => un.id === u.unidadeId || un.id === u.unidade_id);
-                    const isBlocked = u.status === "inativo";
+                    const isBlocked = Boolean(u.bloqueado);
+                    const isInactive = u.status === "inativo";
                     return (
                       <tr key={u.id} className="hover:bg-slate-850/20">
                         <td className="p-3">
@@ -474,6 +528,7 @@ export default function MasterUsuariosView({ unidades, userEmail, onRefresh }: M
                           {u.unidadeId === "Todas" ? "★ Consolidada" : (matchedUnit?.nome || "Goiânia")}
                         </td>
                         <td className="p-3">
+                          <span className={`mb-1 block text-[8px] font-bold uppercase ${isInactive ? "text-slate-500" : "text-emerald-400"}`}>{isInactive ? "Desativado" : "Ativo"}</span>
                           <button
                             onClick={() => toggleBlockStatus(u)}
                             className={`px-2 py-0.5 rounded text-[8.5px] font-mono uppercase font-bold border cursor-pointer ${
@@ -482,8 +537,9 @@ export default function MasterUsuariosView({ unidades, userEmail, onRefresh }: M
                                 : "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
                             }`}
                           >
-                            {isBlocked ? "Bloqueado" : "Ativo"}
+                            {isBlocked ? "Desbloquear" : "Bloquear"}
                           </button>
+                          {(u.mustChangePassword || u.deveAlterarSenha) && <span className="mt-1 block text-[8px] font-bold text-amber-400">Troca de senha pendente</span>}
                         </td>
                         <td className="p-3 text-right space-x-1 whitespace-nowrap">
                           <button
@@ -493,13 +549,11 @@ export default function MasterUsuariosView({ unidades, userEmail, onRefresh }: M
                           >
                             <Edit3 className="w-3.5 h-3.5" />
                           </button>
-                          <button
-                            onClick={() => handleDelete(u)}
-                            className="p-1 bg-slate-950 hover:bg-rose-550/10 text-slate-500 hover:text-rose-400 rounded border border-slate-800 cursor-pointer"
-                            title="Excluir Usuário"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
+                          {canManageAllUsers && (
+                            <button onClick={() => handleDelete(u)} className="p-1 bg-slate-950 hover:bg-rose-550/10 text-slate-500 hover:text-rose-400 rounded border border-slate-800 cursor-pointer" title="Excluir Usuário">
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
                         </td>
                       </tr>
                     );

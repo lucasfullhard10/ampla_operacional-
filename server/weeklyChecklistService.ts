@@ -166,6 +166,12 @@ export function createChecklist(params: {
   const driverUser = resolution.driver
     ? users.find((candidate) => candidate.status === "ativo" && candidate.motoristaId === resolution.driver?.id)
     : undefined;
+  const helperIds = resolution.route?.ajudantesIds || [];
+  const helpers = (FileDatabase.get("motoristas") as Motorista[]).filter((candidate) =>
+    helperIds.includes(candidate.id) &&
+    candidate.unidadeId === vehicle.unidadeId &&
+    (candidate.tipo === "Ajudante Fixo" || candidate.tipo === "Ajudante Geral"),
+  );
 
   const sourceResponses = original
     ? (FileDatabase.get("checklist_respostas") || []).filter((response) => response.checklistId === original.id)
@@ -191,6 +197,8 @@ export function createChecklist(params: {
     usuarioMotoristaId: driverUser?.id,
     motoristaNomeSnapshot: resolution.driver?.nome,
     motoristaCpfSnapshot: resolution.driver?.cpf,
+    ajudanteIdsSnapshot: helpers.map((helper) => helper.id),
+    ajudanteNomesSnapshot: helpers.map((helper) => helper.nome),
     placaSnapshot: vehicle.placa,
     veiculoModeloSnapshot: vehicle.modelo,
     unidadeNomeSnapshot: unit?.nome,

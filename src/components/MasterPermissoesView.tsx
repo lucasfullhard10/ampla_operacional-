@@ -32,7 +32,8 @@ const MODULES: ModuleDef[] = [
   { key: "checklist-semanal", name: "Checklist Semanal", desc: "Inspeções, não conformidades, reinspeções e liberação operacional da frota." },
   { key: "epi", name: "Estoque de EPIs", desc: "Movimentação de botas, cones de sinalização e óculos de proteção." },
   { key: "alertas", name: "Central de Conformidades", desc: "Alertas automáticos de documentos e exames vencidos." },
-  { key: "auditoria", name: "Logs de Auditoria", desc: "Acesso aos logs transacionais e de segurança de auditoria." }
+  { key: "auditoria", name: "Logs de Auditoria", desc: "Acesso aos logs transacionais e de segurança de auditoria." },
+  { key: "usuarios", name: "Gestão de Usuários", desc: "Gerenciamento administrativo de login, bloqueio e credenciais dentro das unidades autorizadas." }
 ];
 
 export default function MasterPermissoesView({ unidades, userEmail }: MasterPermissoesProps) {

@@ -86,7 +86,7 @@ export default function DriverChecklistView({ currentUser, onLogout }: { current
     <div className="min-h-screen bg-slate-950 text-white">
       <header className="sticky top-0 z-20 border-b border-slate-800 bg-slate-950/95 px-4 py-3 backdrop-blur">
         <div className="mx-auto flex max-w-3xl items-center justify-between">
-          <div className="flex items-center gap-3"><img src="/assets/logo.svg" alt="AMPLA" className="h-10 w-10" /><div><p className="text-sm font-black">SISTEMA AMPLA</p><p className="text-[9px] uppercase tracking-widest text-emerald-400">Portal do motorista</p></div></div>
+          <div className="flex items-center gap-3"><img src="/assets/logo.svg" alt="AMPLA" className="h-10 w-10" /><div><p className="text-sm font-black">SISTEMA AMPLA</p><p className="text-[9px] uppercase tracking-widest text-emerald-400">Portal de checklist · {currentUser.tipo_usuario === "AJUDANTE" ? "ajudante" : "motorista"}</p></div></div>
           <button type="button" onClick={onLogout} className="flex min-h-10 items-center gap-2 rounded-lg border border-slate-800 px-3 text-xs font-bold text-slate-300"><LogOut className="h-4 w-4" /> Sair</button>
         </div>
       </header>
@@ -145,4 +145,3 @@ export default function DriverChecklistView({ currentUser, onLogout }: { current
     </div>
   );
 }
-

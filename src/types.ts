@@ -24,23 +24,31 @@ export interface Usuario {
   senha?: string;
   senhaHash?: string;
   deveAlterarSenha?: boolean;
+  mustChangePassword?: boolean;
+  bloqueado?: boolean;
   supervisor?: string;
   unidadesPermitidas?: string[];
   
   // New compliance fields
   unidade_id?: string;
-  tipo_usuario?: "MASTER" | "SUPERVISOR" | "OPERADOR" | "CONFERENTE" | "MOTORISTA" | "MANUTENCAO" | "FINANCEIRO" | "ADMINISTRATIVO";
+  tipo_usuario?: "MASTER" | "SUPERVISOR" | "GESTOR_OPERACIONAL" | "OPERADOR" | "CONFERENTE" | "MOTORISTA" | "AJUDANTE" | "MANUTENCAO" | "FINANCEIRO" | "ADMINISTRATIVO";
   cpf?: string;
   telefone?: string;
   cargo?: string;
   motoristaId?: string;
+  ajudanteId?: string;
   permissions?: {
     [key: string]: {
-      visualizar: boolean;
-      criar: boolean;
-      editar: boolean;
-      excluir: boolean;
+      visualizar?: boolean;
+      criar?: boolean;
+      editar?: boolean;
+      excluir?: boolean;
       exportar?: boolean;
+      view?: boolean;
+      create?: boolean;
+      edit?: boolean;
+      delete?: boolean;
+      export?: boolean;
     };
   };
 }
@@ -518,9 +526,24 @@ export interface ProcessoNotificacao {
   usuarioId: string;
   titulo: string;
   mensagem: string;
-  processoId: string;
+  processoId?: string;
   lida: boolean;
   data: string;
+  tipo?: string;
+  severidade?: "INFORMATIVA" | "OPERACIONAL" | "URGENTE";
+  recipientUserId?: string;
+  checklistId?: string;
+  protocolo?: string;
+  motorista?: string;
+  ajudantes?: string[];
+  veiculo?: string;
+  placa?: string;
+  unidadeId?: string;
+  unidade?: string;
+  resultado?: string;
+  link?: string;
+  destino?: string;
+  idempotencyKey?: string;
 }
 
 export interface ProcessoCategoria {

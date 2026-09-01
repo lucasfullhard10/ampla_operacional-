@@ -62,23 +62,31 @@ export interface Usuario {
   senha?: string;
   senhaHash?: string;
   deveAlterarSenha?: boolean;
+  mustChangePassword?: boolean;
+  bloqueado?: boolean;
   supervisor?: string;
   unidadesPermitidas?: string[];
   
   // New compliance fields
   unidade_id?: string;
-  tipo_usuario?: "MASTER" | "SUPERVISOR" | "OPERADOR" | "CONFERENTE" | "MOTORISTA" | "MANUTENCAO" | "FINANCEIRO" | "ADMINISTRATIVO";
+  tipo_usuario?: "MASTER" | "SUPERVISOR" | "GESTOR_OPERACIONAL" | "OPERADOR" | "CONFERENTE" | "MOTORISTA" | "AJUDANTE" | "MANUTENCAO" | "FINANCEIRO" | "ADMINISTRATIVO";
   cpf?: string;
   telefone?: string;
   cargo?: string;
   motoristaId?: string;
+  ajudanteId?: string;
   permissions?: {
     [key: string]: {
-      visualizar: boolean;
-      criar: boolean;
-      editar: boolean;
-      excluir: boolean;
+      visualizar?: boolean;
+      criar?: boolean;
+      editar?: boolean;
+      excluir?: boolean;
       exportar?: boolean;
+      view?: boolean;
+      create?: boolean;
+      edit?: boolean;
+      delete?: boolean;
+      export?: boolean;
     };
   };
 }
@@ -556,9 +564,24 @@ export interface ProcessoNotificacao {
   usuarioId: string;
   titulo: string;
   mensagem: string;
-  processoId: string;
+  processoId?: string;
   lida: boolean;
   data: string;
+  tipo?: string;
+  severidade?: "INFORMATIVA" | "OPERACIONAL" | "URGENTE";
+  recipientUserId?: string;
+  checklistId?: string;
+  protocolo?: string;
+  motorista?: string;
+  ajudantes?: string[];
+  veiculo?: string;
+  placa?: string;
+  unidadeId?: string;
+  unidade?: string;
+  resultado?: string;
+  link?: string;
+  destino?: string;
+  idempotencyKey?: string;
 }
 
 export interface ProcessoCategoria {
@@ -706,6 +729,7 @@ const initialUsers: Usuario[] = initialAdminEmail && initialAdminPassword
       status: "ativo",
       senha: initialAdminPassword,
       deveAlterarSenha: true,
+      mustChangePassword: true,
     }]
   : [];
 
@@ -785,6 +809,11 @@ export class FileDatabase {
       connected: this.isSupabaseConnected,
       error: this.connectionError
     };
+  }
+
+  public static async waitForPendingWrites(): Promise<void> {
+    const pending = [...this.pendingWrites];
+    if (pending.length > 0) await Promise.all(pending);
   }
 
   public static async bootstrap(force = false): Promise<void> {
@@ -1500,11 +1529,20 @@ export class FileDatabase {
       data: dateStr,
       hora: timeStr,
       acao: action,
-      detalhes: `${details} ${data ? JSON.stringify(data).slice(0, 150) : ""}`,
+      detalhes: `${details} ${data ? JSON.stringify(this.sanitizeAuditData(data)).slice(0, 150) : ""}`,
       unidade,
       ip
     };
     db.auditoria.push(log);
+  }
+
+  private static sanitizeAuditData(value: unknown): unknown {
+    if (Array.isArray(value)) return value.map((item) => this.sanitizeAuditData(item));
+    if (!value || typeof value !== "object") return value;
+    return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([key, item]) => {
+      const sensitive = /(senha|password|secret|token|hash)/i.test(key);
+      return [key, sensitive ? "[REDACTED]" : this.sanitizeAuditData(item)];
+    }));
   }
 
   public static logAudit(user: string, action: string, details: string, unidade: string = "", ip: string = "127.0.0.1") {
@@ -1832,6 +1870,34 @@ export class FileDatabase {
           refId: checklist.id,
           mensagem: `Não conformidade crítica aberta no veículo ${checklist.placaSnapshot} — protocolo ${checklist.protocolo || "em emissão"}`,
           severidade: "Crítica",
+          status: "Ativo",
+          dataCriacao,
+          entidadeTipo: "Checklist",
+          entidadeNome: checklist.placaSnapshot,
+          unidadeId: checklist.unidadeId,
+          checklistId: checklist.id,
+          veiculoId: checklist.veiculoId,
+          identificadorSemana: checklist.identificadorSemana,
+          destino: "checklist-semanal",
+        });
+      });
+
+    checklists
+      .filter((checklist) =>
+        checklist.resultado === "COM_PENDENCIAS" &&
+        !checklist.possuiNaoConformidadeCritica &&
+        checklist.status !== "LIBERADO" &&
+        checklist.status !== "CANCELADO" &&
+        !checklistMaintenances.some((maintenance) => maintenance.checklistId === checklist.id),
+      )
+      .forEach((checklist) => {
+        const id = `al-checklist-pendencia-${slugify(checklist.id)}`;
+        alertsById.set(id, {
+          id,
+          tipo: "Pendência operacional em checklist",
+          refId: checklist.id,
+          mensagem: `Checklist do veículo ${checklist.placaSnapshot} possui pendência operacional — protocolo ${checklist.protocolo || "em emissão"}`,
+          severidade: "Atenção",
           status: "Ativo",
           dataCriacao,
           entidadeTipo: "Checklist",

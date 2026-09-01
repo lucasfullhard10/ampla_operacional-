@@ -140,8 +140,8 @@ export default function ChecklistEditor({
   const [releaseReinspectionId, setReleaseReinspectionId] = useState("");
   const signatureRef = useRef<SignaturePadHandle>(null);
   const finalized = isChecklistFinal(detail.checklist.status);
-  const isDriver = currentUser.tipo_usuario === "MOTORISTA";
-  const canManage = !isDriver;
+  const signatoryRoleLabel = currentUser.tipo_usuario === "AJUDANTE" ? "ajudante" : currentUser.tipo_usuario === "MOTORISTA" ? "motorista" : "responsável";
+  const canManage = currentUser.tipo_usuario !== "MOTORISTA" && currentUser.tipo_usuario !== "AJUDANTE";
 
   useEffect(() => {
     setResponses(detail.respostas);
@@ -155,7 +155,7 @@ export default function ChecklistEditor({
     return payload as { detail?: ChecklistDetailPayload };
   };
 
-  const saveDraft = async () => {
+  const saveDraft = async (notifyAwaitingSignature = true) => {
     setSaving(true);
     try {
       const response = await fetch(`/api/checklists/${detail.checklist.id}/respostas`, {
@@ -163,6 +163,7 @@ export default function ChecklistEditor({
         headers,
         body: JSON.stringify({
           km: km ? Number(km) : undefined,
+          notifyAwaitingSignature,
           respostas: responses.map((item) => ({
             id: item.id,
             resposta: item.resposta,
@@ -186,7 +187,7 @@ export default function ChecklistEditor({
 
   const handleSave = async () => {
     try {
-      await saveDraft();
+      await saveDraft(true);
       setNotification({ type: "success", message: "Rascunho salvo no servidor." });
     } catch (error) {
       setNotification({ type: "error", message: error instanceof Error ? error.message : "Não foi possível salvar." });
@@ -201,7 +202,7 @@ export default function ChecklistEditor({
     }
     setSaving(true);
     try {
-      await saveDraft();
+      await saveDraft(false);
       const response = await fetch(`/api/checklists/${detail.checklist.id}/finalizar`, {
         method: "POST",
         headers,
@@ -325,7 +326,7 @@ export default function ChecklistEditor({
 
       {!finalized && (
         <div className="space-y-4 rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-4">
-          <div className="flex items-center gap-2"><PenTool className="h-5 w-5 text-emerald-400" /><h3 className="text-sm font-black text-white">Assinatura do motorista</h3></div>
+          <div className="flex items-center gap-2"><PenTool className="h-5 w-5 text-emerald-400" /><h3 className="text-sm font-black text-white">Assinatura do {signatoryRoleLabel}</h3></div>
           <p className="text-xs text-slate-300">Assine usando o dedo ou a caneta na área abaixo.</p>
           <SignaturePad ref={signatureRef} />
           <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-slate-800 bg-slate-950 p-3 text-xs text-slate-200">
@@ -345,7 +346,7 @@ export default function ChecklistEditor({
             <div><p className="text-[9px] uppercase text-slate-500">Protocolo</p><p className="font-mono text-sm font-black text-white">{detail.checklist.protocolo || "Não emitido"}</p></div>
             <button type="button" onClick={() => openDocumentOrNotify(detail.checklist.pdfUrl)} className="flex min-h-11 items-center gap-2 rounded-lg bg-sky-600 px-4 text-xs font-black text-white"><FileText className="h-4 w-4" /> VER PDF</button>
           </div>
-          <p className="text-xs text-slate-400">Assinado por {detail.checklist.assinaturaMotoristaNomeSnapshot} em {detail.checklist.dataAssinatura ? new Date(detail.checklist.dataAssinatura).toLocaleString("pt-BR") : "—"}.</p>
+          <p className="text-xs text-slate-400">Assinado por {detail.checklist.assinaturaUsuarioNomeSnapshot || detail.checklist.assinaturaMotoristaNomeSnapshot} em {detail.checklist.dataAssinatura ? new Date(detail.checklist.dataAssinatura).toLocaleString("pt-BR") : "—"}.</p>
         </div>
       )}
 
@@ -394,4 +395,3 @@ export default function ChecklistEditor({
     </>
   );
 }
-
