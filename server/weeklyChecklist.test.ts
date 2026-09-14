@@ -4,15 +4,18 @@ import type { DatabaseSchema } from "./database.ts";
 import { FileDatabase } from "./database.ts";
 import {
   DEFAULT_CHECKLIST_CONFIG,
+  canFieldUserAccessParticipants,
   canDriverAccessChecklist,
   canHelperAccessChecklist,
   findActiveVehicleBlock,
   getChecklistResult,
+  getChecklistStatusAfterSignatures,
   getChecklistWeek,
   resolveOperationalDriver,
   validateChecklistResponses,
   validateVehicleRelease,
   type ChecklistResposta,
+  type ChecklistParticipante,
   type ChecklistVeiculo,
   type VeiculoBloqueio,
 } from "../shared/weeklyChecklist.ts";
@@ -39,6 +42,18 @@ const response = (changes: Partial<ChecklistResposta> = {}): ChecklistResposta =
   exigeFotoSnapshot: true,
   exigeAcaoCorretivaSnapshot: true,
   bloqueiaVeiculoSnapshot: true,
+  ...changes,
+});
+
+const participant = (changes: Partial<ChecklistParticipante> = {}): ChecklistParticipante => ({
+  id: "chp-driver",
+  checklistId: "chk-1",
+  pessoaId: "mot-renato",
+  userId: "usr-renato",
+  tipoParticipante: "MOTORISTA",
+  nomeSnapshot: "Renato",
+  cpfSnapshot: "333",
+  statusAssinatura: "PENDENTE",
   ...changes,
 });
 
@@ -132,6 +147,35 @@ test("ajudante acessa somente checklist que preserva seu vínculo na rota", () =
   const target = checklist({ ajudanteIdsSnapshot: ["aju-paulo"] });
   assert.equal(canHelperAccessChecklist("aju-paulo", target), true);
   assert.equal(canHelperAccessChecklist("aju-outra-unidade", target), false);
+});
+
+test("assinatura do motorista não assina automaticamente o ajudante", () => {
+  const participants = [
+    participant({ statusAssinatura: "ASSINADO", dataAssinatura: "2026-09-01T10:00:00Z" }),
+    participant({ id: "chp-helper", pessoaId: "aju-joao", userId: "usr-joao", tipoParticipante: "AJUDANTE", nomeSnapshot: "João" }),
+  ];
+  assert.equal(getChecklistStatusAfterSignatures("CONFORME", participants), "AGUARDANDO_ASSINATURA_AJUDANTE");
+  assert.equal(participants[1].statusAssinatura, "PENDENTE");
+});
+
+test("assinatura individual exige correspondência simultânea de userId, pessoaId e perfil", () => {
+  const participants = [participant()];
+  assert.equal(canFieldUserAccessParticipants({ userId: "usr-renato", pessoaId: "mot-renato", type: "MOTORISTA", participants }), true);
+  assert.equal(canFieldUserAccessParticipants({ userId: "usr-outro", pessoaId: "mot-renato", type: "MOTORISTA", participants }), false);
+  assert.equal(canFieldUserAccessParticipants({ userId: "usr-renato", pessoaId: "mot-outro", type: "MOTORISTA", participants }), false);
+});
+
+test("ajudante conclui a assinatura sem criar outro checklist", () => {
+  const sameChecklistParticipants = [
+    participant({ statusAssinatura: "ASSINADO" }),
+    participant({ id: "chp-helper", pessoaId: "aju-joao", userId: "usr-joao", tipoParticipante: "AJUDANTE", nomeSnapshot: "João", statusAssinatura: "ASSINADO" }),
+  ];
+  assert.equal(new Set(sameChecklistParticipants.map((item) => item.checklistId)).size, 1);
+  assert.equal(getChecklistStatusAfterSignatures("CONFORME", sameChecklistParticipants), "CONFORME");
+});
+
+test("operação sem ajudante finaliza após a assinatura do motorista", () => {
+  assert.equal(getChecklistStatusAfterSignatures("COM_PENDENCIAS", [participant({ statusAssinatura: "ASSINADO" })]), "COM_PENDENCIAS");
 });
 
 test("sem checklist no prazo cria alerta e checklist concluído remove o alerta", () => {

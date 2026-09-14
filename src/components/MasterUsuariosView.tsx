@@ -402,7 +402,7 @@ export default function MasterUsuariosView({ unidades, userEmail, onRefresh, can
 
             {tipoUsuario === "MOTORISTA" && (
               <div className="space-y-1 rounded-lg border border-emerald-500/20 bg-emerald-500/5 p-3">
-                <label className="text-emerald-300 block font-mono font-medium">Cadastro oficial do motorista *</label>
+                <label className="text-emerald-300 block font-mono font-medium">Motorista vinculado *</label>
                 <select
                   value={motoristaId}
                   onChange={(e) => setMotoristaId(e.target.value)}
@@ -420,7 +420,7 @@ export default function MasterUsuariosView({ unidades, userEmail, onRefresh, can
 
             {tipoUsuario === "AJUDANTE" && (
               <div className="space-y-1 rounded-lg border border-teal-500/20 bg-teal-500/5 p-3">
-                <label className="text-teal-300 block font-mono font-medium">Cadastro oficial do ajudante *</label>
+                <label className="text-teal-300 block font-mono font-medium">Ajudante vinculado *</label>
                 <select value={ajudanteId} onChange={(e) => setAjudanteId(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-2 text-white text-xs outline-none cursor-pointer" required>
                   <option value="">Selecionar ajudante por ID oficial...</option>
                   {motoristas.filter((helper) => (helper.tipo === "Ajudante Fixo" || helper.tipo === "Ajudante Geral") && helper.unidadeId === unidadeId).map((helper) => <option key={helper.id} value={helper.id}>{helper.nome} · {helper.cpf}</option>)}

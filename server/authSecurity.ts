@@ -67,3 +67,24 @@ export const canManageUsers = (user: Usuario): boolean => {
   const permission = user.permissions?.usuarios as Record<string, boolean> | undefined;
   return permission?.editar === true || permission?.edit === true;
 };
+
+export const getActiveFieldLinkConflict = (input: {
+  users: Usuario[];
+  type: "MOTORISTA" | "AJUDANTE";
+  linkId?: string;
+  targetUserId?: string;
+  resultingStatus?: Usuario["status"];
+}): string | null => {
+  if (!input.linkId || input.resultingStatus === "inativo") return null;
+  const conflict = input.users.some((candidate) =>
+    candidate.id !== input.targetUserId &&
+    candidate.status === "ativo" &&
+    (input.type === "MOTORISTA"
+      ? candidate.motoristaId === input.linkId
+      : candidate.ajudanteId === input.linkId),
+  );
+  if (!conflict) return null;
+  return input.type === "MOTORISTA"
+    ? "Este motorista já possui um usuário ativo de acesso ao sistema."
+    : "Este ajudante já possui um usuário ativo de acesso ao sistema.";
+};

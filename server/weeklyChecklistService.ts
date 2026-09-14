@@ -8,6 +8,7 @@ import {
   type ChecklistAnexo,
   type ChecklistConfiguracao,
   type ChecklistItemTemplate,
+  type ChecklistParticipante,
   type ChecklistResposta,
   type ChecklistVeiculo,
   type OperationalDriverResolution,
@@ -25,6 +26,7 @@ import {
 
 export interface ChecklistDetail {
   checklist: ChecklistVeiculo;
+  participantes: ChecklistParticipante[];
   respostas: ChecklistResposta[];
   anexos: ChecklistAnexo[];
   bloqueios: VeiculoBloqueio[];
@@ -164,7 +166,7 @@ export function createChecklist(params: {
   const now = new Date().toISOString();
   const users = FileDatabase.get("usuarios") as Usuario[];
   const driverUser = resolution.driver
-    ? users.find((candidate) => candidate.status === "ativo" && candidate.motoristaId === resolution.driver?.id)
+    ? users.find((candidate) => candidate.status === "ativo" && candidate.tipo_usuario === "MOTORISTA" && candidate.motoristaId === resolution.driver?.id)
     : undefined;
   const helperIds = resolution.route?.ajudantesIds || [];
   const helpers = (FileDatabase.get("motoristas") as Motorista[]).filter((candidate) =>
@@ -172,6 +174,33 @@ export function createChecklist(params: {
     candidate.unidadeId === vehicle.unidadeId &&
     (candidate.tipo === "Ajudante Fixo" || candidate.tipo === "Ajudante Geral"),
   );
+  const participants: ChecklistParticipante[] = [
+    ...(resolution.driver ? [{
+      id: newId("chp"),
+      checklistId,
+      pessoaId: resolution.driver.id,
+      userId: driverUser?.id,
+      tipoParticipante: "MOTORISTA" as const,
+      nomeSnapshot: resolution.driver.nome,
+      cpfSnapshot: resolution.driver.cpf,
+      statusAssinatura: "PENDENTE" as const,
+    }] : []),
+    ...helpers.map((helper) => {
+      const helperUser = users.find((candidate) =>
+        candidate.status === "ativo" && candidate.tipo_usuario === "AJUDANTE" && candidate.ajudanteId === helper.id,
+      );
+      return {
+        id: newId("chp"),
+        checklistId,
+        pessoaId: helper.id,
+        userId: helperUser?.id,
+        tipoParticipante: "AJUDANTE" as const,
+        nomeSnapshot: helper.nome,
+        cpfSnapshot: helper.cpf,
+        statusAssinatura: "PENDENTE" as const,
+      };
+    }),
+  ];
 
   const sourceResponses = original
     ? (FileDatabase.get("checklist_respostas") || []).filter((response) => response.checklistId === original.id)
@@ -229,6 +258,10 @@ export function createChecklist(params: {
   };
 
   FileDatabase.add("checklists_veiculos", checklist, user.email);
+  FileDatabase.set("checklist_participantes", [
+    ...(FileDatabase.get("checklist_participantes") || []),
+    ...participants,
+  ]);
   const responses = original
     ? sourceResponses.map((item) => buildResponseFromSnapshot(checklistId, item))
     : templates.map((item) => buildResponseFromTemplate(checklistId, item));
@@ -240,8 +273,46 @@ export function createChecklist(params: {
 export function getChecklistDetail(checklistId: string): ChecklistDetail | null {
   const checklist = (FileDatabase.get("checklists_veiculos") || []).find((item) => item.id === checklistId);
   if (!checklist) return null;
+  const storedParticipants = (FileDatabase.get("checklist_participantes") || [])
+    .filter((participant) => participant.checklistId === checklistId);
+  const users = FileDatabase.get("usuarios") as Usuario[];
+  const people = FileDatabase.get("motoristas") as Motorista[];
+  const legacyParticipants: ChecklistParticipante[] = storedParticipants.length > 0 ? [] : [
+    ...(checklist.motoristaId ? [{
+      id: `chp-legacy-motorista-${checklist.id}`,
+      checklistId: checklist.id,
+      pessoaId: checklist.motoristaId,
+      userId: checklist.usuarioMotoristaId || (checklist.assinaturaUsuarioTipoSnapshot === "MOTORISTA" ? checklist.assinaturaUserId : undefined),
+      tipoParticipante: "MOTORISTA" as const,
+      nomeSnapshot: checklist.motoristaNomeSnapshot || "Motorista não identificado",
+      cpfSnapshot: checklist.motoristaCpfSnapshot,
+      assinaturaAnexoId: checklist.assinaturaUsuarioTipoSnapshot === "MOTORISTA" ? checklist.assinaturaAnexoId : undefined,
+      dataAssinatura: checklist.assinaturaUsuarioTipoSnapshot === "MOTORISTA" ? checklist.dataAssinatura : undefined,
+      statusAssinatura: checklist.assinaturaUsuarioTipoSnapshot === "MOTORISTA" && checklist.dataAssinatura ? "ASSINADO" as const : "PENDENTE" as const,
+    }] : []),
+    ...(checklist.ajudanteIdsSnapshot || []).map((helperId, index) => {
+      const helper = people.find((candidate) => candidate.id === helperId);
+      const helperUser = users.find((candidate) =>
+        candidate.id === checklist.assinaturaUserId && candidate.tipo_usuario === "AJUDANTE" && candidate.ajudanteId === helperId,
+      );
+      const signed = checklist.assinaturaUsuarioTipoSnapshot === "AJUDANTE" && Boolean(helperUser);
+      return {
+        id: `chp-legacy-ajudante-${checklist.id}-${helperId}`,
+        checklistId: checklist.id,
+        pessoaId: helperId,
+        userId: signed ? helperUser?.id : undefined,
+        tipoParticipante: "AJUDANTE" as const,
+        nomeSnapshot: checklist.ajudanteNomesSnapshot?.[index] || helper?.nome || "Ajudante não identificado",
+        cpfSnapshot: helper?.cpf,
+        assinaturaAnexoId: signed ? checklist.assinaturaAnexoId : undefined,
+        dataAssinatura: signed ? checklist.dataAssinatura : undefined,
+        statusAssinatura: signed && checklist.dataAssinatura ? "ASSINADO" as const : "PENDENTE" as const,
+      };
+    }),
+  ];
   return {
     checklist,
+    participantes: storedParticipants.length > 0 ? storedParticipants : legacyParticipants,
     respostas: (FileDatabase.get("checklist_respostas") || [])
       .filter((response) => response.checklistId === checklistId)
       .sort((left, right) => left.ordemSnapshot - right.ordemSnapshot),
@@ -330,6 +401,7 @@ export function getWeeklyFleetSummary(unitId: string, referenceDate: string): We
 export function replaceChecklistAttachment(params: {
   checklistId: string;
   responseId?: string;
+  participantId?: string;
   type: ChecklistAnexo["tipo"];
   dataUrl: string;
   mimeType: string;
@@ -341,12 +413,14 @@ export function replaceChecklistAttachment(params: {
   const remaining = attachments.filter((attachment) => !(
     attachment.checklistId === params.checklistId &&
     attachment.respostaId === params.responseId &&
+    attachment.participanteId === params.participantId &&
     attachment.tipo === params.type
   ));
   const attachment: ChecklistAnexo = {
     id: newId("cha"),
     checklistId: params.checklistId,
     respostaId: params.responseId,
+    participanteId: params.participantId,
     tipo: params.type,
     nome: params.name,
     mimeType: params.mimeType,

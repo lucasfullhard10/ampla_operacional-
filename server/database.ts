@@ -20,6 +20,7 @@ import {
   type ChecklistAnexo,
   type ChecklistConfiguracao,
   type ChecklistItemTemplate,
+  type ChecklistParticipante,
   type ChecklistProtocolCounter,
   type ChecklistResposta,
   type ChecklistVeiculo,
@@ -659,6 +660,7 @@ export interface DatabaseSchema {
   checklists_veiculos: ChecklistVeiculo[];
   checklist_respostas: ChecklistResposta[];
   checklist_anexos: ChecklistAnexo[];
+  checklist_participantes: ChecklistParticipante[];
   veiculos_bloqueios: VeiculoBloqueio[];
   checklist_configuracoes: ChecklistConfiguracao[];
   checklist_protocolos: ChecklistProtocolCounter[];
@@ -784,6 +786,7 @@ const INITIAL_DATABASE: DatabaseSchema = {
   checklists_veiculos: [],
   checklist_respostas: [],
   checklist_anexos: [],
+  checklist_participantes: [],
   veiculos_bloqueios: [],
   checklist_configuracoes: [DEFAULT_CHECKLIST_CONFIG],
   checklist_protocolos: [],

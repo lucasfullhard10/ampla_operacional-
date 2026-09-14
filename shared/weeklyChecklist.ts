@@ -5,6 +5,8 @@ export type ChecklistAnswerValue = "CONFORME" | "NAO_CONFORME" | "NAO_APLICA";
 export type ChecklistStatus =
   | "PENDENTE"
   | "EM_ANDAMENTO"
+  | "AGUARDANDO_ASSINATURA_MOTORISTA"
+  | "AGUARDANDO_ASSINATURA_AJUDANTE"
   | "CONFORME"
   | "COM_PENDENCIAS"
   | "BLOQUEADO"
@@ -15,6 +17,11 @@ export type ChecklistStatus =
 export type ChecklistResult = "CONFORME" | "COM_PENDENCIAS" | "BLOQUEADO";
 export type ChecklistFrequency = "SEMANAL";
 export type VehicleBlockStatus = "ATIVO" | "LIBERADO" | "CANCELADO";
+export type ChecklistParticipantType = "MOTORISTA" | "AJUDANTE" | "INSPETOR" | "OUTRO";
+export type ChecklistSignatureStatus = "PENDENTE" | "ASSINADO";
+
+export const CHECKLIST_SIGNATURE_DECLARATION =
+  "Declaro que conferi as informações registradas neste checklist e confirmo que correspondem às condições observadas no veículo no momento da inspeção.";
 
 export interface ChecklistItemTemplate {
   id: string;
@@ -66,6 +73,7 @@ export interface ChecklistAnexo {
   id: string;
   checklistId: string;
   respostaId?: string;
+  participanteId?: string;
   tipo: ChecklistAttachmentType;
   nome: string;
   mimeType: string;
@@ -73,6 +81,22 @@ export interface ChecklistAnexo {
   criadoEm: string;
   criadoPor: string;
   unidadeId: string;
+}
+
+export interface ChecklistParticipante {
+  id: string;
+  checklistId: string;
+  pessoaId?: string;
+  userId?: string;
+  tipoParticipante: ChecklistParticipantType;
+  nomeSnapshot: string;
+  cpfSnapshot?: string;
+  assinaturaAnexoId?: string;
+  dataAssinatura?: string;
+  statusAssinatura: ChecklistSignatureStatus;
+  declaracaoAceita?: boolean;
+  assinaturaIp?: string;
+  assinaturaUserAgent?: string;
 }
 
 export interface ChecklistVeiculo {
@@ -125,6 +149,7 @@ export interface ChecklistVeiculo {
   criadoEm: string;
   atualizadoEm: string;
   finalizadoEm?: string;
+  inspecaoConcluidaEm?: string;
   canceladoEm?: string;
   canceladoPor?: string;
   motivoCancelamento?: string;
@@ -396,6 +421,32 @@ export function isChecklistFinal(status: ChecklistStatus): boolean {
     "LIBERADO",
     "CANCELADO",
   ].includes(status);
+}
+
+export function getChecklistStatusAfterSignatures(
+  result: ChecklistResult,
+  participants: ChecklistParticipante[],
+): ChecklistStatus {
+  const driver = participants.find((participant) => participant.tipoParticipante === "MOTORISTA");
+  if (driver && driver.statusAssinatura !== "ASSINADO") return "AGUARDANDO_ASSINATURA_MOTORISTA";
+  const pendingHelper = participants.some((participant) =>
+    participant.tipoParticipante === "AJUDANTE" && participant.statusAssinatura !== "ASSINADO",
+  );
+  return pendingHelper ? "AGUARDANDO_ASSINATURA_AJUDANTE" : result;
+}
+
+export function canFieldUserAccessParticipants(input: {
+  userId: string;
+  pessoaId?: string;
+  type: "MOTORISTA" | "AJUDANTE";
+  participants: ChecklistParticipante[];
+}): boolean {
+  if (!input.pessoaId) return false;
+  return input.participants.some((participant) =>
+    participant.tipoParticipante === input.type &&
+    participant.pessoaId === input.pessoaId &&
+    (!participant.userId || participant.userId === input.userId),
+  );
 }
 
 export function isBlockingResponse(response: ChecklistResposta): boolean {

@@ -4,6 +4,7 @@ import test from "node:test";
 import type { Usuario, UsuarioUnidadePermissao } from "./database.ts";
 import {
   canUseExistingSession,
+  getActiveFieldLinkConflict,
   hashPassword,
   normalizeLogin,
   requiresPasswordChange,
@@ -94,6 +95,16 @@ test("redefinir senha ou bloquear permite revogar todas as sessões do usuário"
   assert.equal(sessions.revokeUser("usr-renato"), 2);
   assert.equal(sessions.get("token-1"), undefined);
   assert.equal(sessions.get("token-3")?.userId, "usr-outro");
+});
+
+test("não permite dois usuários ativos para o mesmo motorista ou ajudante", () => {
+  const users = [
+    user({ id: "usr-renato", tipo_usuario: "MOTORISTA", motoristaId: "mot-renato" }),
+    user({ id: "usr-joao", tipo_usuario: "AJUDANTE", ajudanteId: "aju-joao" }),
+  ];
+  assert.equal(getActiveFieldLinkConflict({ users, type: "MOTORISTA", linkId: "mot-renato" }), "Este motorista já possui um usuário ativo de acesso ao sistema.");
+  assert.equal(getActiveFieldLinkConflict({ users, type: "AJUDANTE", linkId: "aju-joao" }), "Este ajudante já possui um usuário ativo de acesso ao sistema.");
+  assert.equal(getActiveFieldLinkConflict({ users, type: "MOTORISTA", linkId: "mot-renato", resultingStatus: "inativo" }), null);
 });
 
 test("superior da unidade e MASTER recebem; outra unidade sem permissão não recebe", () => {

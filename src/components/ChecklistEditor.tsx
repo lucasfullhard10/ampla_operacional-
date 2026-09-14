@@ -13,18 +13,20 @@ import {
 } from "lucide-react";
 import {
   ChecklistAnexo,
+  ChecklistParticipante,
   ChecklistResposta,
   ChecklistVeiculo,
   Manutencao,
   Usuario,
   VeiculoBloqueio,
 } from "../types";
-import { isChecklistFinal } from "../../shared/weeklyChecklist";
+import { CHECKLIST_SIGNATURE_DECLARATION, isChecklistFinal } from "../../shared/weeklyChecklist";
 import { openDocumentOrNotify } from "../lib/documents";
 import { NotificationModal, NotificationType } from "./NotificationModal";
 
 export interface ChecklistDetailPayload {
   checklist: ChecklistVeiculo;
+  participantes: ChecklistParticipante[];
   respostas: ChecklistResposta[];
   anexos: ChecklistAnexo[];
   bloqueios: VeiculoBloqueio[];
@@ -71,6 +73,7 @@ const SignaturePad = React.forwardRef<SignaturePadHandle>(function SignaturePad(
     <div className="space-y-2">
       <canvas
         ref={canvasRef}
+        aria-label="Campo para desenhar a assinatura"
         width={720}
         height={220}
         className="h-36 w-full touch-none rounded-xl border border-slate-700 bg-white"
@@ -140,12 +143,29 @@ export default function ChecklistEditor({
   const [releaseReinspectionId, setReleaseReinspectionId] = useState("");
   const signatureRef = useRef<SignaturePadHandle>(null);
   const finalized = isChecklistFinal(detail.checklist.status);
+  const inspectionComplete = Boolean(detail.checklist.inspecaoConcluidaEm || detail.checklist.finalizadoEm);
   const signatoryRoleLabel = currentUser.tipo_usuario === "AJUDANTE" ? "ajudante" : currentUser.tipo_usuario === "MOTORISTA" ? "motorista" : "responsável";
   const canManage = currentUser.tipo_usuario !== "MOTORISTA" && currentUser.tipo_usuario !== "AJUDANTE";
+  const currentParticipant = detail.participantes.find((participant) =>
+    participant.tipoParticipante === currentUser.tipo_usuario &&
+    (!participant.userId || participant.userId === currentUser.id) &&
+    (currentUser.tipo_usuario === "MOTORISTA"
+      ? participant.pessoaId === currentUser.motoristaId
+      : currentUser.tipo_usuario === "AJUDANTE"
+        ? participant.pessoaId === currentUser.ajudanteId
+        : false),
+  );
+  const responsesLocked = finalized || inspectionComplete || currentUser.tipo_usuario === "AJUDANTE";
+  const canFinalizeInspection = !inspectionComplete && !finalized && currentUser.tipo_usuario !== "AJUDANTE";
+  const canSignPending = inspectionComplete && currentParticipant?.statusAssinatura === "PENDENTE";
+  const answeredCount = responses.filter((response) => Boolean(response.resposta)).length;
+  const progressPercent = responses.length > 0 ? Math.round((answeredCount / responses.length) * 100) : 0;
 
   useEffect(() => {
     setResponses(detail.respostas);
     setKm(detail.checklist.km ? String(detail.checklist.km) : "");
+    setDeclarationAccepted(false);
+    signatureRef.current?.clear();
   }, [detail]);
 
   const headers = { "Content-Type": "application/json", "x-selected-unit": selectedUnit };
@@ -210,14 +230,41 @@ export default function ChecklistEditor({
       });
       const payload = await parseApi(response);
       onChanged(payload.detail);
+      const resultingStatus = payload.detail?.checklist.status;
+      const pendingSignature = resultingStatus?.startsWith("AGUARDANDO_ASSINATURA_");
       setNotification({
         type: "success",
-        message: payload.detail?.checklist.bloqueouVeiculo
+        message: pendingSignature
+          ? `Inspeção concluída e sua assinatura registrada. Aguardando assinatura do ${resultingStatus === "AGUARDANDO_ASSINATURA_AJUDANTE" ? "ajudante" : "motorista"}.${payload.detail?.checklist.bloqueouVeiculo ? " O veículo está bloqueado por não conformidade crítica." : ""}`
+          : payload.detail?.checklist.bloqueouVeiculo
           ? "Checklist finalizado. VEÍCULO BLOQUEADO por não conformidade crítica."
           : "Checklist assinado e finalizado com sucesso.",
       });
     } catch (error) {
       setNotification({ type: "error", message: error instanceof Error ? error.message : "Não foi possível finalizar." });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleParticipantSign = async () => {
+    const signatureDataUrl = signatureRef.current?.getDataUrl();
+    if (!declarationAccepted || !signatureDataUrl) {
+      setNotification({ type: "error", message: "Aceite a declaração e assine no campo indicado." });
+      return;
+    }
+    setSaving(true);
+    try {
+      const response = await fetch(`/api/checklists/${detail.checklist.id}/assinar`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ declaracaoAceita: true, assinaturaDataUrl: signatureDataUrl }),
+      });
+      const payload = await parseApi(response);
+      onChanged(payload.detail);
+      setNotification({ type: "success", message: "Sua assinatura foi registrada sem alterar a assinatura dos demais participantes." });
+    } catch (error) {
+      setNotification({ type: "error", message: error instanceof Error ? error.message : "Não foi possível registrar sua assinatura." });
     } finally {
       setSaving(false);
     }
@@ -264,7 +311,31 @@ export default function ChecklistEditor({
         <div><span className="text-[9px] uppercase text-slate-500">Unidade</span><p className="text-xs font-semibold text-white">{detail.checklist.unidadeNomeSnapshot || detail.checklist.unidadeId}</p></div>
         <div><span className="text-[9px] uppercase text-slate-500">Rota / DT</span><p className="text-xs font-semibold text-white">{detail.checklist.rotaSnapshot || "Sem rota ativa"}</p></div>
         <div><span className="text-[9px] uppercase text-slate-500">CPF</span><p className="text-xs font-semibold text-white">{detail.checklist.motoristaCpfSnapshot || "—"}</p></div>
-        <label><span className="text-[9px] uppercase text-slate-500">Quilometragem</span><input disabled={finalized} type="number" min="0" value={km} onChange={(event) => setKm(event.target.value)} className="mt-1 w-full rounded border border-slate-800 bg-slate-900 px-2 py-1.5 text-xs text-white disabled:opacity-70" /></label>
+        <label><span className="text-[9px] uppercase text-slate-500">Quilometragem</span><input disabled={responsesLocked} type="number" min="0" value={km} onChange={(event) => setKm(event.target.value)} className="mt-1 w-full rounded border border-slate-800 bg-slate-900 px-2 py-1.5 text-xs text-white disabled:opacity-70" /></label>
+      </div>
+
+      <div className="rounded-xl border border-slate-800 bg-slate-900 p-3">
+        <div className="mb-2 flex items-center justify-between text-[10px] font-bold uppercase text-slate-400">
+          <span>Progresso do checklist</span><span>{answeredCount}/{responses.length} · {progressPercent}%</span>
+        </div>
+        <div className="h-2 overflow-hidden rounded-full bg-slate-800" role="progressbar" aria-label="Progresso do checklist" aria-valuemin={0} aria-valuemax={100} aria-valuenow={progressPercent}>
+          <div className="h-full rounded-full bg-emerald-500 transition-all" style={{ width: `${progressPercent}%` }} />
+        </div>
+      </div>
+
+      <div className="grid gap-2 sm:grid-cols-2">
+        {detail.participantes.map((participant) => (
+          <div key={participant.id} className="rounded-xl border border-slate-800 bg-slate-900 p-3">
+            <div className="flex items-center justify-between gap-2">
+              <div><p className="text-[9px] font-black uppercase text-slate-500">{participant.tipoParticipante}</p><p className="text-xs font-bold text-white">{participant.nomeSnapshot}</p></div>
+              <span className={`rounded px-2 py-1 text-[9px] font-black ${participant.statusAssinatura === "ASSINADO" ? "bg-emerald-500/15 text-emerald-300" : "bg-amber-500/15 text-amber-300"}`}>{participant.statusAssinatura}</span>
+            </div>
+            <p className="mt-1 text-[9px] text-slate-500">{participant.dataAssinatura ? new Date(participant.dataAssinatura).toLocaleString("pt-BR") : "Assinatura pendente"}</p>
+          </div>
+        ))}
+        {detail.participantes.every((participant) => participant.tipoParticipante !== "AJUDANTE") && (
+          <div className="rounded-xl border border-slate-800 bg-slate-900 p-3 text-xs text-slate-400">Ajudante não escalado nesta operação.</div>
+        )}
       </div>
 
       <div className="space-y-3">
@@ -284,7 +355,7 @@ export default function ChecklistEditor({
                   <button
                     key={answer}
                     type="button"
-                    disabled={finalized || (answer === "NAO_APLICA" && !response.permiteNASnapshot)}
+                    disabled={responsesLocked || (answer === "NAO_APLICA" && !response.permiteNASnapshot)}
                     onClick={() => setResponses((items) => items.map((item) => item.id === response.id ? { ...item, resposta: answer } : item))}
                     className={`min-h-12 rounded-lg border px-3 py-2 text-xs font-bold transition disabled:cursor-not-allowed disabled:opacity-30 ${response.resposta === answer ? (answer === "NAO_CONFORME" ? "border-rose-400 bg-rose-500/20 text-rose-200" : "border-emerald-400 bg-emerald-500/20 text-emerald-200") : "border-slate-700 bg-slate-950 text-slate-400"}`}
                   >
@@ -294,12 +365,12 @@ export default function ChecklistEditor({
               </div>
               {response.resposta === "NAO_CONFORME" && (
                 <div className="mt-3 grid gap-3 md:grid-cols-2">
-                  <textarea disabled={finalized} value={response.observacao || ""} onChange={(event) => setResponses((items) => items.map((item) => item.id === response.id ? { ...item, observacao: event.target.value } : item))} placeholder={`Observação${response.exigeObservacaoSnapshot ? " obrigatória" : ""}`} className="min-h-20 rounded-lg border border-slate-800 bg-slate-950 p-3 text-xs text-white" />
-                  <textarea disabled={finalized} value={response.acaoCorretiva || ""} onChange={(event) => setResponses((items) => items.map((item) => item.id === response.id ? { ...item, acaoCorretiva: event.target.value } : item))} placeholder={`Ação corretiva${response.exigeAcaoCorretivaSnapshot ? " obrigatória" : ""}`} className="min-h-20 rounded-lg border border-slate-800 bg-slate-950 p-3 text-xs text-white" />
-                  {!finalized && (
+                  <textarea disabled={responsesLocked} value={response.observacao || ""} onChange={(event) => setResponses((items) => items.map((item) => item.id === response.id ? { ...item, observacao: event.target.value } : item))} placeholder={`Observação${response.exigeObservacaoSnapshot ? " obrigatória" : ""}`} className="min-h-20 rounded-lg border border-slate-800 bg-slate-950 p-3 text-xs text-white" />
+                  <textarea disabled={responsesLocked} value={response.acaoCorretiva || ""} onChange={(event) => setResponses((items) => items.map((item) => item.id === response.id ? { ...item, acaoCorretiva: event.target.value } : item))} placeholder={`Ação corretiva${response.exigeAcaoCorretivaSnapshot ? " obrigatória" : ""}`} className="min-h-20 rounded-lg border border-slate-800 bg-slate-950 p-3 text-xs text-white" />
+                  {!responsesLocked && (
                     <label className="flex min-h-12 cursor-pointer items-center justify-center gap-2 rounded-lg border border-dashed border-slate-700 bg-slate-950 px-3 py-2 text-xs font-semibold text-slate-300 hover:border-sky-500">
                       <Camera className="h-4 w-4" /> {hasPhoto ? "Substituir foto" : `Adicionar foto${response.exigeFotoSnapshot ? " *" : ""}`}
-                      <input type="file" accept="image/png,image/jpeg" className="hidden" onChange={(event) => {
+                      <input type="file" accept="image/png,image/jpeg" capture="environment" className="hidden" onChange={(event) => {
                         const file = event.target.files?.[0];
                         if (!file) return;
                         if (file.size > 3 * 1024 * 1024) {
@@ -313,7 +384,7 @@ export default function ChecklistEditor({
                     </label>
                   )}
                   {hasPhoto && <div className="flex items-center gap-2 text-xs font-semibold text-emerald-400"><CheckCircle2 className="h-4 w-4" /> Evidência fotográfica registrada</div>}
-                  {finalized && canManage && !response.manutencaoId && (
+                  {inspectionComplete && canManage && !response.manutencaoId && (
                     <button type="button" disabled={saving} onClick={() => action(`/api/checklists/${detail.checklist.id}/gerar-manutencao`, { respostaId: response.id }, "Solicitação de manutenção criada e vinculada.")} className="flex min-h-11 items-center justify-center gap-2 rounded-lg bg-amber-600 px-3 text-xs font-black text-white hover:bg-amber-500"><Wrench className="h-4 w-4" /> GERAR SOLICITAÇÃO DE MANUTENÇÃO</button>
                   )}
                   {response.manutencaoId && <p className="text-[10px] font-mono text-amber-300">Manutenção vinculada: {response.manutencaoId}</p>}
@@ -324,14 +395,14 @@ export default function ChecklistEditor({
         })}
       </div>
 
-      {!finalized && (
+      {canFinalizeInspection && (
         <div className="space-y-4 rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-4">
           <div className="flex items-center gap-2"><PenTool className="h-5 w-5 text-emerald-400" /><h3 className="text-sm font-black text-white">Assinatura do {signatoryRoleLabel}</h3></div>
           <p className="text-xs text-slate-300">Assine usando o dedo ou a caneta na área abaixo.</p>
           <SignaturePad ref={signatureRef} />
           <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-slate-800 bg-slate-950 p-3 text-xs text-slate-200">
             <input type="checkbox" checked={declarationAccepted} onChange={(event) => setDeclarationAccepted(event.target.checked)} className="mt-0.5 h-4 w-4 accent-emerald-500" />
-            <span>Declaro que realizei a inspeção do veículo e que as informações registradas neste checklist são verdadeiras.</span>
+            <span>{CHECKLIST_SIGNATURE_DECLARATION}</span>
           </label>
           <div className="grid gap-2 sm:grid-cols-2">
             <button type="button" disabled={saving} onClick={handleSave} className="flex min-h-12 items-center justify-center gap-2 rounded-lg border border-slate-700 bg-slate-900 text-xs font-black text-white"><Save className="h-4 w-4" /> SALVAR RASCUNHO</button>
@@ -340,13 +411,26 @@ export default function ChecklistEditor({
         </div>
       )}
 
-      {finalized && (
+      {canSignPending && (
+        <div className="space-y-4 rounded-xl border border-teal-500/30 bg-teal-500/5 p-4">
+          <div className="flex items-center gap-2"><PenTool className="h-5 w-5 text-teal-300" /><h3 className="text-sm font-black text-white">Checklist aguardando sua confirmação</h3></div>
+          <p className="text-xs text-slate-300">Revise todas as respostas acima. A assinatura será associada somente ao seu usuário e cadastro oficial.</p>
+          <SignaturePad ref={signatureRef} />
+          <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-slate-800 bg-slate-950 p-3 text-xs text-slate-200">
+            <input type="checkbox" checked={declarationAccepted} onChange={(event) => setDeclarationAccepted(event.target.checked)} className="mt-0.5 h-4 w-4 accent-teal-500" />
+            <span>{CHECKLIST_SIGNATURE_DECLARATION}</span>
+          </label>
+          <button type="button" disabled={saving} onClick={handleParticipantSign} className="flex min-h-14 w-full items-center justify-center gap-2 rounded-lg bg-teal-600 text-xs font-black text-white hover:bg-teal-500"><ShieldCheck className="h-4 w-4" /> CONCORDO E ASSINO</button>
+        </div>
+      )}
+
+      {inspectionComplete && (
         <div className="space-y-4 rounded-xl border border-slate-800 bg-slate-900 p-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div><p className="text-[9px] uppercase text-slate-500">Protocolo</p><p className="font-mono text-sm font-black text-white">{detail.checklist.protocolo || "Não emitido"}</p></div>
             <button type="button" onClick={() => openDocumentOrNotify(detail.checklist.pdfUrl)} className="flex min-h-11 items-center gap-2 rounded-lg bg-sky-600 px-4 text-xs font-black text-white"><FileText className="h-4 w-4" /> VER PDF</button>
           </div>
-          <p className="text-xs text-slate-400">Assinado por {detail.checklist.assinaturaUsuarioNomeSnapshot || detail.checklist.assinaturaMotoristaNomeSnapshot} em {detail.checklist.dataAssinatura ? new Date(detail.checklist.dataAssinatura).toLocaleString("pt-BR") : "—"}.</p>
+          <p className="text-xs text-slate-400">As assinaturas são individuais. Participantes pendentes aparecem acima e nunca são marcados como assinados automaticamente.</p>
         </div>
       )}
 

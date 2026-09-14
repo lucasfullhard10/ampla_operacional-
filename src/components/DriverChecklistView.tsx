@@ -4,6 +4,7 @@ import {
   CheckCircle2,
   ClipboardCheck,
   Clock3,
+  History,
   LogOut,
   RefreshCw,
   Truck,
@@ -15,6 +16,7 @@ import { NotificationModal, NotificationType } from "./NotificationModal";
 interface DriverAssignment {
   veiculo: Veiculo;
   rota?: Rota;
+  motorista?: Motorista;
   origemMotorista: "ROTA_ATIVA" | "VINCULO_OFICIAL" | "SEM_MOTORISTA";
   semana: { start: string; end: string; identifier: string };
   checklist: ChecklistDetailPayload | null;
@@ -24,15 +26,21 @@ interface DriverAssignment {
 interface DriverCurrentPayload {
   driver?: Motorista;
   assignment: DriverAssignment | null;
+  linkedVehicle?: Veiculo;
   message?: string;
   error?: string;
   code?: string;
 }
 
+interface FieldChecklistHistory extends ChecklistVeiculo {
+  minhaAssinaturaStatus?: "PENDENTE" | "ASSINADO";
+}
+
 export default function DriverChecklistView({ currentUser, onLogout }: { currentUser: Usuario; onLogout: () => void }) {
   const [current, setCurrent] = useState<DriverCurrentPayload | null>(null);
-  const [history, setHistory] = useState<ChecklistVeiculo[]>([]);
+  const [history, setHistory] = useState<FieldChecklistHistory[]>([]);
   const [detail, setDetail] = useState<ChecklistDetailPayload | null>(null);
+  const [activeSection, setActiveSection] = useState<"atual" | "historico">("atual");
   const [loading, setLoading] = useState(true);
   const [notification, setNotification] = useState<NotificationType | null>(null);
   const headers = { "Content-Type": "application/json", "x-selected-unit": currentUser.unidadeId };
@@ -48,7 +56,6 @@ export default function DriverChecklistView({ currentUser, onLogout }: { current
       if (!currentResponse.ok) throw new Error(currentPayload.error || "Acesso ao checklist não disponível.");
       setCurrent(currentPayload as DriverCurrentPayload);
       if (historyResponse.ok) setHistory(await historyResponse.json());
-      if (currentPayload.assignment?.checklist) setDetail(currentPayload.assignment.checklist as ChecklistDetailPayload);
     } catch (error) {
       setNotification({ type: "error", message: error instanceof Error ? error.message : "Não foi possível carregar seu checklist." });
     } finally {
@@ -92,6 +99,10 @@ export default function DriverChecklistView({ currentUser, onLogout }: { current
       </header>
 
       <main className="mx-auto max-w-3xl space-y-5 p-4 pb-12">
+        <nav className="grid grid-cols-2 gap-2 rounded-xl border border-slate-800 bg-slate-900 p-2" aria-label="Menu operacional">
+          <button type="button" onClick={() => { setActiveSection("atual"); setDetail(null); }} className={`min-h-11 rounded-lg text-xs font-black ${activeSection === "atual" ? "bg-emerald-600 text-white" : "text-slate-400"}`}><ClipboardCheck className="mr-2 inline h-4 w-4" /> Meu Checklist</button>
+          <button type="button" onClick={() => { setActiveSection("historico"); setDetail(null); }} className={`min-h-11 rounded-lg text-xs font-black ${activeSection === "historico" ? "bg-emerald-600 text-white" : "text-slate-400"}`}><History className="mr-2 inline h-4 w-4" /> Histórico</button>
+        </nav>
         <section className="rounded-2xl border border-emerald-500/20 bg-gradient-to-br from-slate-900 to-emerald-950/30 p-5">
           <p className="text-xs text-slate-400">Bom dia,</p>
           <h1 className="mt-1 text-2xl font-black">{current?.driver?.nome || currentUser.nome}</h1>
@@ -100,22 +111,23 @@ export default function DriverChecklistView({ currentUser, onLogout }: { current
 
         {loading && <div className="flex min-h-48 items-center justify-center gap-2 text-sm text-slate-400"><RefreshCw className="h-5 w-5 animate-spin" /> Carregando sua operação...</div>}
 
-        {!loading && !current?.assignment && (
+        {!loading && activeSection === "atual" && !current?.assignment && (
           <section className="rounded-2xl border border-amber-500/20 bg-amber-500/5 p-6 text-center">
             <Clock3 className="mx-auto h-10 w-10 text-amber-400" />
-            <h2 className="mt-3 text-lg font-black">Nenhum veículo atribuído</h2>
+            <h2 className="mt-3 text-lg font-black">Nenhuma operação ativa</h2>
             <p className="mt-2 text-sm text-slate-400">{current?.message || "Procure um administrador para revisar seu vínculo operacional."}</p>
+            {current?.linkedVehicle && <div className="mt-4 rounded-xl border border-slate-800 bg-slate-950 p-3 text-left"><p className="text-[9px] font-black uppercase text-slate-500">Veículo vinculado</p><p className="mt-1 font-mono text-lg font-black">{current.linkedVehicle.placa}</p><p className="text-[10px] text-slate-500">Vínculo cadastral; não representa uma operação ativa hoje.</p></div>}
           </section>
         )}
 
-        {!loading && current?.assignment && (
+        {!loading && activeSection === "atual" && current?.assignment && (
           <>
             <section className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
               <div className="flex items-start justify-between gap-3">
                 <div><p className="text-[10px] font-bold uppercase text-slate-500">Veículo de hoje</p><h2 className="mt-1 font-mono text-3xl font-black">{current.assignment.veiculo.placa}</h2><p className="text-xs text-slate-400">{current.assignment.veiculo.modelo}</p></div>
                 <div className="rounded-xl bg-slate-950 p-3 text-emerald-400"><Truck className="h-7 w-7" /></div>
               </div>
-              <div className="mt-4 grid grid-cols-2 gap-3 border-t border-slate-800 pt-4 text-xs"><div><span className="text-slate-500">Origem</span><p className="font-semibold">{current.assignment.origemMotorista === "ROTA_ATIVA" ? "Rota/DT ativa" : "Vínculo oficial"}</p></div><div><span className="text-slate-500">Rota / DT</span><p className="font-semibold">{current.assignment.rota?.dt || "Sem rota ativa"}</p></div></div>
+              <div className="mt-4 grid grid-cols-2 gap-3 border-t border-slate-800 pt-4 text-xs"><div><span className="text-slate-500">Motorista</span><p className="font-semibold">{current.assignment.motorista?.nome || current.assignment.checklist?.checklist.motoristaNomeSnapshot || "Não identificado"}</p></div><div><span className="text-slate-500">Rota / DT</span><p className="font-semibold">{current.assignment.rota?.dt || "Sem rota ativa"}</p></div></div>
             </section>
 
             {current.assignment.bloqueios.some((block) => block.status === "ATIVO") && (
@@ -137,8 +149,16 @@ export default function DriverChecklistView({ currentUser, onLogout }: { current
           </section>
         )}
 
-        {history.length > 0 && !detail && (
-          <section className="space-y-3"><h2 className="text-sm font-black">Meus checklists</h2>{history.slice(0, 12).map((item) => <button key={item.id} type="button" onClick={() => openHistory(item.id)} className="flex w-full items-center justify-between rounded-xl border border-slate-800 bg-slate-900 p-4 text-left"><div><p className="font-mono text-xs font-black">{item.protocolo || "Rascunho"}</p><p className="mt-1 text-[10px] text-slate-500">{item.placaSnapshot} · {item.dataChecklist.split("-").reverse().join("/")}</p></div><span className="text-[9px] font-black text-slate-300">{item.status.replaceAll("_", " ")}</span></button>)}</section>
+        {activeSection === "atual" && !detail && history.some((item) => item.minhaAssinaturaStatus === "PENDENTE" && item.inspecaoConcluidaEm) && (
+          <section className="space-y-3 rounded-2xl border border-teal-500/25 bg-teal-500/5 p-4"><h2 className="text-sm font-black text-teal-200">Checklists aguardando sua assinatura</h2>{history.filter((item) => item.minhaAssinaturaStatus === "PENDENTE" && item.inspecaoConcluidaEm).slice(0, 4).map((item) => <button key={item.id} type="button" onClick={() => openHistory(item.id)} className="flex min-h-14 w-full items-center justify-between rounded-xl border border-teal-500/20 bg-slate-950 p-4 text-left"><div><p className="font-mono text-xs font-black">{item.placaSnapshot}</p><p className="text-[10px] text-slate-500">Checklist aguardando sua confirmação</p></div><span className="text-[9px] font-black text-teal-300">REVISAR</span></button>)}</section>
+        )}
+
+        {activeSection === "atual" && !detail && history.some((item) => Boolean(item.finalizadoEm)) && (
+          <section className="space-y-3"><h2 className="text-sm font-black">Concluídos recentemente</h2>{history.filter((item) => Boolean(item.finalizadoEm)).slice(0, 3).map((item) => <button key={item.id} type="button" onClick={() => openHistory(item.id)} className="flex min-h-14 w-full items-center justify-between rounded-xl border border-slate-800 bg-slate-900 p-4 text-left"><div><p className="font-mono text-xs font-black">{item.placaSnapshot}</p><p className="mt-1 text-[10px] text-slate-500">{item.finalizadoEm ? new Date(item.finalizadoEm).toLocaleString("pt-BR") : ""}</p></div><span className="text-[9px] font-black text-emerald-300">{item.status.replaceAll("_", " ")}</span></button>)}</section>
+        )}
+
+        {activeSection === "historico" && !detail && (
+          <section className="space-y-3"><h2 className="text-sm font-black">Checklists em que participei</h2>{history.length === 0 ? <p className="rounded-xl border border-slate-800 bg-slate-900 p-5 text-sm text-slate-400">Nenhum checklist encontrado.</p> : history.slice(0, 30).map((item) => <button key={item.id} type="button" onClick={() => openHistory(item.id)} className="flex w-full items-center justify-between rounded-xl border border-slate-800 bg-slate-900 p-4 text-left"><div><p className="font-mono text-xs font-black">{item.protocolo || "Rascunho"}</p><p className="mt-1 text-[10px] text-slate-500">{item.placaSnapshot} · {item.dataChecklist.split("-").reverse().join("/")}</p></div><span className="text-[9px] font-black text-slate-300">{item.status.replaceAll("_", " ")}</span></button>)}</section>
         )}
       </main>
       <NotificationModal notification={notification} onClose={() => setNotification(null)} />

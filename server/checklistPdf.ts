@@ -1,6 +1,7 @@
 import PDFDocument from "pdfkit";
 import type { Unidade } from "./database.ts";
 import type { ChecklistDetail } from "./weeklyChecklistService.ts";
+import { CHECKLIST_SIGNATURE_DECLARATION } from "../shared/weeklyChecklist.ts";
 
 const answerLabel = (value?: string) => {
   if (value === "CONFORME") return "Conforme";
@@ -25,7 +26,7 @@ export function createChecklistPdf(detail: ChecklistDetail, unit?: Unidade): Pro
     doc.on("end", () => resolve(Buffer.concat(chunks)));
     doc.on("error", reject);
 
-    const { checklist, respostas, anexos, bloqueios, manutencoes, reinspecoes } = detail;
+    const { checklist, participantes, respostas, anexos, bloqueios, manutencoes, reinspecoes } = detail;
     doc.rect(0, 0, doc.page.width, 82).fill("#0f172a");
     doc.fillColor("#34d399").fontSize(10).font("Helvetica-Bold").text("SISTEMA AMPLA", 42, 25);
     doc.fillColor("#ffffff").fontSize(18).text("CHECKLIST SEMANAL DE VEÍCULO", 42, 42);
@@ -37,7 +38,9 @@ export function createChecklistPdf(detail: ChecklistDetail, unit?: Unidade): Pro
     };
     line("Unidade", checklist.unidadeNomeSnapshot || unit?.nome || checklist.unidadeId);
     line("Protocolo", checklist.protocolo || "Não emitido");
-    line("Data/hora", checklist.finalizadoEm ? new Date(checklist.finalizadoEm).toLocaleString("pt-BR") : checklist.dataChecklist);
+    line("Data/hora", checklist.finalizadoEm || checklist.inspecaoConcluidaEm
+      ? new Date(checklist.finalizadoEm || checklist.inspecaoConcluidaEm!).toLocaleString("pt-BR")
+      : checklist.dataChecklist);
     line("Semana", `${checklist.dataInicioSemana.split("-").reverse().join("/")} a ${checklist.dataFimSemana.split("-").reverse().join("/")}`);
     line("Veículo", `${checklist.placaSnapshot}${checklist.veiculoModeloSnapshot ? ` — ${checklist.veiculoModeloSnapshot}` : ""}`);
     line("Motorista", checklist.motoristaNomeSnapshot || "Nenhum motorista vinculado");
@@ -102,27 +105,36 @@ export function createChecklistPdf(detail: ChecklistDetail, unit?: Unidade): Pro
       });
     }
 
-    if (doc.y > 620) doc.addPage();
+    if (doc.y > 560) doc.addPage();
     doc.moveDown(1);
-    doc.fillColor("#0f172a").font("Helvetica-Bold").fontSize(10).text("Declaração e assinatura");
-    doc.fillColor("#334155").font("Helvetica").fontSize(8).text(
-      "Declaro que realizei a inspeção do veículo e que as informações registradas neste checklist são verdadeiras.",
-      { width: 500 },
+    doc.fillColor("#0f172a").font("Helvetica-Bold").fontSize(10).text("Declaração e assinaturas individuais");
+    doc.fillColor("#334155").font("Helvetica").fontSize(8).text(CHECKLIST_SIGNATURE_DECLARATION, { width: 500 });
+    const operationalParticipants = participantes.filter((participant) =>
+      participant.tipoParticipante === "MOTORISTA" || participant.tipoParticipante === "AJUDANTE",
     );
-    const signature = anexos.find((attachment) => attachment.id === checklist.assinaturaAnexoId);
-    const signatureImage = dataUrlBuffer(signature?.dataUrl);
-    if (signatureImage) {
-      try {
-        doc.image(signatureImage, 42, doc.y + 8, { fit: [210, 75] });
-        doc.moveDown(6.5);
-      } catch {
-        doc.moveDown(1);
+    operationalParticipants.forEach((participant) => {
+      if (doc.y > 650) doc.addPage();
+      doc.moveDown(0.8);
+      doc.fillColor("#0f172a").font("Helvetica-Bold").fontSize(9).text(participant.tipoParticipante);
+      line("Nome", participant.nomeSnapshot);
+      line("CPF", participant.cpfSnapshot || "Não informado");
+      line("Status", participant.statusAssinatura === "ASSINADO" ? "Assinado" : "Assinatura não registrada");
+      line("Data/hora", participant.dataAssinatura ? new Date(participant.dataAssinatura).toLocaleString("pt-BR") : "—");
+      const signature = anexos.find((attachment) => attachment.id === participant.assinaturaAnexoId);
+      const signatureImage = dataUrlBuffer(signature?.dataUrl);
+      if (signatureImage) {
+        try {
+          doc.image(signatureImage, 335, doc.y - 47, { fit: [190, 65] });
+          doc.moveDown(2.2);
+        } catch {
+          doc.moveDown(0.5);
+        }
       }
+    });
+    if (!operationalParticipants.some((participant) => participant.tipoParticipante === "AJUDANTE")) {
+      doc.moveDown(0.8);
+      doc.fillColor("#475569").font("Helvetica-Oblique").fontSize(8).text("Ajudante não escalado nesta operação.");
     }
-    line("Assinado por", checklist.assinaturaUsuarioNomeSnapshot || checklist.assinaturaMotoristaNomeSnapshot || checklist.motoristaNomeSnapshot);
-    line("Perfil do signatário", checklist.assinaturaUsuarioTipoSnapshot || "MOTORISTA");
-    line("CPF do motorista vinculado", checklist.assinaturaMotoristaCpfSnapshot || checklist.motoristaCpfSnapshot);
-    line("Data/hora da assinatura", checklist.dataAssinatura ? new Date(checklist.dataAssinatura).toLocaleString("pt-BR") : "—");
     line("Bloqueio operacional", checklist.bloqueouVeiculo ? "VEÍCULO BLOQUEADO" : "Não");
 
     doc.end();

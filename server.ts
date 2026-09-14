@@ -15,10 +15,12 @@ import {
 } from "./shared/ships";
 import {
   CHECKLIST_MODULE_KEY,
+  canFieldUserAccessParticipants,
   canDriverAccessChecklist,
   canHelperAccessChecklist,
   formatLocalIsoDate,
   getChecklistResult,
+  getChecklistStatusAfterSignatures,
   getChecklistWeek,
   isRouteOperationallyActive,
   isChecklistFinal,
@@ -46,6 +48,7 @@ import { createChecklistPdf } from "./server/checklistPdf";
 import {
   canManageUsers,
   canUseExistingSession,
+  getActiveFieldLinkConflict,
   hashPassword,
   isFieldUser,
   isMasterUser as isMasterAccount,
@@ -172,9 +175,18 @@ async function startServer() {
           { method: "GET", pattern: /^\/checklists\/[^/]+$/ },
           { method: "POST", pattern: /^\/checklists\/[^/]+\/respostas$/ },
           { method: "POST", pattern: /^\/checklists\/[^/]+\/finalizar$/ },
+          { method: "POST", pattern: /^\/checklists\/[^/]+\/assinar$/ },
           { method: "GET", pattern: /^\/checklists\/[^/]+\/pdf$/ },
         ].some((rule) => rule.method === req.method && rule.pattern.test(req.path));
         if (!driverAllowed) {
+          const rawIp = String(req.headers["x-forwarded-for"] || req.socket.remoteAddress || "127.0.0.1").split(",")[0].replace(/^.*:/, "");
+          FileDatabase.logAudit(
+            authenticatedUser.nome,
+            "ACESSO_NEGADO_USUARIO_CAMPO",
+            `${authenticatedUser.tipo_usuario} tentou acessar ${req.method} ${req.path}.`,
+            authenticatedUser.unidadeId,
+            rawIp,
+          );
           return res.status(403).json({ error: `O perfil ${authenticatedUser.tipo_usuario} não possui acesso a este módulo.` });
         }
       }
@@ -298,6 +310,11 @@ async function startServer() {
     FileDatabase.logAudit(username, action, details, unitName, ip);
   };
 
+  const denyChecklistAccess = (req: express.Request, res: express.Response, user: Usuario, checklistId: string) => {
+    logAudit(req, user.nome, "ACESSO_NEGADO_CHECKLIST", `${user.tipo_usuario || user.perfil} tentou acessar o checklist ${checklistId} sem vínculo ou permissão.`, user.unidadeId || user.unidade_id || "");
+    return res.status(403).json({ error: "Acesso negado a este checklist." });
+  };
+
   // Helper to get the active user validated by the session middleware
   const getRequestUser = (req: express.Request): Usuario => {
     const user = (req as express.Request & { authenticatedUser?: Usuario }).authenticatedUser;
@@ -328,10 +345,19 @@ async function startServer() {
     return authorized.includes("Todas") || authorized.includes(unitId);
   };
   const canAccessChecklist = (user: Usuario, checklist: ChecklistVeiculo) => {
-    if (isDriverUser(user)) {
-      return canDriverAccessChecklist(user.motoristaId, user.id, checklist);
+    if (isFieldUser(user)) {
+      const participants = getChecklistDetail(checklist.id)?.participantes || [];
+      if (participants.length > 0) {
+        return canFieldUserAccessParticipants({
+          userId: user.id,
+          pessoaId: isDriverUser(user) ? user.motoristaId : user.ajudanteId,
+          type: isDriverUser(user) ? "MOTORISTA" : "AJUDANTE",
+          participants,
+        }) && checklist.unidadeId === (user.unidadeId || user.unidade_id);
+      }
+      if (isDriverUser(user)) return canDriverAccessChecklist(user.motoristaId, user.id, checklist);
+      return canHelperAccessChecklist(user.ajudanteId, checklist);
     }
-    if (isHelperUser(user)) return canHelperAccessChecklist(user.ajudanteId, checklist);
     return canViewChecklistModule(user) && canAccessUnit(user, checklist.unidadeId);
   };
   const getClientIp = (req: express.Request) => {
@@ -346,6 +372,42 @@ async function startServer() {
     const bytes = Buffer.byteLength(match[2], "base64");
     if (bytes > 3 * 1024 * 1024) throw new Error(`${label} excede o limite de 3 MB.`);
     return { dataUrl: value, mimeType: match[1] };
+  };
+
+  const ensureImmediateCriticalBlocks = (req: express.Request, user: Usuario, detail: NonNullable<ReturnType<typeof getChecklistDetail>>) => {
+    const now = new Date().toISOString();
+    let created = 0;
+    detail.respostas
+      .filter((response) => response.resposta === "NAO_CONFORME" && response.criticidadeSnapshot === "CRITICA" && response.bloqueiaVeiculoSnapshot)
+      .forEach((response) => {
+        const existing = getActiveVehicleBlocks(detail.checklist.veiculoId).find((block) =>
+          block.checklistId === detail.checklist.id && block.itemId === response.itemTemplateId,
+        );
+        if (existing) return;
+        const block: VeiculoBloqueio = {
+          id: `vbl-${crypto.randomUUID()}`,
+          veiculoId: detail.checklist.veiculoId,
+          checklistId: detail.checklist.id,
+          itemId: response.itemTemplateId,
+          motivo: `${response.codigoSnapshot} — ${response.descricaoSnapshot}${response.observacao ? `: ${response.observacao}` : ""}`,
+          dataHoraBloqueio: now,
+          unidadeId: detail.checklist.unidadeId,
+          status: "ATIVO",
+          usuarioResponsavel: user.id,
+        };
+        FileDatabase.add("veiculos_bloqueios", block, user.email);
+        logAudit(req, user.nome, "VEICULO_BLOQUEADO_CHECKLIST", `Bloqueio imediato do veículo ${detail.checklist.placaSnapshot}; checklist ${detail.checklist.protocolo || detail.checklist.id}; motivo: ${block.motivo}.`, detail.checklist.unidadeId);
+        created += 1;
+      });
+    if (created > 0 || detail.respostas.some((response) => response.resposta === "NAO_CONFORME" && response.criticidadeSnapshot === "CRITICA" && response.bloqueiaVeiculoSnapshot)) {
+      FileDatabase.update("checklists_veiculos", detail.checklist.id, {
+        possuiNaoConformidade: true,
+        possuiNaoConformidadeCritica: true,
+        bloqueouVeiculo: true,
+        atualizadoEm: now,
+      }, user.email);
+    }
+    return created;
   };
 
   const emitChecklistNotifications = async (
@@ -1557,6 +1619,7 @@ async function startServer() {
     unitId?: string;
     motoristaId?: string;
     ajudanteId?: string;
+    status?: Usuario["status"];
     users: Usuario[];
     targetIndex?: number;
   }): string | null => {
@@ -1568,11 +1631,13 @@ async function startServer() {
       : person && (person.tipo === "Ajudante Fixo" || person.tipo === "Ajudante Geral");
     if (!validType) return `O usuário ${input.type} deve estar vinculado a um cadastro oficial válido.`;
     if (person!.unidadeId !== input.unitId) return "O profissional oficial e o usuário devem pertencer à mesma unidade.";
-    const duplicate = input.users.some((candidate, index) =>
-      index !== input.targetIndex &&
-      (input.type === "MOTORISTA" ? candidate.motoristaId === linkId : candidate.ajudanteId === linkId),
-    );
-    return duplicate ? "Este profissional já está vinculado a outro usuário." : null;
+    return getActiveFieldLinkConflict({
+      users: input.users,
+      type: input.type,
+      linkId,
+      targetUserId: input.targetIndex === undefined ? undefined : input.users[input.targetIndex]?.id,
+      resultingStatus: input.status,
+    });
   };
 
   app.get("/api/usuarios", (req, res) => {
@@ -1654,7 +1719,7 @@ async function startServer() {
     if (currentUsers.some((candidate) => normalizeLogin(candidate.email) === normalizedLogin || candidate.id.toLowerCase() === normalizedLogin)) {
       return res.status(409).json({ error: "Login já cadastrado." });
     }
-    const linkError = validateOfficialUserLink({ type: tipo_usuario, unitId: unidade_id, motoristaId, ajudanteId, users: currentUsers });
+    const linkError = validateOfficialUserLink({ type: tipo_usuario, unitId: unidade_id, motoristaId, ajudanteId, status: status || "ativo", users: currentUsers });
     if (linkError) return res.status(409).json({ error: linkError });
 
     // Map new tipo_usuario to classic perfil to maintain backward compatibility
@@ -1734,13 +1799,15 @@ async function startServer() {
     const resultingUnit = unidade_id || target.unidadeId || target.unidade_id;
     const resultingDriverId = motoristaId !== undefined ? motoristaId : target.motoristaId;
     const resultingHelperId = ajudanteId !== undefined ? ajudanteId : target.ajudanteId;
-    const shouldValidateLink = tipo_usuario !== undefined || unidade_id !== undefined || motoristaId !== undefined || ajudanteId !== undefined;
+    const resultingStatus = status || target.status;
+    const shouldValidateLink = tipo_usuario !== undefined || unidade_id !== undefined || motoristaId !== undefined || ajudanteId !== undefined || status !== undefined;
     if (shouldValidateLink) {
       const linkError = validateOfficialUserLink({
         type: resultingType,
         unitId: resultingUnit,
         motoristaId: resultingDriverId,
         ajudanteId: resultingHelperId,
+        status: resultingStatus,
         users: currentUsers,
         targetIndex: targetIdx,
       });
@@ -1865,6 +1932,18 @@ async function startServer() {
 
     if (targetUser.id === user.id) {
       return res.status(400).json({ error: "Você não pode se auto-excluir." });
+    }
+
+    const hasChecklistHistory = (FileDatabase.get("checklist_participantes") || []).some((participant) =>
+      participant.userId === targetUser.id ||
+      (targetUser.motoristaId && participant.tipoParticipante === "MOTORISTA" && participant.pessoaId === targetUser.motoristaId) ||
+      (targetUser.ajudanteId && participant.tipoParticipante === "AJUDANTE" && participant.pessoaId === targetUser.ajudanteId),
+    );
+    if (hasChecklistHistory || isFieldUser(targetUser)) {
+      FileDatabase.update("usuarios", targetUser.id, { status: "inativo", bloqueado: true }, user.email);
+      sessions.revokeUser(targetUser.id);
+      logAudit(req, user.nome, "DESATIVACAO_USUARIO", `Desativou a conta ${targetName} (ID: ${targetUser.id}) preservando vínculos e assinaturas históricas.`, targetUser.unidadeId);
+      return res.json({ success: true, deactivated: true });
     }
 
     const deleted = FileDatabase.delete("usuarios", targetUser.id, user.email);
@@ -4300,7 +4379,9 @@ async function startServer() {
     const officialPersonId = isDriverUser(user) ? user.motoristaId : user.ajudanteId;
     if (!officialPersonId) {
       return res.status(403).json({
-        error: "Seu usuário ainda não está vinculado a um cadastro profissional. Procure um administrador.",
+        error: isDriverUser(user)
+          ? "Seu usuário ainda não está vinculado a um cadastro de motorista. Procure um administrador."
+          : "Seu usuário ainda não está vinculado a um cadastro de ajudante. Procure um administrador.",
         code: "FIELD_USER_NOT_LINKED",
       });
     }
@@ -4310,27 +4391,31 @@ async function startServer() {
       : person && (person.tipo === "Ajudante Fixo" || person.tipo === "Ajudante Geral");
     if (!validPersonType || person!.unidadeId !== user.unidadeId) {
       return res.status(403).json({
-        error: "Seu usuário ainda não está vinculado a um cadastro profissional válido. Procure um administrador.",
+        error: isDriverUser(user)
+          ? "Seu usuário ainda não está vinculado a um cadastro de motorista. Procure um administrador."
+          : "Seu usuário ainda não está vinculado a um cadastro de ajudante. Procure um administrador.",
         code: "FIELD_USER_NOT_LINKED",
       });
     }
     const today = formatLocalIsoDate(new Date());
     const vehicles = FileDatabase.get("veiculos").filter((vehicle) => vehicle.unidadeId === person!.unidadeId);
-    const assignments = isDriverUser(user)
-      ? vehicles
-          .map((vehicle) => ({ vehicle, resolution: resolveChecklistDriver(vehicle, today) }))
-          .filter((entry) => entry.resolution.driver?.id === person!.id)
-          .sort((left, right) => Number(Boolean(right.resolution.route)) - Number(Boolean(left.resolution.route)))
-      : (FileDatabase.get("rotas") as Rota[])
-          .filter((route) => route.unidadeId === person!.unidadeId && route.ajudantesIds?.includes(person!.id) && isRouteOperationallyActive(route, today))
-          .map((route) => {
-            const vehicle = vehicles.find((candidate) => candidate.id === route.veiculoId);
-            return vehicle ? { vehicle, resolution: { ...resolveChecklistDriver(vehicle, today), route } } : null;
-          })
-          .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry));
+    const assignments = vehicles
+      .map((vehicle) => ({ vehicle, resolution: resolveChecklistDriver(vehicle, today) }))
+      .filter(({ resolution }) => resolution.route && (isDriverUser(user)
+        ? resolution.route.motoristaId === person!.id
+        : resolution.route.ajudantesIds?.includes(person!.id) === true));
     const assignment = assignments[0];
     if (!assignment) {
-      return res.json({ driver: person, professionalRole: user.tipo_usuario, assignment: null, message: "Nenhum veículo ou rota está atribuído a você hoje." });
+      const linkedVehicle = isDriverUser(user)
+        ? vehicles.find((vehicle) => vehicle.motoristaId === person!.id)
+        : undefined;
+      return res.json({
+        driver: person,
+        professionalRole: user.tipo_usuario,
+        assignment: null,
+        linkedVehicle,
+        message: "Nenhuma operação ativa encontrada para você hoje.",
+      });
     }
     const config = getChecklistConfiguration(person!.unidadeId);
     const week = getChecklistWeek(today, config.diaInicialSemana);
@@ -4349,6 +4434,7 @@ async function startServer() {
       assignment: {
         veiculo: assignment.vehicle,
         rota: assignment.resolution.route,
+        motorista: assignment.resolution.driver,
         origemMotorista: assignment.resolution.source,
         semana: week,
         checklist: checklist ? getChecklistDetail(checklist.id) : null,
@@ -4363,11 +4449,16 @@ async function startServer() {
     const officialPersonId = isDriverUser(user) ? user.motoristaId : user.ajudanteId;
     if (!officialPersonId) return res.status(403).json({ error: "Usuário sem vínculo oficial." });
     const list = FileDatabase.get("checklists_veiculos")
-      .filter((item) => isDriverUser(user)
-        ? item.motoristaId === officialPersonId && (!item.usuarioMotoristaId || item.usuarioMotoristaId === user.id)
-        : item.ajudanteIdsSnapshot?.includes(officialPersonId))
+      .filter((item) => canAccessChecklist(user, item))
       .sort((left, right) => right.criadoEm.localeCompare(left.criadoEm));
-    res.json(list);
+    res.json(list.map((item) => {
+      const participant = getChecklistDetail(item.id)?.participantes.find((candidate) =>
+        candidate.tipoParticipante === user.tipo_usuario &&
+        candidate.pessoaId === officialPersonId &&
+        (!candidate.userId || candidate.userId === user.id),
+      );
+      return { ...item, minhaAssinaturaStatus: participant?.statusAssinatura || "PENDENTE" };
+    }));
   });
 
   app.get("/api/checklists", (req, res) => {
@@ -4375,9 +4466,7 @@ async function startServer() {
     if (!canViewChecklistModule(user)) return res.status(403).json({ error: "Acesso negado." });
     let list = FileDatabase.get("checklists_veiculos") || [];
     if (isFieldUser(user)) {
-      list = list.filter((item) => isDriverUser(user)
-        ? Boolean(user.motoristaId) && item.motoristaId === user.motoristaId && (!item.usuarioMotoristaId || item.usuarioMotoristaId === user.id)
-        : Boolean(user.ajudanteId) && item.ajudanteIdsSnapshot?.includes(user.ajudanteId!) === true);
+      list = list.filter((item) => canAccessChecklist(user, item));
     } else {
       const unitId = typeof req.query.unidadeId === "string" ? req.query.unidadeId : getRequestUnitContext(req, user);
       if (unitId !== "Todas") list = list.filter((item) => item.unidadeId === unitId && canAccessUnit(user, item.unidadeId));
@@ -4419,6 +4508,9 @@ async function startServer() {
     }
     const resolution = resolveChecklistDriver(vehicle, operationalDate);
     if (isFieldUser(user)) {
+      if (!resolution.route || !isRouteOperationallyActive(resolution.route, today)) {
+        return res.status(403).json({ error: "Nenhuma operação ativa encontrada para você hoje." });
+      }
       if (isDriverUser(user)) {
         if (!user.motoristaId) return res.status(403).json({ error: "Seu usuário ainda não está vinculado a um cadastro de motorista. Procure um administrador." });
         if (resolution.driver?.id !== user.motoristaId) return res.status(403).json({ error: "Este veículo não está atribuído ao seu cadastro operacional hoje." });
@@ -4431,7 +4523,10 @@ async function startServer() {
       item.veiculoId === vehicle.id && item.unidadeId === vehicle.unidadeId && item.identificadorSemana === week.identifier &&
       !item.checklistOriginalId && item.status !== "CANCELADO",
     );
-    if (duplicate) return res.status(409).json({ error: "Já existe um checklist original para este veículo e semana.", checklistId: duplicate.id });
+    if (duplicate) {
+      if (isFieldUser(user) && canAccessChecklist(user, duplicate)) return res.json(getChecklistDetail(duplicate.id));
+      return res.status(409).json({ error: "Já existe um checklist original para este veículo e semana.", checklistId: duplicate.id });
+    }
     try {
       const detail = createChecklist({ vehicle, user, operationalDate, km: typeof body.km === "number" ? body.km : undefined });
       logAudit(req, user.nome, "CHECKLIST_INICIADO", `Iniciou checklist do veículo ${vehicle.placa}; motorista: ${detail.checklist.motoristaNomeSnapshot || "não vinculado"}; origem: ${detail.checklist.origemMotorista}.`, vehicle.unidadeId);
@@ -4445,7 +4540,7 @@ async function startServer() {
     const user = getRequestUser(req);
     const detail = getChecklistDetail(req.params.id);
     if (!detail) return res.status(404).json({ error: "Checklist não encontrado." });
-    if (!canAccessChecklist(user, detail.checklist)) return res.status(403).json({ error: "Acesso negado a este checklist." });
+    if (!canAccessChecklist(user, detail.checklist)) return denyChecklistAccess(req, res, user, detail.checklist.id);
     res.json(detail);
   });
 
@@ -4463,7 +4558,9 @@ async function startServer() {
     const user = getRequestUser(req);
     const detail = getChecklistDetail(req.params.id);
     if (!detail) return res.status(404).json({ error: "Checklist não encontrado." });
-    if (!canAccessChecklist(user, detail.checklist)) return res.status(403).json({ error: "Acesso negado a este checklist." });
+    if (!canAccessChecklist(user, detail.checklist)) return denyChecklistAccess(req, res, user, detail.checklist.id);
+    if (isHelperUser(user)) return res.status(403).json({ error: "O ajudante pode revisar e assinar, mas não pode alterar as respostas do motorista." });
+    if (detail.checklist.inspecaoConcluidaEm) return res.status(409).json({ error: "A inspeção já foi concluída; as respostas estão bloqueadas para assinatura." });
     if (isChecklistFinal(detail.checklist.status)) return res.status(409).json({ error: "Checklist finalizado não permite edição livre. Utilize reinspeção." });
     const body = req.body as { respostas?: ChecklistResponseInput[]; km?: number; notifyAwaitingSignature?: boolean };
     if (!Array.isArray(body.respostas)) return res.status(400).json({ error: "Lista de respostas inválida." });
@@ -4514,7 +4611,9 @@ async function startServer() {
       km: typeof body.km === "number" && body.km >= 0 ? body.km : detail.checklist.km,
       atualizadoEm: new Date().toISOString(),
     }, user.email) as ChecklistVeiculo;
-    const refreshed = getChecklistDetail(detail.checklist.id)!;
+    let refreshed = getChecklistDetail(detail.checklist.id)!;
+    ensureImmediateCriticalBlocks(req, user, refreshed);
+    refreshed = getChecklistDetail(detail.checklist.id)!;
     if (body.notifyAwaitingSignature !== false && validateChecklistResponses(refreshed.respostas).length === 0) {
       try {
         await emitChecklistNotifications(updatedChecklist, user, ["CHECKLIST_AGUARDANDO_ASSINATURA"]);
@@ -4529,17 +4628,18 @@ async function startServer() {
     const user = getRequestUser(req);
     const detail = getChecklistDetail(req.params.id);
     if (!detail) return res.status(404).json({ error: "Checklist não encontrado." });
-    if (!canAccessChecklist(user, detail.checklist)) return res.status(403).json({ error: "Acesso negado a este checklist." });
+    if (!canAccessChecklist(user, detail.checklist)) return denyChecklistAccess(req, res, user, detail.checklist.id);
     if (isChecklistFinal(detail.checklist.status)) {
-      try {
-        await emitChecklistNotifications(detail.checklist, user, getChecklistFinalNotificationTypes(detail.checklist), detail.checklist.finalizadoEm);
-      } catch (error) {
-        return res.status(500).json({ error: "Checklist finalizado, mas a notificação ainda não foi persistida.", details: error instanceof Error ? error.message : String(error) });
-      }
       return res.json({ success: true, idempotent: true, checklist: detail.checklist, detail });
     }
+    if (detail.checklist.inspecaoConcluidaEm) {
+      return res.status(409).json({ error: "A inspeção já foi concluída. Use a confirmação individual para registrar a assinatura pendente." });
+    }
+    if (isHelperUser(user)) {
+      return res.status(403).json({ error: "O ajudante deve revisar o checklist concluído e assinar somente a própria confirmação." });
+    }
     const body = req.body as { declaracaoAceita?: boolean; assinaturaDataUrl?: string };
-    if (body.declaracaoAceita !== true) return res.status(400).json({ error: "A declaração de veracidade deve ser aceita." });
+    if (body.declaracaoAceita !== true) return res.status(400).json({ error: "A declaração de conferência deve ser aceita." });
     if (!detail.checklist.motoristaId || !detail.checklist.motoristaNomeSnapshot) {
       return res.status(400).json({ error: "Não é possível assinar sem um motorista oficial identificado no checklist." });
     }
@@ -4547,12 +4647,35 @@ async function startServer() {
     if (validationErrors.length > 0) return res.status(400).json({ error: "Existem itens pendentes ou inválidos.", details: validationErrors });
     let signatureImage;
     try {
-      signatureImage = parseImageDataUrl(body.assinaturaDataUrl, "Assinatura do motorista");
+      signatureImage = parseImageDataUrl(body.assinaturaDataUrl, "Assinatura individual");
     } catch (error) {
       return res.status(400).json({ error: error instanceof Error ? error.message : "Assinatura inválida." });
     }
+    const participants = [...detail.participantes];
+    let actorParticipant = isDriverUser(user)
+      ? participants.find((participant) =>
+          participant.tipoParticipante === "MOTORISTA" && participant.pessoaId === user.motoristaId &&
+          (!participant.userId || participant.userId === user.id),
+        )
+      : undefined;
+    if (isDriverUser(user) && !actorParticipant) {
+      return res.status(403).json({ error: "Seu usuário não é o motorista participante deste checklist." });
+    }
+    if (!actorParticipant) {
+      actorParticipant = {
+        id: `chp-${crypto.randomUUID()}`,
+        checklistId: detail.checklist.id,
+        userId: user.id,
+        tipoParticipante: "INSPETOR",
+        nomeSnapshot: user.nome,
+        cpfSnapshot: user.cpf,
+        statusAssinatura: "PENDENTE",
+      };
+      participants.push(actorParticipant);
+    }
     const signature = replaceChecklistAttachment({
       checklistId: detail.checklist.id,
+      participantId: actorParticipant.id,
       type: "ASSINATURA",
       dataUrl: signatureImage.dataUrl,
       mimeType: signatureImage.mimeType,
@@ -4562,10 +4685,24 @@ async function startServer() {
     });
     const result = getChecklistResult(detail.respostas);
     const now = new Date().toISOString();
-    const protocol = generateChecklistProtocol(detail.checklist.ano);
+    const protocol = detail.checklist.protocolo || generateChecklistProtocol(detail.checklist.ano);
+    const signedParticipants = participants.map((participant) => participant.id === actorParticipant!.id ? {
+      ...participant,
+      userId: user.id,
+      assinaturaAnexoId: signature.id,
+      dataAssinatura: now,
+      statusAssinatura: "ASSINADO" as const,
+      declaracaoAceita: true,
+      assinaturaIp: getClientIp(req),
+      assinaturaUserAgent: req.get("user-agent")?.slice(0, 500),
+    } : participant);
+    const otherParticipants = (FileDatabase.get("checklist_participantes") || [])
+      .filter((participant) => participant.checklistId !== detail.checklist.id);
+    FileDatabase.set("checklist_participantes", [...otherParticipants, ...signedParticipants]);
+    const nextStatus = getChecklistStatusAfterSignatures(result, signedParticipants);
     const updated = FileDatabase.update("checklists_veiculos", detail.checklist.id, {
       protocolo: protocol,
-      status: result,
+      status: nextStatus,
       resultado: result,
       possuiNaoConformidade: result !== "CONFORME",
       possuiNaoConformidadeCritica: detail.respostas.some((response) => response.resposta === "NAO_CONFORME" && response.criticidadeSnapshot === "CRITICA"),
@@ -4582,34 +4719,13 @@ async function startServer() {
       assinaturaUserAgent: req.get("user-agent")?.slice(0, 500),
       pdfUrl: `/api/checklists/${detail.checklist.id}/pdf`,
       documentId: `doc-${detail.checklist.id}`,
-      finalizadoEm: now,
+      inspecaoConcluidaEm: now,
+      finalizadoEm: nextStatus === result ? now : undefined,
       atualizadoEm: now,
     }, user.email) as ChecklistVeiculo;
-    if (result === "BLOQUEADO") {
-      detail.respostas
-        .filter((response) => response.resposta === "NAO_CONFORME" && response.bloqueiaVeiculoSnapshot)
-        .forEach((response) => {
-          const existing = getActiveVehicleBlocks(detail.checklist.veiculoId).find((block) =>
-            block.checklistId === detail.checklist.id && block.itemId === response.itemTemplateId,
-          );
-          if (existing) return;
-          const block: VeiculoBloqueio = {
-            id: `vbl-${crypto.randomUUID()}`,
-            veiculoId: detail.checklist.veiculoId,
-            checklistId: detail.checklist.id,
-            itemId: response.itemTemplateId,
-            motivo: `${response.codigoSnapshot} — ${response.descricaoSnapshot}${response.observacao ? `: ${response.observacao}` : ""}`,
-            dataHoraBloqueio: now,
-            unidadeId: detail.checklist.unidadeId,
-            status: "ATIVO",
-            usuarioResponsavel: user.id,
-          };
-          FileDatabase.add("veiculos_bloqueios", block, user.email);
-          logAudit(req, user.nome, "VEICULO_BLOQUEADO_CHECKLIST", `Bloqueou o veículo ${detail.checklist.placaSnapshot}; protocolo ${protocol}; motivo: ${block.motivo}.`, detail.checklist.unidadeId);
-        });
-    }
-    logAudit(req, user.nome, "CHECKLIST_ASSINADO", `Assinou o checklist ${protocol} como ${user.tipo_usuario || user.perfil}; motorista vinculado: ${detail.checklist.motoristaNomeSnapshot}.`, detail.checklist.unidadeId);
-    logAudit(req, user.nome, "CHECKLIST_FINALIZADO", `Finalizou o checklist ${protocol} com resultado ${result}.`, detail.checklist.unidadeId);
+    ensureImmediateCriticalBlocks(req, user, getChecklistDetail(detail.checklist.id)!);
+    logAudit(req, user.nome, isDriverUser(user) ? "ASSINATURA_MOTORISTA" : "ASSINATURA_INSPETOR", `Assinou individualmente o checklist ${protocol}.`, detail.checklist.unidadeId);
+    logAudit(req, user.nome, "CHECKLIST_INSPECAO_CONCLUIDA", `Concluiu o preenchimento do checklist ${protocol} com resultado ${result}; status de assinatura: ${nextStatus}.`, detail.checklist.unidadeId);
     detail.respostas.filter((response) => response.resposta === "NAO_CONFORME").forEach((response) => {
       logAudit(req, user.nome, "CHECKLIST_NAO_CONFORMIDADE", `${protocol}: ${response.codigoSnapshot} — ${response.observacao || response.descricaoSnapshot}.`, detail.checklist.unidadeId);
     });
@@ -4617,6 +4733,76 @@ async function startServer() {
       await emitChecklistNotifications(updated, user, getChecklistFinalNotificationTypes(updated), now);
     } catch (error) {
       return res.status(500).json({ error: "Checklist finalizado, mas a notificação ainda não foi persistida. Reenvie a operação para concluir a notificação.", details: error instanceof Error ? error.message : String(error) });
+    }
+    res.json({ success: true, checklist: updated, detail: getChecklistDetail(detail.checklist.id) });
+  });
+
+  app.post("/api/checklists/:id/assinar", async (req, res) => {
+    const user = getRequestUser(req);
+    if (!isFieldUser(user)) return res.status(403).json({ error: "Assinatura individual disponível apenas aos participantes operacionais." });
+    const detail = getChecklistDetail(req.params.id);
+    if (!detail) return res.status(404).json({ error: "Checklist não encontrado." });
+    if (!canAccessChecklist(user, detail.checklist)) return denyChecklistAccess(req, res, user, detail.checklist.id);
+    if (!detail.checklist.inspecaoConcluidaEm || !detail.checklist.resultado) {
+      return res.status(409).json({ error: "O checklist ainda não foi concluído pelo responsável pelo preenchimento." });
+    }
+    const personId = isDriverUser(user) ? user.motoristaId : user.ajudanteId;
+    const participantType = isDriverUser(user) ? "MOTORISTA" : "AJUDANTE";
+    const participant = detail.participantes.find((candidate) =>
+      candidate.tipoParticipante === participantType && candidate.pessoaId === personId &&
+      (!candidate.userId || candidate.userId === user.id),
+    );
+    if (!participant) return res.status(403).json({ error: "Seu vínculo oficial não corresponde a um participante deste checklist." });
+    if (participant.statusAssinatura === "ASSINADO") return res.json({ success: true, idempotent: true, detail });
+    const body = req.body as { declaracaoAceita?: boolean; assinaturaDataUrl?: string };
+    if (body.declaracaoAceita !== true) return res.status(400).json({ error: "A declaração de conferência deve ser aceita." });
+    let signatureImage;
+    try {
+      signatureImage = parseImageDataUrl(body.assinaturaDataUrl, `Assinatura do ${participantType === "MOTORISTA" ? "motorista" : "ajudante"}`);
+    } catch (error) {
+      return res.status(400).json({ error: error instanceof Error ? error.message : "Assinatura inválida." });
+    }
+    const now = new Date().toISOString();
+    const signature = replaceChecklistAttachment({
+      checklistId: detail.checklist.id,
+      participantId: participant.id,
+      type: "ASSINATURA",
+      dataUrl: signatureImage.dataUrl,
+      mimeType: signatureImage.mimeType,
+      name: `assinatura-${participantType.toLowerCase()}-${user.id}.png`,
+      user,
+      unitId: detail.checklist.unidadeId,
+    });
+    const signedParticipants = detail.participantes.map((candidate) => candidate.id === participant.id ? {
+      ...candidate,
+      userId: user.id,
+      assinaturaAnexoId: signature.id,
+      dataAssinatura: now,
+      statusAssinatura: "ASSINADO" as const,
+      declaracaoAceita: true,
+      assinaturaIp: getClientIp(req),
+      assinaturaUserAgent: req.get("user-agent")?.slice(0, 500),
+    } : candidate);
+    const otherParticipants = (FileDatabase.get("checklist_participantes") || [])
+      .filter((candidate) => candidate.checklistId !== detail.checklist.id);
+    FileDatabase.set("checklist_participantes", [...otherParticipants, ...signedParticipants]);
+    const signatureStatus = getChecklistStatusAfterSignatures(detail.checklist.resultado, signedParticipants);
+    const nextStatus = detail.checklist.status.startsWith("AGUARDANDO_ASSINATURA_")
+      ? signatureStatus
+      : detail.checklist.status;
+    const updated = FileDatabase.update("checklists_veiculos", detail.checklist.id, {
+      status: nextStatus,
+      finalizadoEm: signatureStatus === detail.checklist.resultado ? (detail.checklist.finalizadoEm || now) : detail.checklist.finalizadoEm,
+      atualizadoEm: now,
+    }, user.email) as ChecklistVeiculo;
+    logAudit(req, user.nome, participantType === "MOTORISTA" ? "ASSINATURA_MOTORISTA" : "ASSINATURA_AJUDANTE", `Assinou individualmente o checklist ${updated.protocolo || updated.id}.`, updated.unidadeId);
+    if (signatureStatus === detail.checklist.resultado) {
+      logAudit(req, user.nome, "CHECKLIST_FINALIZADO", `Todas as assinaturas do checklist ${updated.protocolo || updated.id} foram concluídas.`, updated.unidadeId);
+    }
+    try {
+      await emitChecklistNotifications(updated, user, getChecklistFinalNotificationTypes(updated), now);
+    } catch (error) {
+      return res.status(500).json({ error: "Assinatura salva, mas a notificação ainda não foi persistida.", details: error instanceof Error ? error.message : String(error) });
     }
     res.json({ success: true, checklist: updated, detail: getChecklistDetail(detail.checklist.id) });
   });
@@ -4802,8 +4988,8 @@ async function startServer() {
     const user = getRequestUser(req);
     const detail = getChecklistDetail(req.params.id);
     if (!detail) return res.status(404).json({ error: "Documento não disponível", message: "Nenhum documento foi anexado a este registro." });
-    if (!canAccessChecklist(user, detail.checklist)) return res.status(403).json({ error: "Acesso negado a este documento." });
-    if (!detail.checklist.protocolo || !isChecklistFinal(detail.checklist.status)) {
+    if (!canAccessChecklist(user, detail.checklist)) return denyChecklistAccess(req, res, user, detail.checklist.id);
+    if (!detail.checklist.protocolo || !detail.checklist.inspecaoConcluidaEm) {
       return res.status(404).json({ error: "Documento não disponível", message: "Nenhum documento foi anexado a este registro." });
     }
     try {

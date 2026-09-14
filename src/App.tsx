@@ -388,16 +388,20 @@ export default function App() {
           setSelectedUnit(startUnit);
           setForcedResetUserEmail(null);
 
-          // Log starting unit context to server for audit trail
-          fetch("/api/logs/acesso-unidade", {
-            method: "POST",
-            headers: { 
-              "Content-Type": "application/json",
-              "x-user-email": data.user.email,
-              "x-selected-unit": startUnit
-            },
-            body: JSON.stringify({ unidadeId: startUnit })
-          }).catch(e => console.error(e));
+          const isFieldUser = data.user.tipo_usuario === "MOTORISTA" || data.user.tipo_usuario === "AJUDANTE";
+          if (!isFieldUser) {
+            // Administrative unit context is audited separately; field users are
+            // redirected directly to their isolated operational portal.
+            fetch("/api/logs/acesso-unidade", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "x-user-email": data.user.email,
+                "x-selected-unit": startUnit
+              },
+              body: JSON.stringify({ unidadeId: startUnit })
+            }).catch(e => console.error(e));
+          }
         }
       } else {
         const error = await res.json();
@@ -732,7 +736,7 @@ export default function App() {
   if (currentUser.tipo_usuario === "MOTORISTA" || currentUser.tipo_usuario === "AJUDANTE") {
     return (
       <ErrorBoundary>
-        <Suspense fallback={<div className="min-h-screen bg-slate-950 text-slate-400 flex items-center justify-center">Carregando portal do motorista...</div>}>
+        <Suspense fallback={<div className="min-h-screen bg-slate-950 text-slate-400 flex items-center justify-center">Carregando portal operacional...</div>}>
           <DriverChecklistView currentUser={currentUser} onLogout={handleLogout} />
         </Suspense>
       </ErrorBoundary>
