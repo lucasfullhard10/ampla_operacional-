@@ -11,6 +11,7 @@ import {
 } from "../shared/documentExpiration.ts";
 import { reconcileRouteRecords } from "./routeIdentity.ts";
 import type { ShipsDeliveryOrder } from "../shared/ships.ts";
+import type { ShipsCsvImportHistory, ShipsDeliveryComplement } from "../shared/shipsComplement.ts";
 import {
   DEFAULT_CHECKLIST_CONFIG,
   DEFAULT_CHECKLIST_TEMPLATES,
@@ -309,6 +310,10 @@ export interface Rota {
   shipsTripType?: string;
   shipsVehicleType?: string;
   shipsVehicleMake?: string;
+  ultimaAtualizacaoOperacional?: string;
+  ultimaImportacaoShipsComplementar?: string;
+  cidadeDestino?: string;
+  perfilVeiculo?: string;
 
   // Reentrega validation fields used by monitoring and closing workflows
   reentrega_validada?: boolean;
@@ -656,6 +661,9 @@ export interface DatabaseSchema {
   devolucoes_hierarquia?: any[];
   devolucoes_motivos?: any[];
   devolucoes_registros?: any[];
+  ships_delivery_complements: ShipsDeliveryComplement[];
+  ships_csv_import_history: ShipsCsvImportHistory[];
+  reporte_operacional_snapshots: any[];
   checklist_item_templates: ChecklistItemTemplate[];
   checklists_veiculos: ChecklistVeiculo[];
   checklist_respostas: ChecklistResposta[];
@@ -782,6 +790,9 @@ const INITIAL_DATABASE: DatabaseSchema = {
     { id: "Y22", codigo: "Y22", descricao: "Falta de espaço físico" }
   ],
   devolucoes_registros: [],
+  ships_delivery_complements: [],
+  ships_csv_import_history: [],
+  reporte_operacional_snapshots: [],
   checklist_item_templates: DEFAULT_CHECKLIST_TEMPLATES,
   checklists_veiculos: [],
   checklist_respostas: [],

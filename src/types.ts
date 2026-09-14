@@ -1,5 +1,10 @@
 import type { ShipsDeliveryOrder } from "../shared/ships";
 export type {
+  ShipsCsvImportHistory,
+  ShipsDeliveryComplement,
+  ShipsComplementPreview,
+} from "../shared/shipsComplement";
+export type {
   ChecklistAnswerValue,
   ChecklistAnexo,
   ChecklistConfiguracao,
@@ -278,6 +283,10 @@ export interface Rota {
   shipsTripType?: string;
   shipsVehicleType?: string;
   shipsVehicleMake?: string;
+  ultimaAtualizacaoOperacional?: string;
+  ultimaImportacaoShipsComplementar?: string;
+  cidadeDestino?: string;
+  perfilVeiculo?: string;
 
   // Reentrega validation data shared by monitoring and closing workflows
   reentrega_validada?: boolean;
@@ -688,4 +697,20 @@ export interface DevolucaoRegistro {
   usuarioCadastro?: string;
   dataCadastro?: string;
   ultimaAtualizacao?: string;
+
+  // Vínculo oficial com a DT e snapshots históricos
+  rotaId?: string;
+  dt?: string;
+  deliveryOrder?: string;
+  shipsDeliveryId?: string;
+  veiculoId?: string;
+  motoristaId?: string;
+  veiculoPlaca?: string;
+  motoristaNomeSnapshot?: string;
+  clienteNomeSnapshot?: string;
+  resolvidoBoolean?: boolean;
+  geraDevolucao?: boolean;
+  statusTratativa?: "RESOLVIDA" | "DEVOLUCAO";
+  resolvidoEm?: string;
+  resolvidoPor?: string;
 }

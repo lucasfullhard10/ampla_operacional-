@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef } from "react";
+import React, { useEffect, useState, useMemo, useRef } from "react";
 import { 
   Plus, Search, Edit, Trash, FileText, CheckCircle, Clock, AlertCircle, 
   MapPin, User, Truck, DollarSign, X, Layers, RefreshCw, AlertTriangle, 
@@ -85,6 +85,20 @@ export default function FechamentoDtView({
   const [devolucaoQtd, setDevolucaoQtd] = useState<number>(0);
   const [devolucaoMotivo, setDevolucaoMotivo] = useState<string>("Cliente recusou");
   const [devolucaoObs, setDevolucaoObs] = useState<string>("");
+  const [linkedReturns, setLinkedReturns] = useState<{ efetivas: any[]; resolvidas: any[]; quantidade: number; valorTotal: number }>({ efetivas: [], resolvidas: [], quantidade: 0, valorTotal: 0 });
+
+  useEffect(() => {
+    if (!activeSearchedDt?.id) { setLinkedReturns({ efetivas: [], resolvidas: [], quantidade: 0, valorTotal: 0 }); return; }
+    fetch(`/api/rotas/${encodeURIComponent(activeSearchedDt.id)}/details`, { headers: { "x-user-email": userEmail } })
+      .then(async (response) => response.ok ? response.json() : Promise.reject(new Error("Falha ao consultar devoluções da DT.")))
+      .then((payload) => {
+        const returns = payload.returns || { efetivas: [], resolvidas: [], quantidade: 0, valorTotal: 0 };
+        setLinkedReturns(returns);
+        setHouveDevolucao(returns.quantidade > 0 ? "Sim" : "Não");
+        setDevolucaoQtd(returns.quantidade || 0);
+      })
+      .catch(() => setLinkedReturns({ efetivas: [], resolvidas: [], quantidade: 0, valorTotal: 0 }));
+  }, [activeSearchedDt?.id, userEmail]);
 
   // Falta de Mercadoria / Vale details
   const [faltaProduto, setFaltaProduto] = useState<string>("");
@@ -750,17 +764,6 @@ export default function FechamentoDtView({
       }
     }
 
-    if (houveDevolucao === "Sim") {
-      if (devolucaoQtd <= 0) {
-        setNotification({ type: "error", message: "A quantidade devolvida deve ser maior que zero." });
-        return;
-      }
-      if (!devolucaoMotivo.trim()) {
-        setNotification({ type: "error", message: "O motivo da devolução é obrigatório." });
-        return;
-      }
-    }
-
     if (houveAvaria === "Sim") {
       if (!avariaProduto.trim()) {
         setNotification({ type: "error", message: "Especificar o 'Produto Avariado' é obrigatório." });
@@ -817,7 +820,7 @@ export default function FechamentoDtView({
         ? "Fechada Com Vale" 
         : (houveAvaria === "Sim" 
             ? "Fechada Com Ocorrência" 
-            : (houveDevolucao === "Sim" 
+            : (linkedReturns.quantidade > 0
                 ? "Fechada Com Devolução" 
                 : "Fechada Sem Vale"));
 
@@ -837,13 +840,13 @@ export default function FechamentoDtView({
           observacoes: observacoesGerais,
           ocorrencias: occurrences,
 
-          houveDevolucao,
+          houveDevolucao: linkedReturns.quantidade > 0 ? "Sim" : "Não",
           houveAvaria,
           houveFalta,
 
-          devolucaoQtd,
-          devolucaoMotivo,
-          devolucaoObs,
+          devolucaoQtd: linkedReturns.quantidade,
+          devolucaoMotivo: "Conforme módulo Devoluções",
+          devolucaoObs: "Fonte oficial vinculada por rotaId",
 
           faltaProduto,
           faltaQuantidade,
@@ -2214,81 +2217,13 @@ export default function FechamentoDtView({
                       </div>
 
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                        {/* 1. Houve Devolução? */}
-                        <div className="bg-slate-950 p-4 border border-slate-850 rounded-xl space-y-3">
-                          <div className="space-y-1">
-                            <label className="text-xs font-extrabold text-white block">📦 Houve devolução?</label>
-                            <p className="text-[10px] text-slate-500 leading-tight">Ocorreram retornos ou recusas de mercadorias pelos clientes de entrega?</p>
-                          </div>
-                          <div className="grid grid-cols-2 gap-2">
-                          <button
-                            type="button"
-                            onClick={() => setHouveDevolucao("Sim")}
-                            className={`py-1.5 px-3 text-xs font-bold rounded-lg border transition cursor-pointer uppercase ${
-                              houveDevolucao === "Sim"
-                                ? "bg-amber-500/10 text-amber-400 border-amber-500"
-                                : "bg-slate-900 border-slate-800 text-slate-500 hover:text-slate-300"
-                            }`}
-                          >
-                            Sim
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setHouveDevolucao("Não");
-                              setDevolucaoQtd(0);
-                            }}
-                            className={`py-1.5 px-3 text-xs font-bold rounded-lg border transition cursor-pointer uppercase ${
-                              houveDevolucao === "Não"
-                                ? "bg-slate-800 text-slate-200 border-slate-700 font-extrabold"
-                                : "bg-slate-900 border-slate-800 text-slate-500 hover:text-slate-300"
-                            }`}
-                          >
-                            Não
-                          </button>
+                        {/* Devoluções são calculadas automaticamente a partir da DT */}
+                        <div className={`bg-slate-950 p-4 border rounded-xl space-y-3 ${linkedReturns.quantidade > 0 ? "border-amber-500/40" : "border-slate-850"}`}>
+                          <div><label className="text-xs font-extrabold text-white block">📦 Devoluções identificadas na DT</label><p className="text-[10px] text-slate-500">Fonte oficial: registros vinculados por rotaId.</p></div>
+                          <div className="grid grid-cols-2 gap-2 text-center font-mono"><div className="rounded bg-slate-900 p-2"><span className="block text-[9px] text-slate-500">Quantidade</span><strong className="text-amber-300">{linkedReturns.quantidade}</strong></div><div className="rounded bg-slate-900 p-2"><span className="block text-[9px] text-slate-500">Valor total</span><strong className="text-amber-300">{linkedReturns.valorTotal.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</strong></div></div>
+                          {linkedReturns.efetivas.map((item) => <div key={item.devolucaoId} className="rounded border border-slate-800 p-2 text-[9px] text-slate-300">{item.clienteCodigo} — {item.clienteNome}<br />NF {item.numeroNF} · {Number(item.valorNF || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })} · {item.motivoDescricao}</div>)}
+                          {linkedReturns.resolvidas.length > 0 && <div className="rounded border border-emerald-500/20 bg-emerald-500/5 p-2 text-[9px] text-emerald-200">Ocorrências resolvidas em rota: {linkedReturns.resolvidas.length}. Não geraram devolução.</div>}
                         </div>
-
-                        {/* Devolução details */}
-                        {houveDevolucao === "Sim" && (
-                          <div className="space-y-2.5 pt-3 border-t border-slate-900 animate-fadeIn text-xs">
-                            <div className="space-y-1 text-left">
-                              <label className="text-slate-400 font-mono text-[10px] uppercase block">Quantidade Devolvida</label>
-                              <input
-                                type="number"
-                                min="1"
-                                value={devolucaoQtd || ""}
-                                onChange={(e) => setDevolucaoQtd(Number(e.target.value))}
-                                className="w-full bg-slate-900 border border-slate-850 rounded px-2.5 py-1.5 text-white text-xs font-mono"
-                                placeholder="Qtd de caixas/itens"
-                              />
-                            </div>
-                            <div className="space-y-1 text-left">
-                              <label className="text-slate-400 font-mono text-[10px] uppercase block">Motivo da Devolução</label>
-                              <select
-                                value={devolucaoMotivo}
-                                onChange={(e) => setDevolucaoMotivo(e.target.value)}
-                                className="w-full bg-slate-900 border border-slate-850 rounded px-2.5 py-1.5 text-white text-xs"
-                              >
-                                <option value="Cliente recusou">Cliente recusou</option>
-                                <option value="Embalagem danificada / Avariada">Embalagem danificada / Avariada</option>
-                                <option value="Endereço não localizado">Endereço não localizado</option>
-                                <option value="Erro fiscal / Pedido divergente">Erro fiscal / Pedido divergente</option>
-                                <option value="Outros motivos">Outros motivos</option>
-                              </select>
-                            </div>
-                            <div className="space-y-1 text-left">
-                              <label className="text-slate-400 font-mono text-[10px] uppercase block">Observações da Devolução</label>
-                              <input
-                                type="text"
-                                value={devolucaoObs}
-                                onChange={(e) => setDevolucaoObs(e.target.value)}
-                                className="w-full bg-slate-900 border border-slate-850 rounded px-2.5 py-1.5 text-white text-xs"
-                                placeholder="Observações complementares"
-                              />
-                            </div>
-                          </div>
-                        )}
-                      </div>
 
                       {/* 2. Houve Avaria? */}
                       <div className="bg-slate-950 p-4 border border-slate-850 rounded-xl space-y-3">
@@ -3576,6 +3511,7 @@ export default function FechamentoDtView({
 
             <div className="space-y-3 text-xs leading-relaxed text-slate-350">
               <p>Tem certeza de que deseja fechar operacionalmente a viagem/DT <strong className="text-white font-mono">{activeSearchedDt.dt}</strong>?</p>
+              {linkedReturns.quantidade > 0 && <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-amber-100"><strong className="block">ATENÇÃO — Esta DT possui devolução de mercadoria.</strong><span>{linkedReturns.quantidade} cliente(s) · {linkedReturns.valorTotal.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })} em devoluções.</span><p className="mt-1 text-[10px]">As informações serão registradas em snapshot junto ao fechamento.</p></div>}
               
               <div className="bg-slate-950 p-3.5 rounded-lg border border-slate-850/80 space-y-1 text-[11px] leading-normal font-sans text-slate-300">
                 <div>• Motorista: <strong className="text-white">{getDriverName(activeSearchedDt.motoristaId)}</strong></div>

@@ -15,6 +15,7 @@ import { NotificationModal, ConfirmModal, NotificationType, ConfirmType } from "
 import SafeResponsiveContainer from "./SafeResponsiveContainer";
 import ShipsPdfImportModal from "./ShipsPdfImportModal";
 import ShipsRouteDeliveries from "./ShipsRouteDeliveries";
+import HeinekenReportModal from "./HeinekenReportModal";
 import { normalizeShipsDtKey } from "../../shared/ships";
 
 interface MonitoramentoProps {
@@ -183,8 +184,19 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
   const [sharingRoute, setSharingRoute] = useState<Rota | null>(null);
   const [historyModalRoute, setHistoryModalRoute] = useState<Rota | null>(null);
   const [shipsImportOpen, setShipsImportOpen] = useState(false);
+  const [heinekenReportOpen, setHeinekenReportOpen] = useState(false);
+  const [devolucaoRecords, setDevolucaoRecords] = useState<any[]>([]);
+  const [returnSummaryRoute, setReturnSummaryRoute] = useState<Rota | null>(null);
   const [printLayoutActive, setPrintLayoutActive] = useState(false);
   const shareCardRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    fetch("/api/devolucoes/registros", { headers: { "x-user-email": userEmail } })
+      .then(async (response) => { if (response.ok) setDevolucaoRecords(await response.json()); })
+      .catch(() => undefined);
+  }, [rotas, userEmail]);
+
+  const getEffectiveRouteReturns = (routeId: string) => devolucaoRecords.filter((record) => record.rotaId === routeId && record.status !== "Cancelada" && (record.geraDevolucao === true || (record.geraDevolucao === undefined && record.resolvido !== "SIM")));
 
   const getRouteStatusColor = (r: Rota) => {
     if (r.ocorrencias && r.ocorrencias.length > 0) {
@@ -1703,6 +1715,7 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
 
         {!isAdding && !editingRoute && (
           <div className="flex flex-wrap gap-2 self-start">
+            <button type="button" onClick={() => setHeinekenReportOpen(true)} className="px-4 py-2 bg-emerald-950 hover:bg-emerald-900 border border-emerald-500/30 text-emerald-300 rounded text-xs font-semibold flex items-center gap-1.5 transition"><LucideShare2 className="w-3.5 h-3.5" />Gerar Reporte Heineken</button>
             <button
               type="button"
               onClick={() => setShipsImportOpen(true)}
@@ -2919,6 +2932,7 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
                           {/* Multiple Actions: EDIT, OCORRENCIA, ACCIDENT, TRASH */}
                           <td className="py-3.5 px-3 text-right">
                             <div className="flex items-center justify-end gap-1.5">
+                              {getEffectiveRouteReturns(r.id).length > 0 && <button type="button" onClick={() => setReturnSummaryRoute(r)} className="px-1.5 py-0.5 text-[9px] font-bold bg-amber-500/10 text-amber-300 border border-amber-500/30 rounded">DEV {getEffectiveRouteReturns(r.id).length}</button>}
                               <button
                                 type="button"
                                 onClick={() => setHistoryModalRoute(r)}
@@ -3523,6 +3537,7 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
                     {/* Card Actions Footer */}
                     <div className="p-3 bg-slate-950/50 border-t border-slate-800/80 grid grid-cols-2 gap-2">
                       <div className="col-span-2 flex justify-between gap-2">
+                        {getEffectiveRouteReturns(r.id).length > 0 && <button type="button" onClick={() => setReturnSummaryRoute(r)} className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-2.5 py-1.5 text-[11px] font-bold text-amber-300">DEV {getEffectiveRouteReturns(r.id).length}</button>}
                         <button
                           type="button"
                           onClick={() => {
@@ -3542,7 +3557,7 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
                           className="px-2.5 bg-slate-900 border border-slate-800 text-amber-400 hover:text-amber-300 rounded-lg py-1.5 text-[11px] font-mono transition flex items-center justify-center gap-1.5 cursor-pointer"
                           title="Gerar Card para Compartilhamento"
                         >
-                          <LucideShare2 className="w-3.5 h-3.5 text-amber-400" /> Compartilhar
+                          <LucideShare2 className="w-3.5 h-3.5 text-amber-400" /> Reporte da DT
                         </button>
                       </div>
 
@@ -4218,6 +4233,8 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
                 route={historyModalRoute}
                 vehicleLabel={veiculos.find((vehicle) => vehicle.id === historyModalRoute.veiculoId)?.placa}
                 driverLabel={motoristas.find((driver) => driver.id === historyModalRoute.motoristaId)?.nome}
+                userEmail={userEmail}
+                onRefresh={onRefresh}
               />
 
               {/* Incident occurrences if any */}
@@ -4317,6 +4334,10 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
           </div>
         </div>
       )}
+
+      {returnSummaryRoute && <div className="fixed inset-0 z-[85] flex items-center justify-center bg-slate-950/85 p-4"><div className="w-full max-w-lg rounded-2xl border border-amber-500/30 bg-slate-900 p-5"><div className="flex items-center justify-between"><div><h3 className="font-bold text-white">Devoluções da DT {returnSummaryRoute.dt}</h3><p className="text-xs text-amber-300">{getEffectiveRouteReturns(returnSummaryRoute.id).length} devolução(ões) · {getEffectiveRouteReturns(returnSummaryRoute.id).reduce((sum, item) => sum + Number(item.valorNF || 0), 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</p></div><button type="button" onClick={() => setReturnSummaryRoute(null)} className="p-2 text-slate-400"><LucideX className="h-4 w-4" /></button></div><div className="mt-4 space-y-2">{getEffectiveRouteReturns(returnSummaryRoute.id).map((item) => <div key={item.id} className="rounded-lg border border-slate-800 bg-slate-950 p-3 text-xs text-slate-300"><strong className="text-white">{item.clienteCodigo} — {item.clienteNomeSnapshot || item.clienteNome || item.clienteNomeFantasia}</strong><p>NF {item.numeroNF} · {Number(item.valorNF || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</p><span className="text-slate-500">{item.motivoDescricao}</span></div>)}</div></div></div>}
+
+      {heinekenReportOpen && <HeinekenReportModal routes={filtered} vehicles={veiculos} drivers={motoristas} units={unidades} userEmail={userEmail} onClose={() => setHeinekenReportOpen(false)} />}
 
       <ShipsPdfImportModal
         open={shipsImportOpen}

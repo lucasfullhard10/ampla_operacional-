@@ -14,6 +14,16 @@ import {
   sanitizeShipsDeliveries,
 } from "./shared/ships";
 import {
+  buildShipsComplementPreview,
+  getOperationalRouteTotals,
+  mapShipsComplementRow,
+  upsertShipsComplements,
+  type CsvRow,
+  type ShipsDeliveryComplement,
+} from "./shared/shipsComplement";
+import { createHeinekenReportPdf, type HeinekenReportData } from "./server/heinekenReportPdf";
+import { buildReturnSnapshot, getRouteReturnSummary } from "./shared/routeReturns";
+import {
   CHECKLIST_MODULE_KEY,
   canFieldUserAccessParticipants,
   canDriverAccessChecklist,
@@ -463,6 +473,41 @@ async function startServer() {
     }
     // Default to primary unit or first authorized
     return user.unidadeId !== "Todas" ? user.unidadeId : (auths[0] || "");
+  };
+
+  const canAccessRoute = (user: Usuario, route: Rota | undefined): boolean => {
+    if (!route) return false;
+    const authorized = getAuthorizedUnitsForUser(user);
+    return authorized.includes("Todas") || authorized.includes(route.unidadeId);
+  };
+
+  const getEffectiveReturnsForRoute = (routeId: string) => {
+    const records = (FileDatabase.get("devolucoes_registros" as any) || []) as any[];
+    return getRouteReturnSummary(records, routeId);
+  };
+
+  const buildReportRouteSnapshot = (route: Rota) => {
+    const totals = getOperationalRouteTotals(route);
+    const vehicle = (FileDatabase.get("veiculos") || []).find((item: Veiculo) => item.id === route.veiculoId);
+    const driver = (FileDatabase.get("motoristas") || []).find((item: Motorista) => item.id === route.motoristaId);
+    const returns = getEffectiveReturnsForRoute(route.id);
+    return {
+      rotaId: route.id,
+      dt: route.dt,
+      veiculo: vehicle?.placa || route.shipsVehicleNumber || "N/D",
+      motorista: driver?.nome || "N/D",
+      tipo: route.tipo,
+      destino: route.cidadeDestino || route.clienteCidade || "—",
+      total: totals.total,
+      entregues: totals.entregues,
+      devolucoes: returns.quantidade || totals.devolucoes,
+      valorDevolucoes: returns.valorTotal,
+      recusadas: totals.recusadas,
+      pendentes: totals.pendentes,
+      progresso: totals.percentual,
+      status: route.status_viagem || route.status,
+      ultimaAtualizacaoOperacional: route.ultimaAtualizacaoOperacional,
+    };
   };
 
   // Helper to check if a user has access to a given process card
@@ -3153,6 +3198,7 @@ async function startServer() {
       shipsTripType: String(body.tripType ?? "").trim().slice(0, 120) || undefined,
       shipsVehicleType: String(body.vehicleType ?? "").trim().slice(0, 120) || undefined,
       shipsVehicleMake: String(body.vehicleMake ?? "").trim().slice(0, 120) || undefined,
+      ultimaAtualizacaoOperacional: createdAt,
     };
 
     // One aggregate write: if persistence fails, neither the DT nor its
@@ -3174,6 +3220,166 @@ async function startServer() {
       unitId,
     );
     res.status(201).json({ success: true, route: added });
+  });
+
+  const getShipsImportInput = (req: express.Request, res: express.Response) => {
+    const user = getRequestUser(req);
+    const route = (FileDatabase.get("rotas") || []).find((item: Rota) => item.id === req.params.id);
+    if (!route) {
+      res.status(404).json({ error: "DT não encontrada." });
+      return null;
+    }
+    if (!canAccessRoute(user, route)) {
+      logAudit(req, user.email, "ACESSO_NEGADO_DT", `Tentativa de acesso à DT ${route.dt} de outra unidade.`, route.unidadeId);
+      res.status(403).json({ error: "Acesso negado à unidade desta DT." });
+      return null;
+    }
+    const rows = Array.isArray(req.body?.rows) ? req.body.rows as CsvRow[] : [];
+    if (rows.length === 0) {
+      res.status(400).json({ error: "O CSV não possui registros válidos." });
+      return null;
+    }
+    if (rows.length > 10_000) {
+      res.status(413).json({ error: "O CSV excede o limite de 10.000 registros por importação." });
+      return null;
+    }
+    if (!route.shipsEntregas?.length) {
+      res.status(409).json({ error: "Esta DT não possui Delivery Orders importados do PDF Ships." });
+      return null;
+    }
+    const fileName = String(req.body?.fileName || "dados-ships.csv").trim().slice(0, 255);
+    const existing = (FileDatabase.get("ships_delivery_complements") || []) as ShipsDeliveryComplement[];
+    const preview = buildShipsComplementPreview({ rotaId: route.id, dt: route.dt, fileName, rows, deliveries: route.shipsEntregas, existing });
+    return { user, route, rows, fileName, existing, preview };
+  };
+
+  app.post("/api/rotas/:id/ships-complement/preview", (req, res) => {
+    const context = getShipsImportInput(req, res);
+    if (!context) return;
+    res.json(context.preview);
+  });
+
+  app.post("/api/rotas/:id/ships-complement/import", (req, res) => {
+    const context = getShipsImportInput(req, res);
+    if (!context) return;
+    const importedAt = new Date().toISOString();
+    const complements = upsertShipsComplements({
+      rotaId: context.route.id,
+      rows: context.rows,
+      deliveries: context.route.shipsEntregas || [],
+      existing: context.existing,
+      importedAt,
+      importedBy: context.user.email,
+    });
+    FileDatabase.set("ships_delivery_complements", complements);
+    const history = FileDatabase.get("ships_csv_import_history") || [];
+    const importEntry = {
+      id: `SHIPSI-${crypto.randomUUID()}`,
+      rotaId: context.route.id,
+      dt: context.route.dt,
+      unidadeId: context.route.unidadeId,
+      fileName: context.fileName,
+      records: context.preview.records,
+      matched: context.preview.matched,
+      ignored: context.preview.ignored,
+      existing: context.preview.existing,
+      importedAt,
+      importedBy: context.user.email,
+    };
+    FileDatabase.add("ships_csv_import_history", importEntry, context.user.email);
+    FileDatabase.update("rotas", context.route.id, { ultimaImportacaoShipsComplementar: importedAt }, context.user.email);
+    logAudit(req, context.user.email, "CSV_COMPLEMENTAR_SHIPS_IMPORTADO", `DT ${context.route.dt}: ${context.preview.matched} correspondências e ${context.preview.ignored} registros ignorados do arquivo ${context.fileName}. Nenhum contador operacional foi alterado.`, context.route.unidadeId);
+    res.status(201).json({ success: true, preview: context.preview, import: importEntry });
+  });
+
+  app.get("/api/rotas/:id/details", (req, res) => {
+    const user = getRequestUser(req);
+    const route = (FileDatabase.get("rotas") || []).find((item: Rota) => item.id === req.params.id);
+    if (!route) return res.status(404).json({ error: "DT não encontrada." });
+    if (!canAccessRoute(user, route)) {
+      logAudit(req, user.email, "ACESSO_NEGADO_DT", `Tentativa de abrir a DT ${route.dt} de outra unidade.`, route.unidadeId);
+      return res.status(403).json({ error: "Acesso negado à unidade desta DT." });
+    }
+    const complements = ((FileDatabase.get("ships_delivery_complements") || []) as ShipsDeliveryComplement[]).filter((item) => item.rotaId === route.id);
+    const importHistory = (FileDatabase.get("ships_csv_import_history") || []).filter((item) => item.rotaId === route.id).sort((a, b) => b.importedAt.localeCompare(a.importedAt));
+    const vehicle = (FileDatabase.get("veiculos") || []).find((item: Veiculo) => item.id === route.veiculoId);
+    const driver = (FileDatabase.get("motoristas") || []).find((item: Motorista) => item.id === route.motoristaId);
+    const returns = getEffectiveReturnsForRoute(route.id);
+    res.json({
+      route,
+      complements,
+      importHistory,
+      vehicle: vehicle ? { id: vehicle.id, placa: vehicle.placa, modelo: vehicle.modelo, perfil: (vehicle as any).perfil || vehicle.tipo } : null,
+      driver: driver ? { id: driver.id, nome: driver.nome, matricula: (driver as any).matricula, telefone: driver.telefone } : null,
+      returns: { efetivas: returns.efetivas.map(buildReturnSnapshot), resolvidas: returns.resolvidas.map(buildReturnSnapshot), quantidade: returns.quantidade, valorTotal: returns.valorTotal },
+      totals: getOperationalRouteTotals(route),
+    });
+  });
+
+  app.get("/api/reportes/heineken", (req, res) => {
+    const user = getRequestUser(req);
+    const snapshots = (FileDatabase.get("reporte_operacional_snapshots") || []).filter((snapshot: any) => {
+      const units = getAuthorizedUnitsForUser(user);
+      const snapshotUnits = Array.isArray(snapshot.unidadeIds) ? snapshot.unidadeIds : [snapshot.unidadeId];
+      return units.includes("Todas") || snapshotUnits.every((unitId: string) => units.includes(unitId));
+    });
+    res.json(snapshots.sort((a: any, b: any) => String(b.criadoEm).localeCompare(String(a.criadoEm))));
+  });
+
+  app.post("/api/reportes/heineken", (req, res) => {
+    const user = getRequestUser(req);
+    const routeIds = Array.isArray(req.body?.routeIds) ? req.body.routeIds.map(String) : [];
+    const routes = (FileDatabase.get("rotas") || []).filter((route: Rota) => routeIds.includes(route.id));
+    if (routes.length === 0) return res.status(400).json({ error: "Selecione ao menos uma DT visível." });
+    if (routes.some((route: Rota) => !canAccessRoute(user, route))) return res.status(403).json({ error: "Uma das DTs selecionadas pertence a uma unidade não autorizada." });
+    const unitIds = [...new Set(routes.map((route: Rota) => route.unidadeId))];
+    const unidades = FileDatabase.get("unidades") || [];
+    const snapshot = {
+      id: `REPORT-${crypto.randomUUID()}`,
+      unidadeId: unitIds.length === 1 ? unitIds[0] : "Todas",
+      unidadeIds: unitIds,
+      unidade: unitIds.length === 1 ? (unidades.find((unit: any) => unit.id === unitIds[0])?.nome || unitIds[0]) : "Visão consolidada",
+      dataReferencia: String(req.body?.dataReferencia || new Date().toISOString().slice(0, 10)),
+      criadoEm: new Date().toISOString(),
+      criadoPor: user.email,
+      filtros: typeof req.body?.filtros === "object" && req.body.filtros ? req.body.filtros : {},
+      rotasSnapshot: routes.map(buildReportRouteSnapshot),
+    };
+    FileDatabase.add("reporte_operacional_snapshots", snapshot, user.email);
+    logAudit(req, user.email, "REPORTE_HEINEKEN_SALVO", `Reporte salvo com snapshot imutável de ${routes.length} DT(s).`, snapshot.unidadeId);
+    res.status(201).json(snapshot);
+  });
+
+  app.post("/api/reportes/heineken/pdf", async (req, res) => {
+    const user = getRequestUser(req);
+    let report: any;
+    if (req.body?.snapshotId) {
+      report = (FileDatabase.get("reporte_operacional_snapshots") || []).find((item: any) => item.id === req.body.snapshotId);
+      if (!report) return res.status(404).json({ error: "Reporte histórico não encontrado." });
+      const units = getAuthorizedUnitsForUser(user);
+      const reportUnits = Array.isArray(report.unidadeIds) ? report.unidadeIds : [report.unidadeId];
+      if (!units.includes("Todas") && !reportUnits.every((unitId: string) => units.includes(unitId))) return res.status(403).json({ error: "Acesso negado ao reporte desta unidade." });
+    } else {
+      const routeIds = Array.isArray(req.body?.routeIds) ? req.body.routeIds.map(String) : [];
+      const routes = (FileDatabase.get("rotas") || []).filter((route: Rota) => routeIds.includes(route.id));
+      if (!routes.length) return res.status(400).json({ error: "Selecione ao menos uma DT." });
+      if (routes.some((route: Rota) => !canAccessRoute(user, route))) return res.status(403).json({ error: "Acesso negado a uma das DTs." });
+      const units = FileDatabase.get("unidades") || [];
+      const unitIds = [...new Set(routes.map((route: Rota) => route.unidadeId))];
+      report = {
+        unidadeId: unitIds.length === 1 ? unitIds[0] : "Todas",
+        unidadeIds: unitIds,
+        unidade: unitIds.length === 1 ? (units.find((unit: any) => unit.id === unitIds[0])?.nome || unitIds[0]) : "Visão consolidada",
+        dataReferencia: String(req.body?.dataReferencia || new Date().toISOString().slice(0, 10)),
+        criadoEm: new Date().toISOString(),
+        rotasSnapshot: routes.map(buildReportRouteSnapshot),
+      };
+    }
+    const pdf = await createHeinekenReportPdf(report as HeinekenReportData);
+    logAudit(req, user.email, "REPORTE_HEINEKEN_PDF_GERADO", `PDF do reporte com ${report.rotasSnapshot.length} DT(s) gerado.`, report.unidadeId || "");
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="reporte-heineken-${report.dataReferencia}.pdf"`);
+    res.send(pdf);
   });
 
   app.post("/api/rotas", (req, res) => {
@@ -3245,6 +3451,7 @@ async function startServer() {
     const nowObj = new Date();
     const dStr = nowObj.toISOString().split("T")[0];
     const tStr = nowObj.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+    item.ultimaAtualizacaoOperacional = nowObj.toISOString();
 
     item.historico_status = [
       {
@@ -3304,7 +3511,7 @@ async function startServer() {
     const current = FileDatabase.get("rotas").find(x => x.id === req.params.id);
     if (!current) return res.status(404).json({ error: "Rota não localizada" });
 
-    if (user.perfil !== "admin_master" && current.unidadeId !== user.unidadeId) {
+    if (!canAccessRoute(user, current)) {
       return res.status(403).json({ error: "Acesso negado para alteração de rotas." });
     }
 
@@ -3410,6 +3617,7 @@ async function startServer() {
 
     if (changedFields.length > 0) {
       item.log_alteracoes = [...changedFields, ...logAlteracoes];
+      item.ultimaAtualizacaoOperacional = new Date().toISOString();
     }
 
     // Detect status_viagem alteration and append to historical log
@@ -3477,6 +3685,7 @@ async function startServer() {
 
     const current = FileDatabase.get("rotas").find(x => x.id === req.params.id);
     if (!current) return res.status(404).json({ error: "DT não encontrada" });
+    if (!canAccessRoute(user, current)) return res.status(403).json({ error: "Acesso negado à unidade desta DT." });
 
     const { tipo, descricao, data, hora } = req.body;
     if (!tipo || !descricao) {
@@ -3498,7 +3707,8 @@ async function startServer() {
 
     const occList = current.ocorrencias || [];
     const updatedRoute = {
-      ocorrencias: [occItem, ...occList]
+      ocorrencias: [occItem, ...occList],
+      ultimaAtualizacaoOperacional: new Date().toISOString(),
     } as any;
 
     // Track as a change log
@@ -6212,11 +6422,17 @@ async function startServer() {
       if (targetRoute && getDtKey(targetRoute.dt) !== getDtKey(dt)) {
         return res.status(400).json({ error: "A viagem selecionada não corresponde ao número da DT informado." });
       }
+      if (!targetRoute) return res.status(404).json({ error: "A DT informada não corresponde a uma rota oficial." });
+      if (!canAccessRoute(user, targetRoute)) {
+        logAudit(req, user.email, "ACESSO_NEGADO_FECHAMENTO_DT", `Tentativa de fechar a DT ${targetRoute.dt} de outra unidade.`, targetRoute.unidadeId);
+        return res.status(403).json({ error: "Acesso negado à unidade desta DT." });
+      }
+      const routeReturns = getEffectiveReturnsForRoute(targetRoute.id);
+      const devolucoesSnapshot = routeReturns.efetivas.map(buildReturnSnapshot);
+      const ocorrenciasResolvidasSnapshot = routeReturns.resolvidas.map(buildReturnSnapshot);
 
       const activeUnit = getRequestUnitContext(req, user);
-      const resolvedUnidadeId = (unidadeId && unidadeId !== "Todas") 
-        ? unidadeId 
-        : (activeUnit !== "Todas" ? activeUnit : (user.unidadeId !== "Todas" ? user.unidadeId : "un-go"));
+      const resolvedUnidadeId = targetRoute.unidadeId || (activeUnit !== "Todas" ? activeUnit : unidadeId);
 
       // Protocol counter generator
       const getNextProtocol = (): string => {
@@ -6305,18 +6521,16 @@ async function startServer() {
         }
       }
 
-      if ((houveDevolucao === "Sim" || houveDevolucao === true)) {
-        if (!resolvedOcorrencias.some(o => o.tipo === "Devolução")) {
-          resolvedOcorrencias.push({
-            id: `occ-auto-dev-${Date.now()}`,
-            tipo: "Devolução",
-            produto: "Devolução de Mercadoria",
-            quantidade: Number(devolucaoQtd || 0),
-            valorUnitario: 0,
-            valorTotal: 0,
-            observacao: `Motivo: ${devolucaoMotivo || "Retorno normal"} • ${devolucaoObs || ""}`
-          });
-        }
+      if (routeReturns.quantidade > 0 && !resolvedOcorrencias.some(o => o.tipo === "Devolução Registrada")) {
+        resolvedOcorrencias.push({
+          id: `occ-auto-dev-${Date.now()}`,
+          tipo: "Devolução Registrada",
+          produto: "Devolução de Mercadoria",
+          quantidade: routeReturns.quantidade,
+          valorUnitario: 0,
+          valorTotal: routeReturns.valorTotal,
+          observacao: `${routeReturns.quantidade} devolução(ões) efetiva(s) vinculada(s) pelo módulo Devoluções.`
+        });
       }
 
       if ((houveAvaria === "Sim" || houveAvaria === true)) {
@@ -6335,12 +6549,14 @@ async function startServer() {
 
       // Auto-determine statusFechamento
       let resolvedStatus = statusFechamento;
-      if (!resolvedStatus) {
+      if (routeReturns.quantidade > 0 && houveFalta !== "Sim" && houveFalta !== true && houveAvaria !== "Sim" && houveAvaria !== true) {
+        resolvedStatus = "Fechada Com Devolução";
+      } else if (!resolvedStatus) {
         if (houveFalta === "Sim" || houveFalta === true) {
           resolvedStatus = "Fechada Com Vale";
         } else if (houveAvaria === "Sim" || houveAvaria === true) {
           resolvedStatus = "Fechada Com Ocorrência";
-        } else if (houveDevolucao === "Sim" || houveDevolucao === true) {
+        } else if (routeReturns.quantidade > 0) {
           resolvedStatus = "Fechada Com Devolução";
         } else {
           resolvedStatus = "Fechada Sem Vale";
@@ -6361,7 +6577,11 @@ async function startServer() {
           adiantamentos: req.body.adiantamentos !== undefined ? Number(req.body.adiantamentos) : 0,
           vales: resolvedOcorrencias.filter((o: any) => o.tipo === "Falta de Mercadoria"),
           multasDescontos: req.body.multasDescontos !== undefined ? Number(req.body.multasDescontos) : 0,
-          statusFechamento: resolvedStatus
+          statusFechamento: resolvedStatus,
+          devolucoesSnapshot,
+          ocorrenciasResolvidasSnapshot,
+          quantidadeDevolucoes: routeReturns.quantidade,
+          valorTotalDevolucoes: routeReturns.valorTotal,
         }
       };
 
@@ -6425,12 +6645,16 @@ async function startServer() {
         unidadeId: resolvedUnidadeId,
         observacoes: observacoes || "",
         ocorrencias: resolvedOcorrencias,
-        houveDevolucao: houveDevolucao || "Não",
+        houveDevolucao: routeReturns.quantidade > 0 ? "Sim" : "Não",
         houveAvaria: houveAvaria || "Não",
         houveFalta: houveFalta || "Não",
-        devolucaoQtd: Number(devolucaoQtd || 0),
-        devolucaoMotivo: devolucaoMotivo || "",
-        devolucaoObs: devolucaoObs || "",
+        devolucaoQtd: routeReturns.quantidade,
+        devolucaoMotivo: routeReturns.quantidade > 0 ? "Conforme registros vinculados à DT" : "",
+        devolucaoObs: "Fonte oficial: módulo Devoluções",
+        quantidadeDevolucoes: routeReturns.quantidade,
+        valorTotalDevolucoes: routeReturns.valorTotal,
+        devolucoesSnapshot,
+        ocorrenciasResolvidasSnapshot,
         faltaProduto: faltaProduto || "",
         faltaQuantidade: Number(faltaQuantidade || 0),
         faltaValorUnit: Number(faltaValorUnit || 0),
@@ -6496,9 +6720,9 @@ async function startServer() {
       // Audit DT closure
       FileDatabase.logAudit(
         user.email,
-        "FECHAMENTO_DT_CRIADO",
-        `Fechamento residencial efetuado para a DT ${dt} com protocolo ${nextProtocol} e status: ${resolvedStatus}.`,
-        unidadeId || ""
+        routeReturns.quantidade > 0 ? "FECHAMENTO_DT_COM_DEVOLUCOES" : "FECHAMENTO_DT_CRIADO",
+        `Fechamento efetuado para a DT ${dt} com protocolo ${nextProtocol}, status ${resolvedStatus}, ${routeReturns.quantidade} devolução(ões) e valor total R$ ${routeReturns.valorTotal.toFixed(2)}.`,
+        resolvedUnidadeId || ""
       );
 
       // Update Rota status to "Finalizada"
@@ -6508,7 +6732,8 @@ async function startServer() {
       if (foundRota) {
         FileDatabase.update("rotas", foundRota.id, {
           status: "Finalizada",
-          status_viagem: "Finalizada"
+          status_viagem: "Finalizada",
+          ultimaAtualizacaoOperacional: now.toISOString(),
         }, user.email);
         
         FileDatabase.logAudit(
@@ -7398,20 +7623,68 @@ async function startServer() {
       const user = getRequestUser(req);
       if (!user) return res.status(401).json({ error: "Não autorizado" });
       
-      const record = req.body;
-
-      // Security: Ignore frontend-provided unit if user is bound to a specific unit
-      const activeUnit = getRequestUnitContext(req, user);
-      if (user.unidadeId && user.unidadeId !== "Todas") {
-        record.unidadeId = user.unidadeId;
-        record.filial = user.unidadeId;
-      } else if (activeUnit && activeUnit !== "Todas") {
-        record.unidadeId = activeUnit;
-        record.filial = activeUnit;
-      } else if (!record.unidadeId) {
-        record.unidadeId = "un-go";
-        record.filial = "un-go";
+      const input = req.body || {};
+      const route = (FileDatabase.get("rotas") || []).find((item: Rota) => item.id === String(input.rotaId || ""));
+      if (!route) return res.status(400).json({ error: "Selecione uma DT válida antes de registrar a ocorrência." });
+      if (!canAccessRoute(user, route)) {
+        logAudit(req, user.email, "ACESSO_NEGADO_DEVOLUCAO_DT", `Tentativa de registrar devolução na DT ${route.dt} de outra unidade.`, route.unidadeId);
+        return res.status(403).json({ error: "Acesso negado à unidade desta DT." });
       }
+      const deliveryOrder = String(input.deliveryOrder || "").trim();
+      const delivery = route.shipsEntregas?.find((item) => item.deliveryOrder === deliveryOrder || item.id === input.shipsDeliveryId);
+      if (!delivery) return res.status(400).json({ error: "Selecione um cliente/Delivery Order pertencente à DT." });
+      const complement = ((FileDatabase.get("ships_delivery_complements") || []) as ShipsDeliveryComplement[])
+        .find((item) => item.rotaId === route.id && item.deliveryOrder === delivery.deliveryOrder);
+      const vehicle = (FileDatabase.get("veiculos") || []).find((item: Veiculo) => item.id === route.veiculoId);
+      const driver = (FileDatabase.get("motoristas") || []).find((item: Motorista) => item.id === route.motoristaId);
+      if (!vehicle || !driver) return res.status(409).json({ error: "A DT não possui veículo e motorista oficiais disponíveis." });
+      const resolved = input.resolvido === true || input.resolvidoBoolean === true || input.resolvido === "SIM";
+      const motivoCodigo = String(input.motivoCodigo || "").trim();
+      const motivo = (FileDatabase.get("devolucoes_motivos" as any) || []).find((item: any) => item.codigo === motivoCodigo || item.id === motivoCodigo);
+      if (!motivoCodigo || !motivo) return res.status(400).json({ error: "Selecione um motivo válido." });
+      const numeroNF = String(input.numeroNF || "").trim();
+      const valorNF = Number(input.valorNF || 0);
+      if (!resolved && !numeroNF) return res.status(400).json({ error: "A NF é obrigatória para devolução efetiva." });
+      if (!resolved && (!Number.isFinite(valorNF) || valorNF <= 0)) return res.status(400).json({ error: "O valor da mercadoria é obrigatório para devolução efetiva." });
+      const nowIso = new Date().toISOString();
+      const record: any = {
+        ...input,
+        rotaId: route.id,
+        dt: route.dt,
+        deliveryOrder: delivery.deliveryOrder,
+        shipsDeliveryId: delivery.id,
+        unidadeId: route.unidadeId,
+        filial: route.unidadeId,
+        veiculoId: route.veiculoId,
+        veiculoPlaca: vehicle.placa,
+        veiculo: vehicle.placa,
+        veiculoModelo: vehicle.modelo || "",
+        motoristaId: route.motoristaId,
+        motoristaMatricula: (driver as any).matricula || driver.id,
+        motoristaNome: driver.nome,
+        motoristaNomeSnapshot: driver.nome,
+        motoristaTelefone: driver.telefone || "",
+        clienteCodigo: delivery.customerId || complement?.customerCode || "",
+        clienteNome: delivery.customerName || complement?.customerName || "Cliente da DT",
+        clienteRazaoSocial: delivery.customerName || complement?.customerName || "Cliente da DT",
+        clienteNomeFantasia: delivery.customerName || complement?.customerName || "Cliente da DT",
+        clienteNomeSnapshot: delivery.customerName || complement?.customerName || "Cliente da DT",
+        endereco: [complement?.addressLine1, complement?.addressLine2, complement?.addressCity, complement?.addressState].filter(Boolean).join(", "),
+        telefone: complement?.phone || complement?.receiverPhone || "",
+        telefoneCliente: complement?.phone || complement?.receiverPhone || "",
+        numeroNF,
+        valorNF: Number.isFinite(valorNF) ? valorNF : 0,
+        motivoCodigo,
+        motivoDescricao: motivo.descricao,
+        resolvido: resolved ? "SIM" : "NÃO",
+        resolvidoBoolean: resolved,
+        geraDevolucao: !resolved,
+        statusTratativa: resolved ? "RESOLVIDA" : "DEVOLUCAO",
+        status: resolved ? "Resolvida" : "Aguardando Tratativa",
+        resolvidoEm: resolved ? nowIso : undefined,
+        resolvidoPor: resolved ? user.email : undefined,
+        origem: "DT",
+      };
       
       // Auto-generate protocol
       if (!record.protocolo) {
@@ -7435,28 +7708,16 @@ async function startServer() {
         record.id = record.protocolo;
       }
       
-      record.origem = record.origem || "manual";
       record.criadoPor = user.nome;
-      record.criadoEm = new Date().toISOString();
-      record.ip = req.ip || req.headers["x-forwarded-for"] || "127.0.0.1";
+      record.criadoEm = nowIso;
+      record.ip = getClientIp(req);
 
       const list = FileDatabase.get("devolucoes_registros" as any) || [];
       list.push(record);
       FileDatabase.set("devolucoes_registros" as any, list);
+      FileDatabase.update("rotas", route.id, { ultimaAtualizacaoOperacional: nowIso }, user.email);
 
-      // Audit log entry
-      try {
-        const auditList = FileDatabase.get("auditoria") || [];
-        auditList.push({
-          id: `aud-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-          usuario: user.email,
-          data: new Date().toISOString().split("T")[0],
-          hora: new Date().toTimeString().split(" ")[0],
-          acao: "CREATE_DEVOLUCOES_REGISTRO",
-          detalhes: `Devolucao ${record.protocolo} criada para o cliente ${record.clienteNomeFantasia} (${record.clienteCodigo}) por ${user.nome}. IP: ${record.ip}.`
-        });
-        FileDatabase.set("auditoria", auditList);
-      } catch (ae) {}
+      logAudit(req, user.email, resolved ? "OCORRENCIA_RESOLVIDA_DT" : "DEVOLUCAO_EFETIVA_DT", `${record.protocolo} vinculada à DT ${route.dt}, Delivery Order ${delivery.deliveryOrder}, cliente ${record.clienteCodigo}.`, route.unidadeId);
 
       return res.json({ success: true, record });
     } catch (err: any) {
@@ -7527,11 +7788,40 @@ async function startServer() {
       });
 
       if (idx === -1) return res.status(404).json({ error: "Registro de devolução não encontrado" });
+      if (!canAccessUnit(user, list[idx].unidadeId)) {
+        logAudit(req, user.email, "ACESSO_NEGADO_DEVOLUCAO", `Tentativa de alterar ${list[idx].protocolo} de outra unidade.`, list[idx].unidadeId);
+        return res.status(403).json({ error: "Acesso negado à devolução desta unidade." });
+      }
+      const protectedSnapshot = {
+        rotaId: list[idx].rotaId,
+        dt: list[idx].dt,
+        unidadeId: list[idx].unidadeId,
+        filial: list[idx].filial,
+        deliveryOrder: list[idx].deliveryOrder,
+        shipsDeliveryId: list[idx].shipsDeliveryId,
+        veiculoId: list[idx].veiculoId,
+        veiculoPlaca: list[idx].veiculoPlaca,
+        motoristaId: list[idx].motoristaId,
+        motoristaNome: list[idx].motoristaNome,
+        motoristaNomeSnapshot: list[idx].motoristaNomeSnapshot,
+        clienteCodigo: list[idx].clienteCodigo,
+        clienteNomeSnapshot: list[idx].clienteNomeSnapshot,
+      };
+      const resolvedUpdate = updatedFields.resolvido === true || updatedFields.resolvidoBoolean === true || updatedFields.resolvido === "SIM";
+      if (updatedFields.resolvido !== undefined || updatedFields.resolvidoBoolean !== undefined) {
+        updatedFields.resolvido = resolvedUpdate ? "SIM" : "NÃO";
+        updatedFields.resolvidoBoolean = resolvedUpdate;
+        updatedFields.geraDevolucao = !resolvedUpdate;
+        updatedFields.statusTratativa = resolvedUpdate ? "RESOLVIDA" : "DEVOLUCAO";
+        updatedFields.resolvidoEm = resolvedUpdate ? (list[idx].resolvidoEm || new Date().toISOString()) : undefined;
+        updatedFields.resolvidoPor = resolvedUpdate ? user.email : undefined;
+      }
       
       const oldStatus = list[idx].status;
       list[idx] = {
         ...list[idx],
         ...updatedFields,
+        ...protectedSnapshot,
         alteradoPor: user.nome,
         alteradoEm: new Date().toISOString()
       };
@@ -7637,6 +7927,11 @@ async function startServer() {
 
       if (removedItems.length === 0) {
         return res.status(404).json({ error: "Registro de devolução não encontrado" });
+      }
+      if (removedItems.some((item) => !canAccessUnit(user, item.unidadeId))) {
+        removedItems.forEach((item) => remainingList.push(item));
+        logAudit(req, user.email, "ACESSO_NEGADO_DEVOLUCAO", "Tentativa de excluir devolução de outra unidade.", removedItems[0]?.unidadeId || "");
+        return res.status(403).json({ error: "Acesso negado à devolução desta unidade." });
       }
 
       FileDatabase.set("devolucoes_registros" as any, remainingList);
