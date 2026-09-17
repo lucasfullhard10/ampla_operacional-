@@ -7,6 +7,8 @@ export type {
 export type {
   ChecklistAnswerValue,
   ChecklistAnexo,
+  ChecklistObservacao,
+  ChecklistVehicleSide,
   ChecklistConfiguracao,
   ChecklistCriticality,
   ChecklistItemTemplate,

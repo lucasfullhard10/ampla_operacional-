@@ -4344,6 +4344,7 @@ export default function MonitoramentoView({ rotas, veiculos, motoristas, unidade
         rotas={rotas}
         veiculos={veiculos}
         motoristas={motoristas}
+        userEmail={userEmail}
         onClose={() => setShipsImportOpen(false)}
         onViewRoute={(route) => {
           setShipsImportOpen(false);

@@ -11,6 +11,8 @@ import { Unidade, Motorista, Veiculo, Rota, Descarga, Manutencao, Abastecimento,
 import DatabaseSettingsModal from "./components/DatabaseSettingsModal";
 import DocumentNotificationCenter from "./components/DocumentNotificationCenter";
 
+const AUTH_SYNC_KEY = "ampla_auth_changed";
+
 // Route-level code splitting keeps charts, XLSX and large operational screens
 // out of the login and shell bundle until the user actually opens each module.
 const DashboardView = lazy(() => import("./components/DashboardView"));
@@ -194,6 +196,65 @@ export default function App() {
 
   useEffect(() => {
     fetchLoginUnidades();
+  }, []);
+
+  useEffect(() => {
+    let disposed = false;
+
+    const synchronizeSession = async () => {
+      try {
+        const response = await fetch("/api/auth/session", { cache: "no-store" });
+        if (disposed) return;
+        if (response.status === 401) {
+          setCurrentUser(null);
+          setForcedResetUserEmail(null);
+          return;
+        }
+        if (!response.ok) return;
+
+        const data = await response.json();
+        const sessionUser = data.user as Usuario;
+        if (data.forcePasswordReset) {
+          setCurrentUser(null);
+          setForcedResetUserEmail(sessionUser.email);
+          return;
+        }
+
+        setForcedResetUserEmail(null);
+        setCurrentUser((previous) => previous?.id === sessionUser.id && previous.email === sessionUser.email
+          ? previous
+          : sessionUser);
+        setSelectedUnit((previous) => {
+          const isMasterSession = sessionUser.perfil === "admin_master" || sessionUser.tipo_usuario === "MASTER";
+          return isMasterSession && previous ? previous : (sessionUser.unidadeId || sessionUser.unidade_id || "Todas");
+        });
+      } catch {
+        // A transient network failure must not log out an otherwise valid local screen.
+      }
+    };
+
+    const handleFocus = () => void synchronizeSession();
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible") void synchronizeSession();
+    };
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key === AUTH_SYNC_KEY) void synchronizeSession();
+    };
+
+    void synchronizeSession();
+    window.addEventListener("focus", handleFocus);
+    window.addEventListener("pageshow", handleFocus);
+    window.addEventListener("storage", handleStorage);
+    window.addEventListener("ampla:session-changed", handleFocus);
+    document.addEventListener("visibilitychange", handleVisibility);
+    return () => {
+      disposed = true;
+      window.removeEventListener("focus", handleFocus);
+      window.removeEventListener("pageshow", handleFocus);
+      window.removeEventListener("storage", handleStorage);
+      window.removeEventListener("ampla:session-changed", handleFocus);
+      document.removeEventListener("visibilitychange", handleVisibility);
+    };
   }, []);
 
   // Load all logistics data from API safely
@@ -383,6 +444,7 @@ export default function App() {
           setLoginError("");
         } else {
           setCurrentUser(data.user);
+          localStorage.setItem(AUTH_SYNC_KEY, String(Date.now()));
           const isMaster = data.user.perfil === "admin_master" || data.user.tipo_usuario === "MASTER";
           const startUnit = isMaster ? loginUnitId : (data.user.unidadeId || data.user.unidade_id || "Todas");
           setSelectedUnit(startUnit);
@@ -434,6 +496,7 @@ export default function App() {
       if (res.ok) {
         const data = await res.json();
         setCurrentUser(data.user);
+        localStorage.setItem(AUTH_SYNC_KEY, String(Date.now()));
         setSelectedUnit("Todas");
         setForcedResetUserEmail(null);
       }
@@ -468,6 +531,7 @@ export default function App() {
       if (res.ok) {
         const data = await res.json();
         setCurrentUser(data.user);
+        localStorage.setItem(AUTH_SYNC_KEY, String(Date.now()));
         setSelectedUnit(data.user.unidadeId || data.user.unidade_id || "Todas");
         setForcedResetUserEmail(null);
         setCurrentPasswordValue("");
@@ -484,15 +548,20 @@ export default function App() {
     }
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
     if (currentUser) {
-      fetch("/api/auth/logout", {
-        method: "POST",
-        headers: { "x-user-email": currentUser.email }
-      }).catch(err => console.error("Logout audit failed:", err));
+      try {
+        await fetch("/api/auth/logout", {
+          method: "POST",
+          headers: { "x-user-email": currentUser.email }
+        });
+      } catch (err) {
+        console.error("Logout audit failed:", err);
+      }
     }
     setCurrentUser(null);
     setActiveTab("dashboard");
+    localStorage.setItem(AUTH_SYNC_KEY, String(Date.now()));
     fetchLoginUnidades();
   };
 

@@ -25,6 +25,7 @@ import { createHeinekenReportPdf, type HeinekenReportData } from "./server/heine
 import { buildReturnSnapshot, getRouteReturnSummary } from "./shared/routeReturns";
 import {
   CHECKLIST_MODULE_KEY,
+  CHECKLIST_VEHICLE_SIDES,
   canFieldUserAccessParticipants,
   canDriverAccessChecklist,
   canHelperAccessChecklist,
@@ -40,6 +41,8 @@ import {
   type ChecklistItemTemplate,
   type ChecklistResposta,
   type ChecklistVeiculo,
+  type ChecklistObservacao,
+  type ChecklistVehicleSide,
   type VeiculoBloqueio,
 } from "./shared/weeklyChecklist";
 import {
@@ -69,6 +72,7 @@ import {
   verifyPassword,
 } from "./server/authSecurity";
 import { SessionStore } from "./server/sessionStore";
+import { sessionMatchesClaimedUser } from "./server/authIdentity";
 import {
   buildChecklistNotifications,
   getChecklistFinalNotificationTypes,
@@ -165,8 +169,15 @@ async function startServer() {
       sessions.refresh(token!);
       (req as express.Request & { authenticatedUser?: Usuario }).authenticatedUser = authenticatedUser;
 
+      if (!sessionMatchesClaimedUser(authenticatedUser, req.headers["x-user-email"])) {
+        return res.status(409).json({
+          error: "A sessão deste navegador pertence a outro usuário. A tela será atualizada com o perfil autenticado.",
+          code: "SESSION_USER_CHANGED",
+        });
+      }
+
       if (requiresPasswordChange(authenticatedUser) &&
-          !["/auth/change-password", "/auth/logout"].includes(req.path)) {
+          !["/auth/session", "/auth/change-password", "/auth/logout"].includes(req.path)) {
         return res.status(403).json({
           error: "Troca de senha obrigatória antes de acessar os módulos.",
           code: "PASSWORD_CHANGE_REQUIRED",
@@ -179,11 +190,14 @@ async function startServer() {
         const driverAllowed = [
           { method: "POST", pattern: /^\/auth\/logout$/ },
           { method: "POST", pattern: /^\/auth\/change-password$/ },
+          { method: "GET", pattern: /^\/auth\/session$/ },
           { method: "GET", pattern: /^\/motorista\/me\/checklist-atual$/ },
           { method: "GET", pattern: /^\/motorista\/me\/checklists$/ },
           { method: "POST", pattern: /^\/checklists$/ },
           { method: "GET", pattern: /^\/checklists\/[^/]+$/ },
           { method: "POST", pattern: /^\/checklists\/[^/]+\/respostas$/ },
+          { method: "POST", pattern: /^\/checklists\/[^/]+\/fotos-veiculo$/ },
+          { method: "POST", pattern: /^\/checklists\/[^/]+\/observacoes$/ },
           { method: "POST", pattern: /^\/checklists\/[^/]+\/finalizar$/ },
           { method: "POST", pattern: /^\/checklists\/[^/]+\/assinar$/ },
           { method: "GET", pattern: /^\/checklists\/[^/]+\/pdf$/ },
@@ -618,6 +632,15 @@ async function startServer() {
   app.get("/api/auth/unidades", (req, res) => {
     const unidades = FileDatabase.get("unidades");
     res.json(unidades);
+  });
+
+  app.get("/api/auth/session", (req, res) => {
+    const user = getRequestUser(req);
+    res.json({
+      success: true,
+      user: getUserWithPerms(user),
+      forcePasswordReset: requiresPasswordChange(user),
+    });
   });
 
   app.post("/api/auth/login", (req, res) => {
@@ -4763,6 +4786,81 @@ async function startServer() {
     fotoNome?: string;
     removerFoto?: boolean;
   }
+
+  app.post("/api/checklists/:id/fotos-veiculo", (req, res) => {
+    const user = getRequestUser(req);
+    const detail = getChecklistDetail(req.params.id);
+    if (!detail) return res.status(404).json({ error: "Checklist não encontrado." });
+    if (!canAccessChecklist(user, detail.checklist)) return denyChecklistAccess(req, res, user, detail.checklist.id);
+    if (!isDriverUser(user) && !isChecklistManager(user)) return res.status(403).json({ error: "Seu perfil não pode alterar as fotos do veículo." });
+    if (detail.checklist.inspecaoConcluidaEm || isChecklistFinal(detail.checklist.status)) {
+      return res.status(409).json({ error: "Fotos do veículo não podem ser substituídas após a conclusão da inspeção." });
+    }
+    const position = req.body?.posicao as ChecklistVehicleSide;
+    if (!CHECKLIST_VEHICLE_SIDES.includes(position)) return res.status(400).json({ error: "Posição do veículo inválida." });
+    let image;
+    try {
+      image = parseImageDataUrl(req.body?.fotoDataUrl, `Foto ${position.toLowerCase()} do veículo`);
+    } catch (error) {
+      return res.status(400).json({ error: error instanceof Error ? error.message : "Foto inválida." });
+    }
+    replaceChecklistAttachment({
+      checklistId: detail.checklist.id,
+      position,
+      type: "FOTO_VEICULO",
+      dataUrl: image.dataUrl,
+      mimeType: image.mimeType,
+      name: `${detail.checklist.placaSnapshot}-${position.toLowerCase()}.${image.mimeType === "image/png" ? "png" : "jpg"}`,
+      user,
+      unitId: detail.checklist.unidadeId,
+    });
+    FileDatabase.update("checklists_veiculos", detail.checklist.id, { atualizadoEm: new Date().toISOString() }, user.email);
+    logAudit(req, user.nome, "FOTO_VEICULO_CHECKLIST", `Registrou foto ${position.toLowerCase()} do veículo no checklist ${detail.checklist.protocolo || detail.checklist.id}.`, detail.checklist.unidadeId);
+    return res.json({ success: true, detail: getChecklistDetail(detail.checklist.id) });
+  });
+
+  app.post("/api/checklists/:id/observacoes", (req, res) => {
+    const user = getRequestUser(req);
+    const detail = getChecklistDetail(req.params.id);
+    if (!detail) return res.status(404).json({ error: "Checklist não encontrado." });
+    if (!canAccessChecklist(user, detail.checklist)) return denyChecklistAccess(req, res, user, detail.checklist.id);
+    if (!isDriverUser(user) && !isChecklistManager(user)) return res.status(403).json({ error: "Seu perfil não pode registrar observações neste checklist." });
+    const texto = typeof req.body?.texto === "string" ? req.body.texto.trim() : "";
+    if (!texto || texto.length > 2000) return res.status(400).json({ error: "A observação deve conter de 1 a 2000 caracteres." });
+    let image: ReturnType<typeof parseImageDataUrl> | undefined;
+    if (req.body?.fotoDataUrl) {
+      try {
+        image = parseImageDataUrl(req.body.fotoDataUrl, "Foto da observação");
+      } catch (error) {
+        return res.status(400).json({ error: error instanceof Error ? error.message : "Foto inválida." });
+      }
+    }
+    const observation: ChecklistObservacao = {
+      id: `cho-${crypto.randomUUID()}`,
+      texto,
+      autorId: user.id,
+      autorNome: user.nome,
+      criadoEm: new Date().toISOString(),
+    };
+    if (image) {
+      observation.fotoAnexoId = replaceChecklistAttachment({
+        checklistId: detail.checklist.id,
+        observationId: observation.id,
+        type: "FOTO_OBSERVACAO",
+        dataUrl: image.dataUrl,
+        mimeType: image.mimeType,
+        name: `observacao-${observation.id}.${image.mimeType === "image/png" ? "png" : "jpg"}`,
+        user,
+        unitId: detail.checklist.unidadeId,
+      }).id;
+    }
+    FileDatabase.update("checklists_veiculos", detail.checklist.id, {
+      observacoes: [...(detail.checklist.observacoes || []), observation],
+      atualizadoEm: observation.criadoEm,
+    }, user.email);
+    logAudit(req, user.nome, "OBSERVACAO_CHECKLIST", `Registrou observação no checklist ${detail.checklist.protocolo || detail.checklist.id}${image ? " com foto" : ""}.`, detail.checklist.unidadeId);
+    return res.json({ success: true, detail: getChecklistDetail(detail.checklist.id) });
+  });
 
   app.post("/api/checklists/:id/respostas", async (req, res) => {
     const user = getRequestUser(req);

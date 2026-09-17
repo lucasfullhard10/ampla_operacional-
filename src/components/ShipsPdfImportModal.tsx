@@ -8,6 +8,7 @@ type Props = {
   rotas: Rota[];
   veiculos: Veiculo[];
   motoristas: Motorista[];
+  userEmail: string;
   onClose: () => void;
   onImported: (route: Rota) => void;
   onViewRoute: (route: Rota) => void;
@@ -35,7 +36,9 @@ function vehicleCanBeUsed(vehicle: Veiculo): boolean {
 }
 
 function driverCanBeUsed(driver: Motorista): boolean {
-  return (!driver.tipo || driver.tipo === "Motorista") && driver.statusFinal === "LIBERADO";
+  return (!driver.tipo || driver.tipo === "Motorista") &&
+    driver.statusFinal !== "BLOQUEADO" &&
+    driver.statusFinal !== "PENDENTE";
 }
 
 function formatDate(date: string): string {
@@ -49,6 +52,7 @@ export default function ShipsPdfImportModal({
   rotas,
   veiculos,
   motoristas,
+  userEmail,
   onClose,
   onImported,
   onViewRoute,
@@ -128,7 +132,7 @@ export default function ShipsPdfImportModal({
     try {
       const response = await fetch("/api/rotas/import-ships", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "x-user-email": userEmail },
         body: JSON.stringify({
           ...parsed,
           vehicleId,
@@ -138,6 +142,9 @@ export default function ShipsPdfImportModal({
         }),
       });
       const payload = await response.json().catch(() => ({}));
+      if (payload.code === "SESSION_USER_CHANGED") {
+        window.dispatchEvent(new Event("ampla:session-changed"));
+      }
       if (!response.ok) throw new Error(payload.error || "Não foi possível importar a DT.");
       onImported(payload.route as Rota);
     } catch (caught) {

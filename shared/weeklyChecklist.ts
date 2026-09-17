@@ -67,13 +67,26 @@ export interface ChecklistResposta {
   respondidoEm?: string;
 }
 
-export type ChecklistAttachmentType = "FOTO_NAO_CONFORMIDADE" | "ASSINATURA" | "FOTO_REINSPECAO";
+export type ChecklistVehicleSide = "DIREITA" | "ESQUERDA" | "FRENTE" | "TRASEIRA";
+export const CHECKLIST_VEHICLE_SIDES: ChecklistVehicleSide[] = ["DIREITA", "ESQUERDA", "FRENTE", "TRASEIRA"];
+export type ChecklistAttachmentType = "FOTO_NAO_CONFORMIDADE" | "ASSINATURA" | "FOTO_REINSPECAO" | "FOTO_VEICULO" | "FOTO_OBSERVACAO";
+
+export interface ChecklistObservacao {
+  id: string;
+  texto: string;
+  autorId: string;
+  autorNome: string;
+  criadoEm: string;
+  fotoAnexoId?: string;
+}
 
 export interface ChecklistAnexo {
   id: string;
   checklistId: string;
   respostaId?: string;
   participanteId?: string;
+  posicaoVeiculo?: ChecklistVehicleSide;
+  observacaoId?: string;
   tipo: ChecklistAttachmentType;
   nome: string;
   mimeType: string;
@@ -146,6 +159,7 @@ export interface ChecklistVeiculo {
   checklistOriginalId?: string;
   numeroReinspecao?: number;
   observacaoReinspecao?: string;
+  observacoes?: ChecklistObservacao[];
   criadoEm: string;
   atualizadoEm: string;
   finalizadoEm?: string;

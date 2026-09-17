@@ -20,7 +20,7 @@ import {
   Usuario,
   VeiculoBloqueio,
 } from "../types";
-import { CHECKLIST_SIGNATURE_DECLARATION, isChecklistFinal } from "../../shared/weeklyChecklist";
+import { CHECKLIST_MODULE_KEY, CHECKLIST_SIGNATURE_DECLARATION, CHECKLIST_VEHICLE_SIDES, isChecklistFinal } from "../../shared/weeklyChecklist";
 import { openDocumentOrNotify } from "../lib/documents";
 import { NotificationModal, NotificationType } from "./NotificationModal";
 
@@ -133,6 +133,8 @@ export default function ChecklistEditor({
 }) {
   const [responses, setResponses] = useState<EditableResponse[]>(detail.respostas);
   const [km, setKm] = useState(detail.checklist.km ? String(detail.checklist.km) : "");
+  const [observationText, setObservationText] = useState("");
+  const [observationPhoto, setObservationPhoto] = useState<string | null>(null);
   const [declarationAccepted, setDeclarationAccepted] = useState(false);
   const [saving, setSaving] = useState(false);
   const [notification, setNotification] = useState<NotificationType | null>(null);
@@ -146,6 +148,9 @@ export default function ChecklistEditor({
   const inspectionComplete = Boolean(detail.checklist.inspecaoConcluidaEm || detail.checklist.finalizadoEm);
   const signatoryRoleLabel = currentUser.tipo_usuario === "AJUDANTE" ? "ajudante" : currentUser.tipo_usuario === "MOTORISTA" ? "motorista" : "responsável";
   const canManage = currentUser.tipo_usuario !== "MOTORISTA" && currentUser.tipo_usuario !== "AJUDANTE";
+  const checklistPermissions = currentUser.permissions?.[CHECKLIST_MODULE_KEY];
+  const canAddEvidence = currentUser.tipo_usuario === "MOTORISTA" || currentUser.perfil === "admin_master" || currentUser.perfil === "admin_unidade" ||
+    ["MASTER", "SUPERVISOR", "MANUTENCAO"].includes(currentUser.tipo_usuario || "") || checklistPermissions?.editar === true || checklistPermissions?.edit === true;
   const currentParticipant = detail.participantes.find((participant) =>
     participant.tipoParticipante === currentUser.tipo_usuario &&
     (!participant.userId || participant.userId === currentUser.id) &&
@@ -166,7 +171,7 @@ export default function ChecklistEditor({
     setKm(detail.checklist.km ? String(detail.checklist.km) : "");
     setDeclarationAccepted(false);
     signatureRef.current?.clear();
-  }, [detail]);
+  }, [detail.checklist.id]);
 
   const headers = { "Content-Type": "application/json", "x-selected-unit": selectedUnit };
   const parseApi = async (response: Response) => {
@@ -242,6 +247,54 @@ export default function ChecklistEditor({
       });
     } catch (error) {
       setNotification({ type: "error", message: error instanceof Error ? error.message : "Não foi possível finalizar." });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const readPhoto = async (file: File): Promise<string> => {
+    if (!["image/png", "image/jpeg"].includes(file.type)) throw new Error("Use uma imagem PNG ou JPEG.");
+    if (file.size > 3 * 1024 * 1024) throw new Error("A foto excede o limite de 3 MB.");
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => reject(new Error("Não foi possível ler a foto."));
+      reader.readAsDataURL(file);
+    });
+  };
+
+  const uploadVehiclePhoto = async (position: string, file: File) => {
+    setSaving(true);
+    try {
+      const fotoDataUrl = await readPhoto(file);
+      const payload = await parseApi(await fetch(`/api/checklists/${detail.checklist.id}/fotos-veiculo`, {
+        method: "POST", headers, body: JSON.stringify({ posicao: position, fotoDataUrl }),
+      }));
+      onChanged(payload.detail);
+      setNotification({ type: "success", message: `Foto da parte ${position.toLowerCase()} registrada.` });
+    } catch (error) {
+      setNotification({ type: "error", message: error instanceof Error ? error.message : "Não foi possível enviar a foto." });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const saveObservation = async () => {
+    if (!observationText.trim()) {
+      setNotification({ type: "error", message: "Escreva a observação antes de salvar." });
+      return;
+    }
+    setSaving(true);
+    try {
+      const payload = await parseApi(await fetch(`/api/checklists/${detail.checklist.id}/observacoes`, {
+        method: "POST", headers, body: JSON.stringify({ texto: observationText.trim(), fotoDataUrl: observationPhoto }),
+      }));
+      setObservationText("");
+      setObservationPhoto(null);
+      onChanged(payload.detail);
+      setNotification({ type: "success", message: "Observação registrada no histórico do checklist." });
+    } catch (error) {
+      setNotification({ type: "error", message: error instanceof Error ? error.message : "Não foi possível salvar a observação." });
     } finally {
       setSaving(false);
     }
@@ -337,6 +390,43 @@ export default function ChecklistEditor({
           <div className="rounded-xl border border-slate-800 bg-slate-900 p-3 text-xs text-slate-400">Ajudante não escalado nesta operação.</div>
         )}
       </div>
+
+      <section className="space-y-3 rounded-xl border border-slate-800 bg-slate-900 p-4">
+        <div><h3 className="text-sm font-black text-white">Fotos do veículo</h3><p className="mt-1 text-xs text-slate-400">Registre os quatro ângulos: lado direito, lado esquerdo, frente e traseira. PNG ou JPEG, até 3 MB por foto.</p></div>
+        <div className="grid gap-3 sm:grid-cols-2">
+          {CHECKLIST_VEHICLE_SIDES.map((position) => {
+            const photo = detail.anexos.find((attachment) => attachment.tipo === "FOTO_VEICULO" && attachment.posicaoVeiculo === position);
+            const label = position === "DIREITA" ? "Lado direito" : position === "ESQUERDA" ? "Lado esquerdo" : position === "FRENTE" ? "Frente" : "Parte de trás";
+            return <div key={position} className="rounded-lg border border-slate-700 bg-slate-950 p-3">
+              <p className="mb-2 text-xs font-bold text-white">{label}</p>
+              {photo ? <img src={photo.dataUrl} alt={`Foto do veículo - ${label}`} className="mb-2 h-36 w-full rounded object-contain bg-slate-900" /> : <div className="mb-2 flex h-36 items-center justify-center rounded bg-slate-900 text-xs text-slate-500">Sem foto</div>}
+              {!responsesLocked && canAddEvidence && <label className="flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded border border-dashed border-slate-600 px-3 text-xs font-bold text-slate-200"><Camera className="h-4 w-4" /> {photo ? "Substituir foto" : "Adicionar foto"}<input type="file" accept="image/png,image/jpeg" capture="environment" disabled={saving} className="sr-only" onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadVehiclePhoto(position, file); event.target.value = ""; }} /></label>}
+            </div>;
+          })}
+        </div>
+      </section>
+
+      <section className="space-y-3 rounded-xl border border-slate-800 bg-slate-900 p-4">
+        <div><h3 className="text-sm font-black text-white">Observações adicionais</h3><p className="mt-1 text-xs text-slate-400">Motorista ou supervisor podem registrar uma observação. A foto é opcional; registros anteriores ficam preservados.</p></div>
+        {(detail.checklist.observacoes || []).map((observation) => {
+          const photo = detail.anexos.find((attachment) => attachment.id === observation.fotoAnexoId);
+          const isAddendum = Boolean(detail.checklist.inspecaoConcluidaEm && observation.criadoEm > detail.checklist.inspecaoConcluidaEm);
+          return <article key={observation.id} className="rounded-lg border border-slate-700 bg-slate-950 p-3">
+            <p className="text-[10px] text-slate-400">{observation.autorNome} · {new Date(observation.criadoEm).toLocaleString("pt-BR")}</p>
+            {isAddendum && <p className="mt-1 text-[10px] font-bold text-amber-300">Adendo após a conclusão; não altera a assinatura original.</p>}
+            <p className="mt-2 whitespace-pre-wrap text-xs text-white">{observation.texto}</p>
+            {photo && <img src={photo.dataUrl} alt="Foto da observação" className="mt-3 max-h-56 w-full rounded object-contain bg-slate-900" />}
+          </article>;
+        })}
+        {canAddEvidence && <div className="space-y-2">
+          <textarea value={observationText} maxLength={2000} onChange={(event) => setObservationText(event.target.value)} placeholder="Descreva sua observação sobre o veículo..." aria-label="Nova observação do checklist" className="min-h-24 w-full rounded-lg border border-slate-700 bg-slate-950 p-3 text-xs text-white" />
+          <div className="flex flex-wrap items-center gap-3">
+            <label className="flex min-h-11 cursor-pointer items-center gap-2 rounded-lg border border-dashed border-slate-600 px-3 text-xs font-bold text-slate-200"><Camera className="h-4 w-4" /> {observationPhoto ? "Foto selecionada" : "Anexar foto (opcional)"}<input type="file" accept="image/png,image/jpeg" capture="environment" disabled={saving} className="sr-only" onChange={async (event) => { const file = event.target.files?.[0]; if (!file) return; try { setObservationPhoto(await readPhoto(file)); } catch (error) { setNotification({ type: "error", message: error instanceof Error ? error.message : "Foto inválida." }); } event.target.value = ""; }} /></label>
+            {observationPhoto && <button type="button" onClick={() => setObservationPhoto(null)} className="text-xs text-slate-400">Remover foto</button>}
+            <button type="button" disabled={saving || !observationText.trim()} onClick={saveObservation} className="min-h-11 rounded-lg bg-sky-600 px-4 text-xs font-black text-white disabled:opacity-50">SALVAR OBSERVAÇÃO</button>
+          </div>
+        </div>}
+      </section>
 
       <div className="space-y-3">
         {responses.map((response, index) => {

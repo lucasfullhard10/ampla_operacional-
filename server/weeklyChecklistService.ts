@@ -402,6 +402,8 @@ export function replaceChecklistAttachment(params: {
   checklistId: string;
   responseId?: string;
   participantId?: string;
+  position?: ChecklistAnexo["posicaoVeiculo"];
+  observationId?: string;
   type: ChecklistAnexo["tipo"];
   dataUrl: string;
   mimeType: string;
@@ -414,6 +416,8 @@ export function replaceChecklistAttachment(params: {
     attachment.checklistId === params.checklistId &&
     attachment.respostaId === params.responseId &&
     attachment.participanteId === params.participantId &&
+    attachment.posicaoVeiculo === params.position &&
+    attachment.observacaoId === params.observationId &&
     attachment.tipo === params.type
   ));
   const attachment: ChecklistAnexo = {
@@ -421,6 +425,8 @@ export function replaceChecklistAttachment(params: {
     checklistId: params.checklistId,
     respostaId: params.responseId,
     participanteId: params.participantId,
+    posicaoVeiculo: params.position,
+    observacaoId: params.observationId,
     tipo: params.type,
     nome: params.name,
     mimeType: params.mimeType,
