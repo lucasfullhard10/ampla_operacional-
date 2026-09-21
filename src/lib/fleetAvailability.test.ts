@@ -20,6 +20,13 @@ assert.deepEqual(calculateFleetAvailabilityMetrics([
   { data: "2026-08-13", unidadeId: "go", veiculoId: "same", status: "Em rota" },
   { data: "2026-08-14", unidadeId: "go", veiculoId: "same", status: "Em rota" },
 ]), { disponibilizados: 1, roteirizados: 1, ociosos: 0, aproveitamento: 100 });
+assert.deepEqual(calculateFleetAvailabilityMetrics([
+  { data: "2026-08-13", unidadeId: "go", veiculoId: "v-1" },
+  { data: "2026-08-14", unidadeId: "go", veiculoId: "v-1" },
+  { data: "2026-08-14", unidadeId: "go", veiculoId: "v-2" },
+], [
+  { data: "2026-08-14", unidadeId: "go", veiculoId: "v-1", status: "Em rota" },
+]), { disponibilizados: 2, roteirizados: 1, ociosos: 1, aproveitamento: 50 });
 assert.equal(calculateFleetAvailabilityMetrics(availability(1), [{ data: "2026-08-13", unidadeId: "go", veiculoId: "v-0", status: "Cancelada" }]).roteirizados, 0);
 
 console.log("fleetAvailability tests passed");

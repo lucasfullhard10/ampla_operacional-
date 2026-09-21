@@ -5,7 +5,11 @@ import fs from "fs";
 import crypto from "crypto";
 import { createServer as createViteServer } from "vite";
 import { FileDatabase, Usuario, Motorista, Veiculo, Rota, NotaFiscal, Manutencao, UsuarioUnidadePermissao, Unidade, MovimentacaoFinanceira } from "./server/database";
-import { deduplicateAvailabilityRecords, isValidRouteForAvailability } from "./src/lib/fleetAvailability";
+import {
+  calculateFleetAvailabilityMetrics,
+  deduplicateAvailabilityRecords,
+  isValidRouteForAvailability,
+} from "./src/lib/fleetAvailability";
 import { normalizeDriverId, resolveVehicleDriverLink } from "./shared/vehicleDriverLink";
 import { buildRouteId, findConflictingRoute, getDtKey, isReentregaRoute, normalizeDt } from "./server/routeIdentity";
 import {
@@ -769,7 +773,14 @@ async function startServer() {
     const rotas = FileDatabase.get("rotas") as Rota[];
     const motoristas = FileDatabase.get("motoristas") as Motorista[];
     const veiculos = FileDatabase.get("veiculos") as Veiculo[];
-    const disponibilidade = FileDatabase.get("disponibilidade") || [];
+    const supabaseStatus = FileDatabase.getSupabaseStatus();
+    // The daily collection is the source rendered by /api/disponibilidade.
+    // Prefer it here as well so the operational screen and the dashboard cannot
+    // show conflicting numbers. Older installations may only have the legacy
+    // collection, so retain it as a safe fallback.
+    const disponibilidadeDiaria = FileDatabase.get("disponibilidade_diaria") || [];
+    const disponibilidadeLegada = FileDatabase.get("disponibilidade") || [];
+    const disponibilidade = disponibilidadeDiaria.length > 0 ? disponibilidadeDiaria : disponibilidadeLegada;
     const descargas = FileDatabase.get("descargas") || [];
     const nfs = FileDatabase.get("notas_fiscais") || [];
     const unidades = FileDatabase.get("unidades") || [];
@@ -975,17 +986,23 @@ async function startServer() {
     const veiculosDisponiveis = filteredVeiculos.filter(v => v.status === "Liberado").length;
     const veiculosIndisponiveis = filteredVeiculos.filter(v => v.status === "Bloqueado").length;
 
-    // Availability KPI records
+    // Availability KPI records. Records persisted before the current API use
+    // snake_case/date_disponibilidade fields, while newer records use camelCase.
+    // Normalize both formats before deduplicating or calculating indicators.
     const mDisps = deduplicateAvailabilityRecords(disponibilidade.map((item: any) => {
-      const unitId = item.unidadeId || item.unidade || "un-go";
+      const unitId = item.unidade_id || item.unidadeId || item.unidade || "un-go";
+      const data = item.data_disponibilidade || item.data || "";
+      const veiculoId = item.veiculo_id || item.veiculoId || "";
       const isRoteirizado = rotas.some(r =>
         isValidRouteForAvailability(r) &&
-        r.veiculoId === item.veiculoId &&
-        r.data === item.data &&
+        r.veiculoId === veiculoId &&
+        r.data === data &&
         (!r.unidadeId || r.unidadeId === unitId)
       );
       return {
         ...item,
+        data,
+        veiculoId,
         roteirizado: isRoteirizado,
         status_disponibilidade: isRoteirizado ? "ROTEIRIZADO" : "NÃO ROTEIRIZADO",
         unidadeId: unitId,
@@ -994,12 +1011,18 @@ async function startServer() {
 
     const filteredMDisps = mDisps.filter(filterUnit);
 
-    // Active availability KPIs filtered
+    const calculateAvailabilityMetrics = (records: any[]) =>
+      calculateFleetAvailabilityMetrics(records, filteredRotasUnit);
+
+    // Active availability KPIs filtered. Each vehicle is counted only once in
+    // the selected operational scope, even when it was declared on multiple
+    // days or duplicated by a legacy import.
     const rangeDisps = filteredMDisps.filter(d => d.data >= currentRange.start && d.data <= currentRange.end);
-    const disponibilizadosHoje = rangeDisps.length;
-    const roteirizadosHoje = rangeDisps.filter(d => d.roteirizado).length;
-    const naoUtilizadosHoje = Math.max(0, disponibilizadosHoje - roteirizadosHoje);
-    const aproveitamentoHoje = disponibilizadosHoje > 0 ? Math.round((roteirizadosHoje / disponibilizadosHoje) * 100) : 0;
+    const rangeAvailabilityMetrics = calculateAvailabilityMetrics(rangeDisps);
+    const disponibilizadosHoje = rangeAvailabilityMetrics.disponibilizados;
+    const roteirizadosHoje = rangeAvailabilityMetrics.roteirizados;
+    const naoUtilizadosHoje = rangeAvailabilityMetrics.ociosos;
+    const aproveitamentoHoje = rangeAvailabilityMetrics.aproveitamento;
 
     const veiculosNaoRoteirizados = naoUtilizadosHoje;
 
@@ -1008,16 +1031,19 @@ async function startServer() {
     const activeYear = currentRange.start.slice(0, 4);
 
     const monthlyDisps = filteredMDisps.filter(d => d.data.startsWith(activeMonth));
-    const disponibilizadosMes = monthlyDisps.length;
-    const roteirizadosMes = monthlyDisps.filter(d => d.roteirizado).length;
-    const aproveitamentoMes = disponibilizadosMes > 0 ? Math.round((roteirizadosMes / disponibilizadosMes) * 100) : 0;
+    const monthlyAvailabilityMetrics = calculateAvailabilityMetrics(monthlyDisps);
+    const disponibilizadosMes = monthlyAvailabilityMetrics.disponibilizados;
+    const roteirizadosMes = monthlyAvailabilityMetrics.roteirizados;
+    const aproveitamentoMes = monthlyAvailabilityMetrics.aproveitamento;
 
     // Daily Grouping
     const dailyGroup: Record<string, { disp: number; rot: number }> = {};
     filteredMDisps.forEach((d) => {
       if (!dailyGroup[d.data]) dailyGroup[d.data] = { disp: 0, rot: 0 };
-      dailyGroup[d.data].disp++;
-      if (d.roteirizado) dailyGroup[d.data].rot++;
+    });
+    Object.keys(dailyGroup).forEach((date) => {
+      const metrics = calculateAvailabilityMetrics(filteredMDisps.filter(d => d.data === date));
+      dailyGroup[date] = { disp: metrics.disponibilizados, rot: metrics.roteirizados };
     });
 
     const sortedDatesStr = Object.keys(dailyGroup).sort().slice(-7);
@@ -1040,8 +1066,10 @@ async function startServer() {
     filteredMDisps.forEach((d) => {
       const monthKey = d.data.slice(0, 7);
       if (!monthlyGroup[monthKey]) monthlyGroup[monthKey] = { disp: 0, rot: 0 };
-      monthlyGroup[monthKey].disp++;
-      if (d.roteirizado) monthlyGroup[monthKey].rot++;
+    });
+    Object.keys(monthlyGroup).forEach((monthKey) => {
+      const metrics = calculateAvailabilityMetrics(filteredMDisps.filter(d => d.data.startsWith(monthKey)));
+      monthlyGroup[monthKey] = { disp: metrics.disponibilizados, rot: metrics.roteirizados };
     });
     const monthNames = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
     if (!monthlyGroup[activeMonth]) {
@@ -1060,8 +1088,10 @@ async function startServer() {
     filteredMDisps.forEach((d) => {
       const yearKey = d.data.slice(0, 4);
       if (!yearlyGroup[yearKey]) yearlyGroup[yearKey] = { disp: 0, rot: 0 };
-      yearlyGroup[yearKey].disp++;
-      if (d.roteirizado) yearlyGroup[yearKey].rot++;
+    });
+    Object.keys(yearlyGroup).forEach((yearKey) => {
+      const metrics = calculateAvailabilityMetrics(filteredMDisps.filter(d => d.data.startsWith(yearKey)));
+      yearlyGroup[yearKey] = { disp: metrics.disponibilizados, rot: metrics.roteirizados };
     });
     if (!yearlyGroup[activeYear]) {
       yearlyGroup[activeYear] = { disp: 0, rot: 0 };
@@ -1076,8 +1106,12 @@ async function startServer() {
     const unitGroup: Record<string, { disp: number; rot: number }> = {};
     mDisps.forEach((d: any) => {
       if (!unitGroup[d.unidadeId]) unitGroup[d.unidadeId] = { disp: 0, rot: 0 };
-      unitGroup[d.unidadeId].disp++;
-      if (d.roteirizado) unitGroup[d.unidadeId].rot++;
+    });
+    Object.keys(unitGroup).forEach((unitId) => {
+      const unitRecords = mDisps.filter((d: any) => d.unidadeId === unitId);
+      const unitRoutes = rotas.filter(r => !r.unidadeId || r.unidadeId === unitId);
+      const metrics = calculateFleetAvailabilityMetrics(unitRecords, unitRoutes);
+      unitGroup[unitId] = { disp: metrics.disponibilizados, rot: metrics.roteirizados };
     });
     const aproveitamentoUnidadeMap = Object.keys(unitGroup).map((uId) => {
       const g = unitGroup[uId];
@@ -1437,6 +1471,10 @@ async function startServer() {
         aproveitamentoAnual: aproveitamentoAnualMap,
         aproveitamentoUnidade: aproveitamentoUnidadeMap,
         veiculosOciosos: veiculosOciososMap
+      },
+      availabilityDataStatus: {
+        source: supabaseStatus.connected ? "supabase" : "local",
+        stale: supabaseStatus.configured && !supabaseStatus.connected,
       },
       valesKpis: {
         totalValorVales,

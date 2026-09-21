@@ -334,7 +334,7 @@ export default function DashboardView({
     );
   }
 
-  const { cards, ranking, dadosGraficoPeriodo, disponibilidadeKpis } = data;
+  const { cards, ranking, dadosGraficoPeriodo, disponibilidadeKpis, availabilityDataStatus } = data;
 
   const renderComparisonBadge = (current: number, previous: number) => {
     if (!compareMode || !data || !data.previousCards) return null;
@@ -1479,6 +1479,16 @@ export default function DashboardView({
           {/* TAB 2: EXECUTIVO - DISPONIBILIDADE & APROVEITAMENTO OPERACIONAL (SLA HEINEKEN) */}
           {activeTab === "executivo" && (
             <div className="space-y-6">
+
+              {availabilityDataStatus?.stale && (
+                <div className="flex items-start gap-3 rounded-xl border border-amber-500/40 bg-amber-500/10 p-4 text-amber-100">
+                  <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-400" />
+                  <div>
+                    <p className="text-xs font-bold">Supabase temporariamente indisponível</p>
+                    <p className="mt-1 text-[11px] text-amber-100/80">Os indicadores de disponibilidade abaixo usam o cache local. Eles serão atualizados automaticamente quando a conexão com o banco for restabelecida.</p>
+                  </div>
+                </div>
+              )}
               
               {/* 7 Requested Executive KPI cards */}
               <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-7 gap-4">
