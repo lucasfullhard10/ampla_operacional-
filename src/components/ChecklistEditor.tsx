@@ -175,7 +175,13 @@ export default function ChecklistEditor({
   const headers = { "Content-Type": "application/json", "x-selected-unit": selectedUnit };
   const parseApi = async (response: Response) => {
     const payload = await response.json();
-    if (!response.ok) throw new Error(payload.error || payload.message || "Operação rejeitada.");
+    if (!response.ok) {
+      const primaryMessage = payload.error || payload.message || "Operação rejeitada.";
+      const detailMessage = typeof payload.details === "string" ? payload.details : "";
+      throw new Error(detailMessage && detailMessage !== primaryMessage
+        ? `${primaryMessage}\n${detailMessage}`
+        : primaryMessage);
+    }
     return payload as { detail?: ChecklistDetailPayload };
   };
 
@@ -257,7 +263,8 @@ export default function ChecklistEditor({
       const pdfResponse = await fetch(`/api/checklists/${detail.checklist.id}/pdf`, { headers: { "x-selected-unit": selectedUnit } });
       if (!pdfResponse.ok) {
         const payload = await pdfResponse.json().catch(() => ({}));
-        throw new Error(payload.error || payload.message || "Não foi possível gerar o PDF.");
+        const primaryMessage = payload.error || payload.message || "Não foi possível gerar o PDF.";
+        throw new Error(payload.details ? `${primaryMessage}\n${payload.details}` : primaryMessage);
       }
       const blob = await pdfResponse.blob();
       const url = URL.createObjectURL(blob);

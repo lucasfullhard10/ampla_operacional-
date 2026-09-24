@@ -58,6 +58,7 @@ import {
   getChecklistTemplates,
   getVehicleOperationBlock,
   getWeeklyFleetSummary,
+  removePersistentChecklistImageData,
   replaceChecklistAttachment,
   resolveChecklistDriver,
 } from "./server/weeklyChecklistService";
@@ -4923,7 +4924,10 @@ async function startServer() {
       if (input.resposta && !allowedAnswers.includes(input.resposta)) return res.status(400).json({ error: `Resposta inválida para o item ${current.codigoSnapshot}.` });
       let photoAttachmentId = current.fotoAnexoId;
       if (input.removerFoto) {
-        FileDatabase.set("checklist_anexos", (FileDatabase.get("checklist_anexos") || []).filter((attachment) => attachment.id !== current.fotoAnexoId));
+        const storedAttachments = FileDatabase.get("checklist_anexos") || [];
+        const remainingAttachments = storedAttachments.filter((attachment) => attachment.id !== current.fotoAnexoId);
+        if (remainingAttachments.length !== storedAttachments.length) FileDatabase.set("checklist_anexos", remainingAttachments);
+        if (current.fotoAnexoId) deleteTemporaryChecklistImages([current.fotoAnexoId]);
         photoAttachmentId = undefined;
       }
       if (input.fotoDataUrl) {
@@ -5348,6 +5352,7 @@ async function startServer() {
       res.setHeader("Content-Disposition", `attachment; filename="${detail.checklist.protocolo}.pdf"`);
       res.once("finish", () => {
         deleteTemporaryChecklistImages(detail.anexos.map((attachment) => attachment.id));
+        removePersistentChecklistImageData(detail.checklist.id);
       });
       res.send(pdf);
     } catch (error) {
