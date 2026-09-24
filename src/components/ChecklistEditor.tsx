@@ -287,14 +287,47 @@ export default function ChecklistEditor({
   };
 
   const readPhoto = async (file: File): Promise<string> => {
-    if (!["image/png", "image/jpeg"].includes(file.type)) throw new Error("Use uma imagem PNG ou JPEG.");
-    if (file.size > 3 * 1024 * 1024) throw new Error("A foto excede o limite de 3 MB.");
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(String(reader.result));
-      reader.onerror = () => reject(new Error("Não foi possível ler a foto."));
-      reader.readAsDataURL(file);
-    });
+    if (!file.type.startsWith("image/")) throw new Error("Selecione um arquivo de imagem.");
+    let bitmap: ImageBitmap;
+    try {
+      bitmap = await createImageBitmap(file);
+    } catch {
+      throw new Error("Não consegui abrir essa foto. Escolha uma imagem JPG ou PNG.");
+    }
+
+    const maxBytes = 3 * 1024 * 1024;
+    const qualities = [0.86, 0.78, 0.7, 0.62];
+    let maxDimension = 1920;
+    try {
+      for (let sizeAttempt = 0; sizeAttempt < 4; sizeAttempt += 1) {
+        const scale = Math.min(1, maxDimension / Math.max(bitmap.width, bitmap.height));
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+        canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+        const context = canvas.getContext("2d");
+        if (!context) throw new Error("Não foi possível preparar a foto para envio.");
+        context.fillStyle = "#fff";
+        context.fillRect(0, 0, canvas.width, canvas.height);
+        context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+
+        for (const quality of qualities) {
+          const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", quality));
+          if (!blob) continue;
+          if (blob.size <= maxBytes) {
+            return await new Promise((resolve, reject) => {
+              const reader = new FileReader();
+              reader.onload = () => resolve(String(reader.result));
+              reader.onerror = () => reject(new Error("Não foi possível ler a foto preparada."));
+              reader.readAsDataURL(blob);
+            });
+          }
+        }
+        maxDimension = Math.round(maxDimension * 0.8);
+      }
+    } finally {
+      bitmap.close();
+    }
+    throw new Error("Não foi possível reduzir essa foto para o tamanho permitido.");
   };
 
   const uploadVehiclePhoto = async (position: string, file: File) => {
@@ -426,7 +459,7 @@ export default function ChecklistEditor({
       </div>
 
       <section className="space-y-3 rounded-xl border border-slate-800 bg-slate-900 p-4">
-        <div><h3 className="text-sm font-black text-white">Fotos do veículo</h3><p className="mt-1 text-xs text-slate-400">Registre os quatro ângulos: lado direito, lado esquerdo, frente e traseira. PNG ou JPEG, até 3 MB por foto.</p></div>
+        <div><h3 className="text-sm font-black text-white">Fotos do veículo</h3><p className="mt-1 text-xs text-slate-400">Registre os quatro ângulos: lado direito, lado esquerdo, frente e traseira. As fotos são reduzidas automaticamente antes do envio.</p></div>
         <div className="grid gap-3 sm:grid-cols-2">
           {CHECKLIST_VEHICLE_SIDES.map((position) => {
             const photo = detail.anexos.find((attachment) => attachment.tipo === "FOTO_VEICULO" && attachment.posicaoVeiculo === position);
@@ -434,7 +467,7 @@ export default function ChecklistEditor({
             return <div key={position} className="rounded-lg border border-slate-700 bg-slate-950 p-3">
               <p className="mb-2 text-xs font-bold text-white">{label}</p>
               {photo?.dataUrl ? <img src={photo.dataUrl} alt={`Foto do veículo - ${label}`} className="mb-2 h-36 w-full rounded object-contain bg-slate-900" /> : <div className="mb-2 flex h-36 items-center justify-center rounded bg-slate-900 text-xs text-slate-500">{photo ? "Imagem removida após gerar PDF" : "Sem foto"}</div>}
-              {!responsesLocked && canAddEvidence && <label className="flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded border border-dashed border-slate-600 px-3 text-xs font-bold text-slate-200"><Camera className="h-4 w-4" /> {photo ? "Substituir foto" : "Adicionar foto"}<input type="file" accept="image/png,image/jpeg" capture="environment" disabled={saving} className="sr-only" onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadVehiclePhoto(position, file); event.target.value = ""; }} /></label>}
+              {!responsesLocked && canAddEvidence && <label className="flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded border border-dashed border-slate-600 px-3 text-xs font-bold text-slate-200"><Camera className="h-4 w-4" /> {photo ? "Substituir foto" : "Adicionar foto"}<input type="file" accept="image/*" capture="environment" disabled={saving} className="sr-only" onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadVehiclePhoto(position, file); event.target.value = ""; }} /></label>}
             </div>;
           })}
         </div>

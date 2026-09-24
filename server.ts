@@ -227,12 +227,13 @@ async function startServer() {
     const originalSend = res.send;
 
     let isIntercepted = false;
+    const isTemporaryChecklistPhotoUpload = req.method === "POST" && /^\/checklists\/[^/]+\/fotos-veiculo$/.test(req.path);
 
     const waitForWrites = async () => {
       if (isIntercepted) return true;
       isIntercepted = true;
       
-      if (FileDatabase.pendingWrites.length > 0) {
+      if (!isTemporaryChecklistPhotoUpload && FileDatabase.pendingWrites.length > 0) {
         console.log(`[Middleware] Waiting for ${FileDatabase.pendingWrites.length} pending Supabase writes...`);
         try {
           // Wait for all current pending writes to resolve
@@ -4847,17 +4848,22 @@ async function startServer() {
     } catch (error) {
       return res.status(400).json({ error: error instanceof Error ? error.message : "Foto inválida." });
     }
-    replaceChecklistAttachment({
-      checklistId: detail.checklist.id,
-      position,
-      type: "FOTO_VEICULO",
-      dataUrl: image.dataUrl,
-      mimeType: image.mimeType,
-      name: `${detail.checklist.placaSnapshot}-${position.toLowerCase()}.${image.mimeType === "image/png" ? "png" : "jpg"}`,
-      user,
-      unitId: detail.checklist.unidadeId,
-    });
-    return res.json({ success: true, detail: getChecklistDetail(detail.checklist.id) });
+    try {
+      replaceChecklistAttachment({
+        checklistId: detail.checklist.id,
+        position,
+        type: "FOTO_VEICULO",
+        dataUrl: image.dataUrl,
+        mimeType: image.mimeType,
+        name: `${detail.checklist.placaSnapshot}-${position.toLowerCase()}.${image.mimeType === "image/png" ? "png" : "jpg"}`,
+        user,
+        unitId: detail.checklist.unidadeId,
+      });
+      return res.json({ success: true, detail: getChecklistDetail(detail.checklist.id) });
+    } catch (error) {
+      console.error("[Checklist] Falha ao armazenar foto temporária do veículo:", error);
+      return res.status(500).json({ error: "Não foi possível guardar a foto temporariamente neste servidor." });
+    }
   });
 
   app.post("/api/checklists/:id/observacoes", (req, res) => {
