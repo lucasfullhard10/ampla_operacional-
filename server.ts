@@ -4857,8 +4857,6 @@ async function startServer() {
       user,
       unitId: detail.checklist.unidadeId,
     });
-    FileDatabase.update("checklists_veiculos", detail.checklist.id, { atualizadoEm: new Date().toISOString() }, user.email);
-    logAudit(req, user.nome, "FOTO_VEICULO_CHECKLIST", `Registrou foto ${position.toLowerCase()} do veículo no checklist ${detail.checklist.protocolo || detail.checklist.id}.`, detail.checklist.unidadeId);
     return res.json({ success: true, detail: getChecklistDetail(detail.checklist.id) });
   });
 
