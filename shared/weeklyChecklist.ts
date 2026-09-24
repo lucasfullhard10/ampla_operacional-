@@ -90,7 +90,7 @@ export interface ChecklistAnexo {
   tipo: ChecklistAttachmentType;
   nome: string;
   mimeType: string;
-  dataUrl: string;
+  dataUrl?: string;
   criadoEm: string;
   criadoPor: string;
   unidadeId: string;

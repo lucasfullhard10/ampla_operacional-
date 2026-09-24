@@ -21,7 +21,6 @@ import {
   VeiculoBloqueio,
 } from "../types";
 import { CHECKLIST_MODULE_KEY, CHECKLIST_SIGNATURE_DECLARATION, CHECKLIST_VEHICLE_SIDES, isChecklistFinal } from "../../shared/weeklyChecklist";
-import { openDocumentOrNotify } from "../lib/documents";
 import { NotificationModal, NotificationType } from "./NotificationModal";
 
 export interface ChecklistDetailPayload {
@@ -240,13 +239,41 @@ export default function ChecklistEditor({
       setNotification({
         type: "success",
         message: pendingSignature
-          ? `Inspeção concluída e sua assinatura registrada. Aguardando assinatura do ${resultingStatus === "AGUARDANDO_ASSINATURA_AJUDANTE" ? "ajudante" : "motorista"}.${payload.detail?.checklist.bloqueouVeiculo ? " O veículo está bloqueado por não conformidade crítica." : ""}`
+          ? `Inspeção concluída e sua assinatura registrada. Baixe e salve o PDF agora: as imagens temporárias serão apagadas após a geração. Aguardando assinatura do ${resultingStatus === "AGUARDANDO_ASSINATURA_AJUDANTE" ? "ajudante" : "motorista"}.${payload.detail?.checklist.bloqueouVeiculo ? " O veículo está bloqueado por não conformidade crítica." : ""}`
           : payload.detail?.checklist.bloqueouVeiculo
-          ? "Checklist finalizado. VEÍCULO BLOQUEADO por não conformidade crítica."
-          : "Checklist assinado e finalizado com sucesso.",
+          ? "Checklist finalizado. Baixe e salve o PDF agora: as imagens temporárias serão apagadas após a geração. VEÍCULO BLOQUEADO por não conformidade crítica."
+          : "Checklist assinado e finalizado. Baixe e salve o PDF agora: as imagens temporárias serão apagadas após a geração.",
       });
     } catch (error) {
       setNotification({ type: "error", message: error instanceof Error ? error.message : "Não foi possível finalizar." });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const downloadChecklistPdf = async () => {
+    setSaving(true);
+    try {
+      const pdfResponse = await fetch(`/api/checklists/${detail.checklist.id}/pdf`, { headers: { "x-selected-unit": selectedUnit } });
+      if (!pdfResponse.ok) {
+        const payload = await pdfResponse.json().catch(() => ({}));
+        throw new Error(payload.error || payload.message || "Não foi possível gerar o PDF.");
+      }
+      const blob = await pdfResponse.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `${detail.checklist.protocolo || detail.checklist.id}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+
+      const detailResponse = await fetch(`/api/checklists/${detail.checklist.id}`, { headers: { "x-selected-unit": selectedUnit } });
+      if (detailResponse.ok) onChanged(await detailResponse.json() as ChecklistDetailPayload);
+      setNotification({ type: "success", message: "PDF baixado. As imagens temporárias foram apagadas; os dados do checklist continuam no histórico." });
+    } catch (error) {
+      setNotification({ type: "error", message: error instanceof Error ? error.message : "Não foi possível baixar o PDF." });
     } finally {
       setSaving(false);
     }
@@ -399,7 +426,7 @@ export default function ChecklistEditor({
             const label = position === "DIREITA" ? "Lado direito" : position === "ESQUERDA" ? "Lado esquerdo" : position === "FRENTE" ? "Frente" : "Parte de trás";
             return <div key={position} className="rounded-lg border border-slate-700 bg-slate-950 p-3">
               <p className="mb-2 text-xs font-bold text-white">{label}</p>
-              {photo ? <img src={photo.dataUrl} alt={`Foto do veículo - ${label}`} className="mb-2 h-36 w-full rounded object-contain bg-slate-900" /> : <div className="mb-2 flex h-36 items-center justify-center rounded bg-slate-900 text-xs text-slate-500">Sem foto</div>}
+              {photo?.dataUrl ? <img src={photo.dataUrl} alt={`Foto do veículo - ${label}`} className="mb-2 h-36 w-full rounded object-contain bg-slate-900" /> : <div className="mb-2 flex h-36 items-center justify-center rounded bg-slate-900 text-xs text-slate-500">{photo ? "Imagem removida após gerar PDF" : "Sem foto"}</div>}
               {!responsesLocked && canAddEvidence && <label className="flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded border border-dashed border-slate-600 px-3 text-xs font-bold text-slate-200"><Camera className="h-4 w-4" /> {photo ? "Substituir foto" : "Adicionar foto"}<input type="file" accept="image/png,image/jpeg" capture="environment" disabled={saving} className="sr-only" onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadVehiclePhoto(position, file); event.target.value = ""; }} /></label>}
             </div>;
           })}
@@ -415,7 +442,7 @@ export default function ChecklistEditor({
             <p className="text-[10px] text-slate-400">{observation.autorNome} · {new Date(observation.criadoEm).toLocaleString("pt-BR")}</p>
             {isAddendum && <p className="mt-1 text-[10px] font-bold text-amber-300">Adendo após a conclusão; não altera a assinatura original.</p>}
             <p className="mt-2 whitespace-pre-wrap text-xs text-white">{observation.texto}</p>
-            {photo && <img src={photo.dataUrl} alt="Foto da observação" className="mt-3 max-h-56 w-full rounded object-contain bg-slate-900" />}
+            {photo?.dataUrl ? <img src={photo.dataUrl} alt="Foto da observação" className="mt-3 max-h-56 w-full rounded object-contain bg-slate-900" /> : photo && <p className="mt-2 text-[10px] text-slate-500">Imagem removida após gerar PDF.</p>}
           </article>;
         })}
         {canAddEvidence && <div className="space-y-2">
@@ -516,9 +543,12 @@ export default function ChecklistEditor({
 
       {inspectionComplete && (
         <div className="space-y-4 rounded-xl border border-slate-800 bg-slate-900 p-4">
+          <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-100">
+            Baixe e salve o PDF agora. Ao gerar o documento, as imagens temporárias serão apagadas; os dados do checklist permanecem no histórico.
+          </div>
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div><p className="text-[9px] uppercase text-slate-500">Protocolo</p><p className="font-mono text-sm font-black text-white">{detail.checklist.protocolo || "Não emitido"}</p></div>
-            <button type="button" onClick={() => openDocumentOrNotify(detail.checklist.pdfUrl)} className="flex min-h-11 items-center gap-2 rounded-lg bg-sky-600 px-4 text-xs font-black text-white"><FileText className="h-4 w-4" /> VER PDF</button>
+            <button type="button" disabled={saving} onClick={() => void downloadChecklistPdf()} className="flex min-h-11 items-center gap-2 rounded-lg bg-sky-600 px-4 text-xs font-black text-white disabled:opacity-50"><FileText className="h-4 w-4" /> BAIXAR E SALVAR PDF</button>
           </div>
           <p className="text-xs text-slate-400">As assinaturas são individuais. Participantes pendentes aparecem acima e nunca são marcados como assinados automaticamente.</p>
         </div>

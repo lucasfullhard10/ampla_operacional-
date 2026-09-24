@@ -62,6 +62,7 @@ import {
   resolveChecklistDriver,
 } from "./server/weeklyChecklistService";
 import { createChecklistPdf } from "./server/checklistPdf";
+import { deleteTemporaryChecklistImages } from "./server/checklistTemporaryImages";
 import {
   canManageUsers,
   canUseExistingSession,
@@ -4672,9 +4673,12 @@ async function startServer() {
     const vehicles = FileDatabase.get("veiculos").filter((vehicle) => vehicle.unidadeId === person!.unidadeId);
     const assignments = vehicles
       .map((vehicle) => ({ vehicle, resolution: resolveChecklistDriver(vehicle, today) }))
-      .filter(({ resolution }) => resolution.route && (isDriverUser(user)
-        ? resolution.route.motoristaId === person!.id
-        : resolution.route.ajudantesIds?.includes(person!.id) === true));
+      .filter(({ resolution }) => isDriverUser(user)
+        ? resolution.route
+          ? isRouteOperationallyActive(resolution.route, today) && resolution.route.motoristaId === person!.id
+          : resolution.driver?.id === person!.id
+        : resolution.route && isRouteOperationallyActive(resolution.route, today) && resolution.route.ajudantesIds?.includes(person!.id) === true)
+      .sort((left, right) => Number(Boolean(right.resolution.route)) - Number(Boolean(left.resolution.route)));
     const assignment = assignments[0];
     if (!assignment) {
       const linkedVehicle = isDriverUser(user)
@@ -4779,12 +4783,12 @@ async function startServer() {
     }
     const resolution = resolveChecklistDriver(vehicle, operationalDate);
     if (isFieldUser(user)) {
-      if (!resolution.route || !isRouteOperationallyActive(resolution.route, today)) {
+      if (resolution.route && !isRouteOperationallyActive(resolution.route, today)) {
         return res.status(403).json({ error: "Nenhuma operação ativa encontrada para você hoje." });
       }
       if (isDriverUser(user)) {
         if (!user.motoristaId) return res.status(403).json({ error: "Seu usuário ainda não está vinculado a um cadastro de motorista. Procure um administrador." });
-        if (resolution.driver?.id !== user.motoristaId) return res.status(403).json({ error: "Este veículo não está atribuído ao seu cadastro operacional hoje." });
+        if (resolution.driver?.id !== user.motoristaId || (resolution.route && resolution.route.motoristaId !== user.motoristaId)) return res.status(403).json({ error: "Este veículo não está atribuído ao seu cadastro operacional hoje." });
       } else {
         if (!user.ajudanteId) return res.status(403).json({ error: "Seu usuário ainda não está vinculado a um cadastro de ajudante. Procure um administrador." });
         if (!resolution.route?.ajudantesIds?.includes(user.ajudanteId)) return res.status(403).json({ error: "Este veículo não está atribuído ao seu cadastro operacional hoje." });
@@ -5167,7 +5171,6 @@ async function startServer() {
       return res.status(409).json({ error: "Esta não conformidade já possui uma manutenção vinculada.", manutencao: existing });
     }
     const today = formatLocalIsoDate(new Date());
-    const attachment = detail.anexos.find((item) => item.id === response.fotoAnexoId);
     const maintenance: Manutencao = {
       id: `man-chk-${crypto.randomUUID()}`,
       veiculoId: detail.checklist.veiculoId,
@@ -5175,7 +5178,6 @@ async function startServer() {
       tipo: "Corretiva",
       data: today,
       observacao: `[${detail.checklist.protocolo || detail.checklist.id}] ${response.codigoSnapshot} — ${response.descricaoSnapshot}. ${response.observacao || ""}`.trim(),
-      fotoUrl: attachment?.dataUrl,
       proximaManutencao: today,
       unidadeId: detail.checklist.unidadeId,
       categoria: response.categoriaSnapshot,
@@ -5343,7 +5345,10 @@ async function startServer() {
       const pdf = await createChecklistPdf(detail, unit);
       logAudit(req, user.nome, "CHECKLIST_PDF_GERADO", `Gerou/regenerou o PDF do checklist ${detail.checklist.protocolo}.`, detail.checklist.unidadeId);
       res.setHeader("Content-Type", "application/pdf");
-      res.setHeader("Content-Disposition", `inline; filename="${detail.checklist.protocolo}.pdf"`);
+      res.setHeader("Content-Disposition", `attachment; filename="${detail.checklist.protocolo}.pdf"`);
+      res.once("finish", () => {
+        deleteTemporaryChecklistImages(detail.anexos.map((attachment) => attachment.id));
+      });
       res.send(pdf);
     } catch (error) {
       console.error("[Checklist PDF]", error);

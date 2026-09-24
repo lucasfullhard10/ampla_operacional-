@@ -1,5 +1,10 @@
 import crypto from "crypto";
 import {
+  deleteTemporaryChecklistImages,
+  readTemporaryChecklistImage,
+  saveTemporaryChecklistImage,
+} from "./checklistTemporaryImages.ts";
+import {
   DEFAULT_CHECKLIST_CONFIG,
   getChecklistWeek,
   findActiveVehicleBlock,
@@ -310,13 +315,28 @@ export function getChecklistDetail(checklistId: string): ChecklistDetail | null 
       };
     }),
   ];
+  const allAttachments = FileDatabase.get("checklist_anexos") || [];
+  let migratedLegacyImages = false;
+  const metadataAttachments = allAttachments.map((attachment) => {
+    if (!attachment.dataUrl) return attachment;
+    saveTemporaryChecklistImage(attachment.id, attachment.dataUrl);
+    migratedLegacyImages = true;
+    const { dataUrl: _dataUrl, ...metadata } = attachment;
+    return metadata;
+  });
+  if (migratedLegacyImages) FileDatabase.set("checklist_anexos", metadataAttachments);
   return {
     checklist,
     participantes: storedParticipants.length > 0 ? storedParticipants : legacyParticipants,
     respostas: (FileDatabase.get("checklist_respostas") || [])
       .filter((response) => response.checklistId === checklistId)
       .sort((left, right) => left.ordemSnapshot - right.ordemSnapshot),
-    anexos: (FileDatabase.get("checklist_anexos") || []).filter((attachment) => attachment.checklistId === checklistId),
+    anexos: metadataAttachments
+      .filter((attachment) => attachment.checklistId === checklistId)
+      .map((attachment) => ({
+        ...attachment,
+        dataUrl: readTemporaryChecklistImage(attachment.id, attachment.mimeType),
+      })),
     bloqueios: (FileDatabase.get("veiculos_bloqueios") || []).filter((block) => block.checklistId === checklistId),
     manutencoes: FileDatabase.get("manutencoes").filter((maintenance) => maintenance.checklistId === checklistId),
     reinspecoes: (FileDatabase.get("checklists_veiculos") || []).filter((item) => item.checklistOriginalId === checklistId),
@@ -420,8 +440,12 @@ export function replaceChecklistAttachment(params: {
     attachment.observacaoId === params.observationId &&
     attachment.tipo === params.type
   ));
+  const replacedAttachments = attachments.filter((attachment) => !remaining.some((item) => item.id === attachment.id));
+  deleteTemporaryChecklistImages(replacedAttachments.map((attachment) => attachment.id));
+  const id = newId("cha");
+  saveTemporaryChecklistImage(id, params.dataUrl);
   const attachment: ChecklistAnexo = {
-    id: newId("cha"),
+    id,
     checklistId: params.checklistId,
     respostaId: params.responseId,
     participanteId: params.participantId,
@@ -430,7 +454,6 @@ export function replaceChecklistAttachment(params: {
     tipo: params.type,
     nome: params.name,
     mimeType: params.mimeType,
-    dataUrl: params.dataUrl,
     criadoEm: new Date().toISOString(),
     criadoPor: params.user.id,
     unidadeId: params.unitId,
